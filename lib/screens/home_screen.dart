@@ -4,8 +4,11 @@ import 'package:google_fonts/google_fonts.dart';
 import '../theme.dart';
 import '../models/data_models.dart';
 import '../providers/chat_filter_provider.dart';
+import '../providers/matrix_provider.dart';
 import '../screens/chat_screen.dart';
+import '../screens/matrix_chat_screen.dart';
 import '../screens/stories_screen.dart';
+import '../screens/login_screen.dart';
 import '../widgets/chat_tile.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -203,9 +206,10 @@ class _FilterChip extends StatelessWidget {
 class _ChatBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<ChatFilterProvider>();
-    final filter = provider.filter;
-    final searchQuery = provider.searchQuery.toLowerCase();
+    final filterProvider = context.watch<ChatFilterProvider>();
+    final matrixProvider = context.watch<MatrixProvider>();
+    final filter = filterProvider.filter;
+    final searchQuery = filterProvider.searchQuery.toLowerCase();
 
     if (filter == ChatFilter.stories && searchQuery.isEmpty) {
       return const StoriesScreen();
@@ -221,11 +225,113 @@ class _ChatBody extends StatelessWidget {
       return nameMatches || messageMatches;
     }).toList();
 
+    // Real Matrix rooms from the SDK
+    final matrixRooms = matrixProvider.isLoggedIn
+        ? matrixProvider.rooms.where((r) {
+            final name = r.getLocalizedDisplayname().toLowerCase();
+            return searchQuery.isEmpty || name.contains(searchQuery);
+          }).toList()
+        : [];
+
+    final totalCount = chats.length + (matrixRooms.isNotEmpty ? matrixRooms.length + 1 : 0);
+
     return ListView.builder(
       padding: EdgeInsets.zero,
-      itemCount: chats.length,
+      itemCount: totalCount,
       itemBuilder: (context, index) {
-        final chat = chats[index];
+        // Matrix section header + rooms shown FIRST
+        if (matrixRooms.isNotEmpty) {
+          if (index == 0) {
+            // Section header
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: const BoxDecoration(
+                      color: kLimeGreen,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Matrix Rooms',
+                    style: GoogleFonts.inter(
+                      color: kLimeGreen,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: kLimeGreen,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '${matrixRooms.length}',
+                      style: GoogleFonts.inter(
+                          color: kBlack,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+          if (index <= matrixRooms.length) {
+            final room = matrixRooms[index - 1];
+            final name = room.getLocalizedDisplayname();
+            final lastMsg = room.lastEvent?.body ?? 'No messages yet';
+            return ListTile(
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              leading: CircleAvatar(
+                backgroundColor: kLimeGreen,
+                child: Text(
+                  name.isNotEmpty ? name[0].toUpperCase() : '#',
+                  style: GoogleFonts.inter(
+                      color: kBlack, fontWeight: FontWeight.bold),
+                ),
+              ),
+              title: Text(
+                name,
+                style: GoogleFonts.inter(
+                    color: kWhite,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                lastMsg,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
+              ),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => MatrixChatScreen(
+                      room: room,
+                      matrixProvider: matrixProvider,
+                    ),
+                  ),
+                );
+              },
+            );
+          }
+        }
+
+        // Mock chats below
+        final chatIndex = matrixRooms.isNotEmpty
+            ? index - matrixRooms.length - 1
+            : index;
+        final chat = chats[chatIndex];
         return ChatTile(
           chat: chat,
           onTap: () {
@@ -245,49 +351,177 @@ class _XmoDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const items = [
-      {'icon': Icons.person_outline, 'label': 'My Profile'},
-      {'icon': Icons.group_outlined, 'label': 'New Group'},
-      {'icon': Icons.contacts_outlined, 'label': 'Contacts'},
-      {'icon': Icons.phone_outlined, 'label': 'Calls'},
-      {'icon': Icons.bookmark_outline, 'label': 'Saved Messages'},
-      {'icon': Icons.settings_outlined, 'label': 'Settings'},
-      {'icon': Icons.person_add_outlined, 'label': 'Invite Friends'},
-      {'icon': Icons.info_outline, 'label': 'About xmo'},
-      {'icon': Icons.logout, 'label': 'Logout'},
-    ];
+    final matrixProvider = context.watch<MatrixProvider>();
+    final displayName = matrixProvider.displayName ?? 'Unknown';
+    final userId = matrixProvider.userId ?? '';
 
     return Drawer(
       backgroundColor: const Color(0xFF0F0F0F),
       child: SafeArea(
-        child: ListView.builder(
-          padding: const EdgeInsets.only(top: 16),
-          itemCount: items.length,
-          itemBuilder: (context, index) {
-            final item = items[index];
-            final isLogout = item['label'] == 'Logout';
-            return ListTile(
-              leading: Icon(
-                item['icon'] as IconData,
-                color: isLogout ? Colors.red[400] : kWhite,
-                size: 22,
+        child: Column(
+          children: [
+            // ── User header ───────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    backgroundColor: kLimeGreen,
+                    radius: 22,
+                    child: Text(
+                      displayName.isNotEmpty
+                          ? displayName[0].toUpperCase()
+                          : '?',
+                      style: GoogleFonts.inter(
+                          color: kBlack,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          displayName,
+                          style: GoogleFonts.inter(
+                              color: kWhite,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600),
+                        ),
+                        Text(
+                          userId,
+                          style: GoogleFonts.inter(
+                              color: kLightGrey, fontSize: 12),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
+            ),
+            const Divider(color: kDarkGrey, height: 1),
+            const SizedBox(height: 8),
+
+            // ── Create Matrix Room ─────────────────────────────────────
+            ListTile(
+              leading: const Icon(Icons.add_circle_outline,
+                  color: kLimeGreen, size: 22),
               title: Text(
-                item['label'] as String,
+                'New Matrix Room',
                 style: GoogleFonts.inter(
-                  color: isLogout ? Colors.red[400] : kWhite,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
-                ),
+                    color: kLimeGreen,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500),
               ),
-              onTap: () => Navigator.pop(context),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 2,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
+              onTap: () {
+                Navigator.pop(context);
+                _showCreateRoomDialog(context, matrixProvider);
+              },
+            ),
+
+            // ── Static items ───────────────────────────────────────────
+            ...[
+              {'icon': Icons.person_outline, 'label': 'My Profile'},
+              {'icon': Icons.contacts_outlined, 'label': 'Contacts'},
+              {'icon': Icons.phone_outlined, 'label': 'Calls'},
+              {'icon': Icons.bookmark_outline, 'label': 'Saved Messages'},
+              {'icon': Icons.settings_outlined, 'label': 'Settings'},
+              {'icon': Icons.info_outline, 'label': 'About xmo'},
+            ].map((item) => ListTile(
+                  leading: Icon(item['icon'] as IconData,
+                      color: kWhite, size: 22),
+                  title: Text(
+                    item['label'] as String,
+                    style: GoogleFonts.inter(
+                        color: kWhite,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500),
+                  ),
+                  onTap: () => Navigator.pop(context),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 2),
+                )),
+
+            const Spacer(),
+            const Divider(color: kDarkGrey, height: 1),
+
+            // ── Logout ────────────────────────────────────────────────
+            ListTile(
+              leading: Icon(Icons.logout, color: Colors.red[400], size: 22),
+              title: Text(
+                'Logout',
+                style: GoogleFonts.inter(
+                    color: Colors.red[400],
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500),
               ),
-            );
-          },
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
+              onTap: () async {
+                Navigator.pop(context);
+                await matrixProvider.logout();
+                if (context.mounted) {
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(
+                        builder: (_) => const LoginScreen()),
+                    (route) => false,
+                  );
+                }
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
         ),
+      ),
+    );
+  }
+
+  void _showCreateRoomDialog(BuildContext context, MatrixProvider provider) {
+    final ctrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: kDarkerGrey,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('New Matrix Room',
+            style: GoogleFonts.inter(
+                color: kWhite, fontWeight: FontWeight.w600)),
+        content: TextField(
+          controller: ctrl,
+          style: GoogleFonts.inter(color: kWhite),
+          autofocus: true,
+          decoration: InputDecoration(
+            hintText: 'Room name',
+            hintStyle: GoogleFonts.inter(color: kLightGrey),
+            enabledBorder: const UnderlineInputBorder(
+                borderSide: BorderSide(color: kDarkGrey)),
+            focusedBorder: const UnderlineInputBorder(
+                borderSide: BorderSide(color: kLimeGreen)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel',
+                style: GoogleFonts.inter(color: kLightGrey)),
+          ),
+          TextButton(
+            onPressed: () async {
+              if (ctrl.text.trim().isEmpty) return;
+              Navigator.pop(context);
+              await provider.createRoom(ctrl.text.trim());
+            },
+            child: Text('Create',
+                style: GoogleFonts.inter(
+                    color: kLimeGreen, fontWeight: FontWeight.w600)),
+          ),
+        ],
       ),
     );
   }

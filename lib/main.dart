@@ -3,28 +3,37 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'theme.dart';
 import 'providers/chat_filter_provider.dart';
-import 'screens/home_screen.dart';
-
+import 'providers/matrix_provider.dart';
 import 'screens/splash_screen.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light,
     ),
   );
-  runApp(const XmoApp());
+
+  // Initialize Matrix SDK before app starts
+  final matrixProvider = MatrixProvider();
+  await matrixProvider.init();
+
+  runApp(XmoApp(matrixProvider: matrixProvider));
 }
 
 class XmoApp extends StatelessWidget {
-  const XmoApp({super.key});
+  final MatrixProvider matrixProvider;
+  const XmoApp({super.key, required this.matrixProvider});
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
-      providers: [ChangeNotifierProvider(create: (_) => ChatFilterProvider())],
+      providers: [
+        ChangeNotifierProvider(create: (_) => ChatFilterProvider()),
+        ChangeNotifierProvider.value(value: matrixProvider),
+      ],
       child: MaterialApp(
         title: 'xmo',
         debugShowCheckedModeBanner: false,
