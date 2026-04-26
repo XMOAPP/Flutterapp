@@ -5,6 +5,8 @@ import 'theme.dart';
 import 'providers/chat_filter_provider.dart';
 import 'screens/home_screen.dart';
 
+import 'screens/splash_screen.dart';
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(
@@ -27,7 +29,7 @@ class XmoApp extends StatelessWidget {
         title: 'xmo',
         debugShowCheckedModeBanner: false,
         theme: buildXmoTheme(),
-        home: const HomeScreen(),
+        home: const SplashScreen(),
       ),
     );
   }

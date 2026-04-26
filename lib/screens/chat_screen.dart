@@ -396,11 +396,11 @@ class _TextBubble extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: isOutgoing ? kLimeGreen : kDarkGrey,
+        color: isOutgoing ? kLimeGreen : const Color(0xFF2C2C2E),
         borderRadius: BorderRadius.only(
-          topLeft: const Radius.circular(18),
+          topLeft: Radius.circular(isOutgoing ? 18 : 4),
           topRight: const Radius.circular(18),
-          bottomLeft: Radius.circular(isOutgoing ? 18 : 4),
+          bottomLeft: const Radius.circular(18),
           bottomRight: Radius.circular(isOutgoing ? 4 : 18),
         ),
       ),
@@ -440,7 +440,7 @@ class _ImageBubble extends StatelessWidget {
       constraints: const BoxConstraints(maxWidth: 240),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        color: kDarkGrey,
+        color: const Color(0xFF2C2C2E),
       ),
       clipBehavior: Clip.hardEdge,
       child: Stack(
@@ -492,11 +492,11 @@ class _AudioBubble extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: const BoxDecoration(
-        color: kDarkGrey,
+        color: Color(0xFF2C2C2E),
         borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(18),
+          topLeft: Radius.circular(4),
           topRight: Radius.circular(18),
-          bottomLeft: Radius.circular(4),
+          bottomLeft: Radius.circular(18),
           bottomRight: Radius.circular(18),
         ),
       ),

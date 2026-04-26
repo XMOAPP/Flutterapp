@@ -79,17 +79,40 @@ class _StoryCircle extends StatelessWidget {
           Stack(
             alignment: Alignment.center,
             children: [
-              // Green ring for others, or plain for "Your story"
+              // Outer ring: gradient for "Your Story", dark grey for others
               Container(
-                width: 60,
-                height: 60,
+                width: 68,
+                height: 68,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: kLimeGreen, width: 2.5),
+                  gradient: story.isYourStory
+                      ? const LinearGradient(
+                          begin: Alignment.bottomLeft,
+                          end: Alignment.topCenter,
+                          colors: [
+                            Color(0xFF2DB55D), // bright green (bottom)
+                            Color(0xFF1565C0), // dark blue (top)
+                          ],
+                        )
+                      : const LinearGradient(
+                          colors: [
+                            Color(0xFF9E9E9E),
+                            Color(0xFF9E9E9E),
+                          ],
+                        ),
+                ),
+              ),
+              // Black gap ring
+              Container(
+                width: 62,
+                height: 62,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: kBlack,
                 ),
               ),
               CircleAvatar(
-                radius: 26,
+                radius: 28,
                 backgroundColor: kDarkGrey,
                 backgroundImage: NetworkImage(
                   story.profileImageUrl ?? story.backgroundImageUrl,
@@ -97,8 +120,8 @@ class _StoryCircle extends StatelessWidget {
               ),
               if (story.isYourStory)
                 Positioned(
-                  bottom: 0,
-                  right: 0,
+                  bottom: 2,
+                  right: 2,
                   child: Container(
                     width: 20,
                     height: 20,
@@ -160,12 +183,46 @@ class _StoryGridTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                CircleAvatar(
-                  radius: 14,
-                  backgroundColor: kDarkGrey,
-                  backgroundImage: NetworkImage(
-                    story.profileImageUrl ?? story.backgroundImageUrl,
-                  ),
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Hollow gradient ring
+                    ShaderMask(
+                      blendMode: BlendMode.srcIn,
+                      shaderCallback: (Rect bounds) {
+                        return story.isYourStory
+                            ? const LinearGradient(
+                                begin: Alignment.bottomLeft,
+                                end: Alignment.topCenter,
+                                colors: [
+                                  Color(0xFF2DB55D), // bright green
+                                  Color(0xFF1565C0), // dark blue
+                                ],
+                              ).createShader(bounds)
+                            : const LinearGradient(
+                                colors: [
+                                  Color(0xFF9E9E9E),
+                                  Color(0xFF9E9E9E),
+                                ],
+                              ).createShader(bounds);
+                      },
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 1.5),
+                        ),
+                      ),
+                    ),
+                    CircleAvatar(
+                      radius: 14,
+                      backgroundColor: kDarkGrey,
+                      backgroundImage: NetworkImage(
+                        story.profileImageUrl ?? story.backgroundImageUrl,
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 4),
                 Text(
