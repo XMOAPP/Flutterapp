@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import '../theme.dart';
 import '../providers/matrix_provider.dart';
+import '../services/matrix_service.dart';
 
 /// Real-time Matrix chat screen for a given Room.
 /// Mirrors the dark aesthetic of ChatScreen but is backed by live Matrix data.
@@ -136,8 +137,23 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   AppBar _buildAppBar() {
-    final name = _room.getLocalizedDisplayname();
+    final rawName = _room.getLocalizedDisplayname();
     final memberCount = _room.summary.mJoinedMemberCount ?? 0;
+    final isDirect = memberCount == 2;
+    
+    // For direct chats, clean up the name (remove "Group with" prefix)
+    String displayName = rawName;
+    if (isDirect) {
+      // Remove "Group with " prefix if present
+      if (displayName.toLowerCase().startsWith('group with ')) {
+        displayName = displayName.substring(11); // Remove "Group with "
+      }
+      // Remove "Direct Room with " prefix if present
+      if (displayName.toLowerCase().startsWith('direct room with ')) {
+        displayName = displayName.substring(17); // Remove "Direct Room with "
+      }
+    }
+    final name = MatrixService.cleanName(displayName);
 
     return AppBar(
       backgroundColor: kBlack,
@@ -165,26 +181,107 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
             ),
           ),
           const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                name,
-                style: GoogleFonts.inter(
-                    color: kWhite, fontSize: 15, fontWeight: FontWeight.w600),
-              ),
-              Text(
-                '$memberCount member${memberCount == 1 ? '' : 's'}',
-                style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
-              ),
-            ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: GoogleFonts.inter(
+                      color: kWhite, fontSize: 15, fontWeight: FontWeight.w600),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                // Only show subtitle for groups (3+ members)
+                if (!isDirect)
+                  Text(
+                    '$memberCount members',
+                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+                  ),
+              ],
+            ),
           ),
         ],
       ),
       actions: [
-        IconButton(
+        PopupMenuButton<String>(
           icon: const Icon(Icons.more_vert, color: kWhite, size: 22),
-          onPressed: () {},
+          color: kDarkerGrey,
+          onSelected: (value) async {
+            if (value == 'leave') {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  backgroundColor: kDarkerGrey,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  title: Text(
+                    'Delete Chat?',
+                    style: GoogleFonts.inter(
+                      color: kWhite,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  content: Text(
+                    'Are you sure you want to delete this chat? This action cannot be undone.',
+                    style: GoogleFonts.inter(color: kLightGrey),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: Text(
+                        'Cancel',
+                        style: GoogleFonts.inter(color: kLightGrey),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: Text(
+                        'Delete',
+                        style: GoogleFonts.inter(
+                          color: Colors.red,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+              
+              if (confirm == true && mounted) {
+                try {
+                  await _room.leave();
+                  if (mounted) {
+                    Navigator.pop(context);
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Failed to delete chat: $e'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
+              }
+            }
+          },
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              value: 'leave',
+              child: Row(
+                children: [
+                  const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Delete Chat',
+                    style: GoogleFonts.inter(color: Colors.red),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -194,7 +291,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final isMe = event.senderId == _myUserId;
     final body = event.body;
     final time = _formatTime(event.originServerTs);
-    final senderName = event.senderId.split(':').first.replaceFirst('@', '');
+    final senderName = MatrixService.cleanName(event.senderId);
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,

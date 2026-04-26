@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'theme.dart';
-import 'providers/chat_filter_provider.dart';
-import 'providers/matrix_provider.dart';
+import '../theme.dart';
+import '../providers/chat_filter_provider.dart';
+import '../providers/matrix_provider.dart';
 import 'screens/splash_screen.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,6 +17,14 @@ Future<void> main() async {
       statusBarIconBrightness: Brightness.light,
     ),
   );
+
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    debugPrint("Firebase init failed (expected if not configured yet): $e");
+  }
 
   // Initialize Matrix SDK before app starts
   final matrixProvider = MatrixProvider();

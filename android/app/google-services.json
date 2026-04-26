@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "807371083430",
+    "project_id": "xmoapp-6ef05",
+    "storage_bucket": "xmoapp-6ef05.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:807371083430:android:8ba0516138b2fb3aa62e67",
+        "android_client_info": {
+          "package_name": "com.xmo.xmo"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBvC2G_OVJ0iQm0WgxumhW9NmHoe3RjHWU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

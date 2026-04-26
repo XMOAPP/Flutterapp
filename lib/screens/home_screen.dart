@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:matrix/matrix.dart';
 import '../theme.dart';
 import '../models/data_models.dart';
 import '../providers/chat_filter_provider.dart';
 import '../providers/matrix_provider.dart';
+import '../services/matrix_service.dart';
 import '../screens/chat_screen.dart';
 import '../screens/matrix_chat_screen.dart';
 import '../screens/stories_screen.dart';
 import '../screens/login_screen.dart';
+import '../screens/user_search_screen.dart';
 import '../widgets/chat_tile.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -102,6 +105,16 @@ class _HomeScreenState extends State<HomeScreen> {
           if (!_isSearching) const SizedBox(height: 4),
           Expanded(child: _ChatBody()),
         ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: kLimeGreen,
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const UserSearchScreen()),
+          );
+        },
+        child: const Icon(Icons.chat_outlined, color: kBlack, size: 24),
       ),
     );
   }
@@ -286,21 +299,50 @@ class _ChatBody extends StatelessWidget {
           }
           if (index <= matrixRooms.length) {
             final room = matrixRooms[index - 1];
-            final name = room.getLocalizedDisplayname();
-            final lastMsg = room.lastEvent?.body ?? 'No messages yet';
+            final rawName = room.getLocalizedDisplayname();
+            final memberCount = room.summary.mJoinedMemberCount ?? 0;
+            final isDirect = memberCount == 2;
+            
+            // For direct chats, clean up the name (remove "Group with" prefix)
+            String displayName = rawName;
+            if (isDirect) {
+              // Remove "Group with " prefix if present
+              if (displayName.toLowerCase().startsWith('group with ')) {
+                displayName = displayName.substring(11);
+              }
+              // Remove "Direct Room with " prefix if present
+              if (displayName.toLowerCase().startsWith('direct room with ')) {
+                displayName = displayName.substring(17);
+              }
+            }
+            final cleanedName = MatrixService.cleanName(displayName);
+            
+            // Get the last message properly
+            String lastMsg = 'No messages yet';
+            if (room.lastEvent != null) {
+              final event = room.lastEvent!;
+              if (event.type == EventTypes.Message) {
+                lastMsg = event.body;
+              } else if (event.type == EventTypes.Encrypted) {
+                lastMsg = '🔒 Encrypted message';
+              } else if (event.type == 'm.room.member') {
+                lastMsg = 'Room created';
+              }
+            }
+            
             return ListTile(
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               leading: CircleAvatar(
                 backgroundColor: kLimeGreen,
                 child: Text(
-                  name.isNotEmpty ? name[0].toUpperCase() : '#',
+                  cleanedName.isNotEmpty ? cleanedName[0].toUpperCase() : '#',
                   style: GoogleFonts.inter(
                       color: kBlack, fontWeight: FontWeight.bold),
                 ),
               ),
               title: Text(
-                name,
+                cleanedName,
                 style: GoogleFonts.inter(
                     color: kWhite,
                     fontSize: 15,
@@ -312,6 +354,29 @@ class _ChatBody extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
               ),
+              // Only show member count badge for groups (3+ members)
+              trailing: !isDirect ? Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: kLimeGreen.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.people, color: kLimeGreen, size: 14),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$memberCount',
+                      style: GoogleFonts.inter(
+                        color: kLimeGreen,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ) : null,
               onTap: () {
                 Navigator.push(
                   context,
@@ -391,7 +456,7 @@ class _XmoDrawer extends StatelessWidget {
                               fontWeight: FontWeight.w600),
                         ),
                         Text(
-                          userId,
+                          userId.contains(':') ? '@${MatrixService.cleanName(userId)}' : userId,
                           style: GoogleFonts.inter(
                               color: kLightGrey, fontSize: 12),
                           maxLines: 1,
