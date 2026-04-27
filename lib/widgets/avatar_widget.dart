@@ -65,7 +65,7 @@ class AvatarWidget extends StatelessWidget {
               width: size * 0.26,
               height: size * 0.26,
               decoration: BoxDecoration(
-                color: kLimeGreen,
+                color: kBlue,
                 shape: BoxShape.circle,
                 border: Border.all(color: kBlack, width: 2),
               ),
@@ -83,7 +83,7 @@ class AvatarWidget extends StatelessWidget {
                 shape: BoxShape.circle,
                 border: Border.all(color: kBlack, width: 1.5),
               ),
-              child: Icon(Icons.group, color: kLimeGreen, size: size * 0.22),
+              child: Icon(Icons.group, color: kBlue, size: size * 0.22),
             ),
           ),
       ],

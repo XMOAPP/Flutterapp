@@ -104,7 +104,7 @@ class _OtpScreenState extends State<OtpScreen>
               'OTP resent to ${widget.email}',
               style: GoogleFonts.inter(color: kBlack),
             ),
-            backgroundColor: kLimeGreen,
+            backgroundColor: kBlue,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           ),
@@ -248,7 +248,7 @@ class _OtpScreenState extends State<OtpScreen>
               Text(
                 widget.email,
                 style: GoogleFonts.inter(
-                  color: kLimeGreen,
+                  color: kBlue,
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1.5,
@@ -277,16 +277,16 @@ class _OtpScreenState extends State<OtpScreen>
                         height: 56,
                         decoration: BoxDecoration(
                           color: filled
-                              ? kLimeGreen.withValues(alpha: 0.12)
+                              ? kBlue.withValues(alpha: 0.12)
                               : kDarkGrey,
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
                             color: _error != null
                                 ? Colors.red.withValues(alpha: 0.7)
                                 : isActive
-                                    ? kLimeGreen
+                                    ? kBlue
                                     : filled
-                                        ? kLimeGreen.withValues(alpha: 0.5)
+                                        ? kBlue.withValues(alpha: 0.5)
                                         : Colors.white
                                             .withValues(alpha: 0.06),
                             width: isActive ? 2 : 1.5,
@@ -360,7 +360,7 @@ class _OtpScreenState extends State<OtpScreen>
                         Text(
                           '${(_remaining ~/ 60).toString().padLeft(2, '0')}:${(_remaining % 60).toString().padLeft(2, '0')}',
                           style: GoogleFonts.inter(
-                            color: kLimeGreen,
+                            color: kBlue,
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
                           ),
@@ -372,11 +372,11 @@ class _OtpScreenState extends State<OtpScreen>
                       child: Text(
                         'Resend OTP',
                         style: GoogleFonts.inter(
-                          color: kLimeGreen,
+                          color: kBlue,
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
                           decoration: TextDecoration.underline,
-                          decorationColor: kLimeGreen,
+                          decorationColor: kBlue,
                         ),
                       ),
                     ),
@@ -393,7 +393,7 @@ class _OtpScreenState extends State<OtpScreen>
                           ? null
                           : () => _verify(_enteredCode),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: kLimeGreen,
+                    backgroundColor: kBlue,
                     foregroundColor: kBlack,
                     disabledBackgroundColor:
                         kDarkGrey,

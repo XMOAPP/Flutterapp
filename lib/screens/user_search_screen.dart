@@ -197,7 +197,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
               child: Center(
                 child: Column(
                   children: [
-                    CircularProgressIndicator(color: kLimeGreen),
+                    CircularProgressIndicator(color: kBlue),
                     SizedBox(height: 12),
                     Text('Starting chat...',
                         style: TextStyle(color: kLightGrey, fontSize: 13)),
@@ -211,7 +211,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 24),
               child: Center(
-                child: CircularProgressIndicator(color: kLimeGreen),
+                child: CircularProgressIndicator(color: kBlue),
               ),
             ),
 
@@ -247,7 +247,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.people_outline,
-                        color: kLimeGreen.withValues(alpha: 0.3), size: 64),
+                        color: kBlue.withValues(alpha: 0.3), size: 64),
                     const SizedBox(height: 16),
                     Text(
                       'Search for a user to start chatting',
@@ -330,8 +330,8 @@ class _UserTileState extends State<_UserTile> {
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
-                      kLimeGreen.withValues(alpha: 0.8),
-                      kLimeGreen,
+                      kBlue.withValues(alpha: 0.8),
+                      kBlue,
                     ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
@@ -383,11 +383,11 @@ class _UserTileState extends State<_UserTile> {
                   width: 36,
                   height: 36,
                   decoration: BoxDecoration(
-                    color: kLimeGreen.withValues(alpha: _hovered ? 0.2 : 0.08),
+                    color: kBlue.withValues(alpha: _hovered ? 0.2 : 0.08),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.chat_bubble_outline,
-                      color: kLimeGreen, size: 16),
+                      color: kBlue, size: 16),
                 ),
               ),
             ],

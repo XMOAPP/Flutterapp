@@ -107,7 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        backgroundColor: kLimeGreen,
+        backgroundColor: kBlue,
         onPressed: () {
           Navigator.push(
             context,
@@ -179,7 +179,7 @@ class _FilterChip extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? kLimeGreen : kDarkGrey,
+          color: isSelected ? kBlue : kDarkGrey,
           borderRadius: BorderRadius.circular(20),
         ),
         child: Row(
@@ -197,7 +197,7 @@ class _FilterChip extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: isSelected ? kBlack.withValues(alpha: 0.25) : kLimeGreen,
+                color: isSelected ? kBlack.withValues(alpha: 0.25) : kBlue,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
@@ -264,7 +264,7 @@ class _ChatBody extends StatelessWidget {
                     width: 6,
                     height: 6,
                     decoration: const BoxDecoration(
-                      color: kLimeGreen,
+                      color: kBlue,
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -272,7 +272,7 @@ class _ChatBody extends StatelessWidget {
                   Text(
                     'Matrix Rooms',
                     style: GoogleFonts.inter(
-                      color: kLimeGreen,
+                      color: kBlue,
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
                       letterSpacing: 1.2,
@@ -282,7 +282,7 @@ class _ChatBody extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                     decoration: BoxDecoration(
-                      color: kLimeGreen,
+                      color: kBlue,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
@@ -334,7 +334,7 @@ class _ChatBody extends StatelessWidget {
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               leading: CircleAvatar(
-                backgroundColor: kLimeGreen,
+                backgroundColor: kBlue,
                 child: Text(
                   cleanedName.isNotEmpty ? cleanedName[0].toUpperCase() : '#',
                   style: GoogleFonts.inter(
@@ -358,18 +358,18 @@ class _ChatBody extends StatelessWidget {
               trailing: !isDirect ? Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: kLimeGreen.withValues(alpha: 0.2),
+                  color: kBlue.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.people, color: kLimeGreen, size: 14),
+                    const Icon(Icons.people, color: kBlue, size: 14),
                     const SizedBox(width: 4),
                     Text(
                       '$memberCount',
                       style: GoogleFonts.inter(
-                        color: kLimeGreen,
+                        color: kBlue,
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
                       ),
@@ -431,7 +431,7 @@ class _XmoDrawer extends StatelessWidget {
               child: Row(
                 children: [
                   CircleAvatar(
-                    backgroundColor: kLimeGreen,
+                    backgroundColor: kBlue,
                     radius: 22,
                     child: Text(
                       displayName.isNotEmpty
@@ -474,11 +474,11 @@ class _XmoDrawer extends StatelessWidget {
             // ── Create Matrix Room ─────────────────────────────────────
             ListTile(
               leading: const Icon(Icons.add_circle_outline,
-                  color: kLimeGreen, size: 22),
+                  color: kBlue, size: 22),
               title: Text(
                 'New Matrix Room',
                 style: GoogleFonts.inter(
-                    color: kLimeGreen,
+                    color: kBlue,
                     fontSize: 15,
                     fontWeight: FontWeight.w500),
               ),
@@ -567,7 +567,7 @@ class _XmoDrawer extends StatelessWidget {
             enabledBorder: const UnderlineInputBorder(
                 borderSide: BorderSide(color: kDarkGrey)),
             focusedBorder: const UnderlineInputBorder(
-                borderSide: BorderSide(color: kLimeGreen)),
+                borderSide: BorderSide(color: kBlue)),
           ),
         ),
         actions: [
@@ -584,7 +584,7 @@ class _XmoDrawer extends StatelessWidget {
             },
             child: Text('Create',
                 style: GoogleFonts.inter(
-                    color: kLimeGreen, fontWeight: FontWeight.w600)),
+                    color: kBlue, fontWeight: FontWeight.w600)),
           ),
         ],
       ),

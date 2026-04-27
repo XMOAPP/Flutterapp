@@ -107,7 +107,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           Expanded(
             child: _loading
                 ? const Center(
-                    child: CircularProgressIndicator(color: kLimeGreen))
+                    child: CircularProgressIndicator(color: kBlue))
                 : messages.isEmpty
                     ? Center(
                         child: Column(
@@ -169,7 +169,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
             width: 38,
             height: 38,
             decoration: BoxDecoration(
-              color: kLimeGreen,
+              color: kBlue,
               shape: BoxShape.circle,
             ),
             child: Center(
@@ -305,7 +305,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: isMe ? kLimeGreen : const Color(0xFF2C2C2E),
+            color: isMe ? kBlue : const Color(0xFF2C2C2E),
             borderRadius: BorderRadius.only(
               topLeft: Radius.circular(isMe ? 18 : 4),
               topRight: const Radius.circular(18),
@@ -322,7 +322,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                   child: Text(
                     senderName,
                     style: GoogleFonts.inter(
-                        color: kLimeGreen,
+                        color: kBlue,
                         fontSize: 11,
                         fontWeight: FontWeight.w600),
                   ),
@@ -409,7 +409,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                         height: 40,
                         margin: const EdgeInsets.only(left: 8),
                         decoration: const BoxDecoration(
-                          color: kLimeGreen,
+                          color: kBlue,
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(Icons.send_rounded,

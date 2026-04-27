@@ -153,7 +153,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     width: 10,
                     height: 10,
                     decoration: BoxDecoration(
-                      color: kLimeGreen,
+                      color: kBlue,
                       shape: BoxShape.circle,
                       border: Border.all(color: kBlack, width: 1.5),
                     ),
@@ -180,7 +180,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         ? '${_groupMemberCount(chat.id)} members'
                         : 'last seen recently',
                 style: GoogleFonts.inter(
-                  color: chat.isOnline ? kLimeGreen : kLightGrey,
+                  color: chat.isOnline ? kBlue : kLightGrey,
                   fontSize: 12,
                 ),
               ),
@@ -308,7 +308,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         width: 40,
                         height: 40,
                         decoration: const BoxDecoration(
-                          color: kLimeGreen,
+                          color: kBlue,
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(
@@ -396,7 +396,7 @@ class _TextBubble extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: isOutgoing ? kLimeGreen : const Color(0xFF2C2C2E),
+        color: isOutgoing ? kBlue : const Color(0xFF2C2C2E),
         borderRadius: BorderRadius.only(
           topLeft: Radius.circular(isOutgoing ? 18 : 4),
           topRight: const Radius.circular(18),
@@ -509,7 +509,7 @@ class _AudioBubble extends StatelessWidget {
               width: 40,
               height: 40,
               decoration: const BoxDecoration(
-                color: kLimeGreen,
+                color: kBlue,
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -563,7 +563,7 @@ class _AudioBubble extends StatelessWidget {
                       height: heights[index % heights.length],
                       margin: const EdgeInsets.symmetric(horizontal: 0.8),
                       decoration: BoxDecoration(
-                        color: played ? kLimeGreen : kLightGrey,
+                        color: played ? kBlue : kLightGrey,
                         borderRadius: BorderRadius.circular(2),
                       ),
                     );

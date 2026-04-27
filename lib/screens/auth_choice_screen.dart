@@ -261,7 +261,7 @@ class _OrbPainter extends CustomPainter {
       size.width * 0.45,
     );
     drawOrb(
-      kLimeGreen,
+      kBlue,
       size.width * 0.5 + s1 * 20,
       size.height * 0.75,
       size.width * 0.35,

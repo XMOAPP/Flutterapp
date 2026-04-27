@@ -58,7 +58,7 @@ class ChatTile extends StatelessWidget {
                                   vertical: 2,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: kLimeGreen.withValues(alpha: 0.15),
+                                  color: kBlue.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Row(
@@ -66,14 +66,14 @@ class ChatTile extends StatelessWidget {
                                   children: [
                                     Icon(
                                       Icons.group,
-                                      color: kLimeGreen,
+                                      color: kBlue,
                                       size: 11,
                                     ),
                                     const SizedBox(width: 3),
                                     Text(
                                       'Group',
                                       style: GoogleFonts.inter(
-                                        color: kLimeGreen,
+                                        color: kBlue,
                                         fontSize: 10,
                                         fontWeight: FontWeight.w600,
                                       ),
@@ -89,7 +89,7 @@ class ChatTile extends StatelessWidget {
                       Text(
                         chat.time,
                         style: GoogleFonts.inter(
-                          color: chat.unreadCount > 0 ? kLimeGreen : kLightGrey,
+                          color: chat.unreadCount > 0 ? kBlue : kLightGrey,
                           fontSize: 12,
                         ),
                       ),
@@ -100,7 +100,7 @@ class ChatTile extends StatelessWidget {
                   Row(
                     children: [
                       if (chat.hasDoubleCheck) ...[
-                        Icon(Icons.done_all, color: kLimeGreen, size: 14),
+                        Icon(Icons.done_all, color: kBlue, size: 14),
                         const SizedBox(width: 3),
                       ] else if (!chat.isGroup &&
                           chat.isRead &&
@@ -126,7 +126,7 @@ class ChatTile extends StatelessWidget {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: kLimeGreen,
+                            color: kBlue,
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
