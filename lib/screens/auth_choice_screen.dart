@@ -120,55 +120,33 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen>
                     const Spacer(flex: 2),
 
                     // ── Logo ───────────────────────────────────────────────
-                    _Logo(),
-
-                    const SizedBox(height: 20),
-
-                    Text(
-                      'The future of\nsecure messaging',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.cormorantGaramond(
-                        color: kWhite,
-                        fontSize: 32,
-                        fontWeight: FontWeight.w600,
-                        fontStyle: FontStyle.italic,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Choose how you want to get started',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.inter(
-                        color: kLightGrey,
-                        fontSize: 13,
-                        letterSpacing: 0.3,
-                      ),
+                    Image.asset(
+                      'assets/images/logo.png',
+                      width: 160,
+                      height: 160,
                     ),
 
-                    const Spacer(flex: 3),
+                    const SizedBox(height: 0),
 
                     // ── Option buttons ───────────────────────────────────────
-                    _AuthButton(
-                      icon: Icons.mail_outline_rounded,
-                      iconColor: kBlack,
-                      bgColor: kLimeGreen,
-                      title: 'Sign Up / Sign In',
-                      onTap: _goToSignUp,
-                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 40),
+                      child: Column(
+                        children: [
+                          _AuthButton(
+                            title: 'Sign Up / Sign In',
+                            onTap: _goToSignUp,
+                            isFirst: true,
+                          ),
 
-                    const SizedBox(height: 16),
+                          const SizedBox(height: 16),
 
-                    _AuthButton(
-                      icon: Icons.account_balance_wallet_outlined,
-                      iconColor: kWhite,
-                      bgColor: const Color(0xFF6C63FF),
-                      title: 'Connect Wallet',
-                      onTap: _goToWallet,
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF6C63FF), Color(0xFF3ECFCF)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
+                          _AuthButton(
+                            title: 'Connect Wallet',
+                            onTap: _goToWallet,
+                            isFirst: false,
+                          ),
+                        ],
                       ),
                     ),
 
@@ -187,20 +165,14 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen>
 // ── Auth Button ────────────────────────────────────────────────────────────
 
 class _AuthButton extends StatefulWidget {
-  final IconData icon;
-  final Color iconColor;
-  final Color bgColor;
   final String title;
   final VoidCallback onTap;
-  final Gradient? gradient;
+  final bool isFirst;
 
   const _AuthButton({
-    required this.icon,
-    required this.iconColor,
-    required this.bgColor,
     required this.title,
     required this.onTap,
-    this.gradient,
+    required this.isFirst,
   });
 
   @override
@@ -212,6 +184,10 @@ class _AuthButtonState extends State<_AuthButton> {
 
   @override
   Widget build(BuildContext context) {
+    // First button: white, second button: grey
+    final bgColor = widget.isFirst ? kWhite : const Color(0xFF2C2C2E);
+    final textColor = widget.isFirst ? kBlack : kWhite;
+
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -220,71 +196,31 @@ class _AuthButtonState extends State<_AuthButton> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           width: double.infinity,
-          height: 60,
+          height: 40,
           decoration: BoxDecoration(
-            color: widget.gradient == null ? widget.bgColor : null,
-            gradient: widget.gradient,
-            borderRadius: BorderRadius.circular(16),
+            color: bgColor,
+            borderRadius: BorderRadius.circular(30),
             boxShadow: _hovered
                 ? [
                     BoxShadow(
-                      color: widget.bgColor.withValues(alpha: 0.4),
-                      blurRadius: 20,
-                      spreadRadius: 2,
+                      color: bgColor.withValues(alpha: 0.3),
+                      blurRadius: 16,
+                      spreadRadius: 1,
                       offset: const Offset(0, 4),
                     )
                   ]
                 : [],
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(widget.icon, color: widget.iconColor, size: 24),
-              const SizedBox(width: 12),
-              Text(
-                widget.title,
-                style: GoogleFonts.inter(
-                  color: widget.iconColor,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.5,
-                ),
+          child: Center(
+            child: Text(
+              widget.title,
+              style: GoogleFonts.inter(
+                color: textColor,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.3,
               ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ── Animated Logo ─────────────────────────────────────────────────────────
-
-class _Logo extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 72,
-      height: 72,
-      decoration: BoxDecoration(
-        color: kLimeGreen,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: kLimeGreen.withValues(alpha: 0.35),
-            blurRadius: 24,
-            spreadRadius: 2,
-          ),
-        ],
-      ),
-      child: Center(
-        child: Text(
-          'X',
-          style: GoogleFonts.cormorantGaramond(
-            color: kBlack,
-            fontSize: 44,
-            fontWeight: FontWeight.bold,
-            fontStyle: FontStyle.italic,
+            ),
           ),
         ),
       ),
