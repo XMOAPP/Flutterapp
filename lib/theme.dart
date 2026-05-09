@@ -6,20 +6,18 @@ const Color kDarkGrey = Color(0xFF1A1A1A);
 const Color kDarkerGrey = Color(0xFF111111);
 const Color kMediumGrey = Color(0xFF2A2A2A);
 const Color kLightGrey = Color(0xFF888888);
+const Color kLimeGreen = Color(0xFFA3E635);
+const Color kBlueGrey = Color(0xFF3A3A3C); // Message bubble grey for unread badges
 const Color kWhite = Color(0xFFFFFFFF);
-const Color kMagenta = Color(0xFFE040FB);
-const Color kOrange = Color(0xFFFF8C00);
-const Color kBlue = Color(0xFF0066FF); // Story ring blue
-const Color kCyan = Color(0xFF00CC99); // Story ring cyan
 
 ThemeData buildXmoTheme() {
   return ThemeData(
     brightness: Brightness.dark,
     scaffoldBackgroundColor: kBlack,
-    primaryColor: kBlue,
+    primaryColor: kLimeGreen,
     colorScheme: const ColorScheme.dark(
-      primary: kBlue,
-      secondary: kCyan,
+      primary: kLimeGreen,
+      secondary: kLimeGreen,
       surface: kDarkGrey,
     ),
     textTheme: GoogleFonts.interTextTheme(

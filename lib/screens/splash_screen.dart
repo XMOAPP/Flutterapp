@@ -5,6 +5,10 @@ import '../providers/matrix_provider.dart';
 import 'auth_choice_screen.dart';
 import 'home_screen.dart';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// OPTIMIZED SPLASH SCREEN
+// ═══════════════════════════════════════════════════════════════════════════
+
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -12,7 +16,8 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _progressAnimation;
 
@@ -21,7 +26,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 3), // Loading duration
+      duration: const Duration(seconds: 3),
     );
 
     _progressAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
@@ -29,8 +34,8 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     );
 
     _controller.forward().then((_) {
-      final isLoggedIn =
-          context.read<MatrixProvider>().isLoggedIn;
+      if (!mounted) return;
+      final isLoggedIn = context.read<MatrixProvider>().isLoggedIn;
       Navigator.of(context).pushReplacement(
         PageRouteBuilder(
           pageBuilder: (_, __, ___) =>
@@ -56,17 +61,19 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Background Image
-          Image.asset(
-            'assets/images/splash_bg.png',
-            fit: BoxFit.cover,
+          // Background Image - Use RepaintBoundary
+          RepaintBoundary(
+            child: Image.asset(
+              'assets/images/splash_bg.png',
+              fit: BoxFit.cover,
+              // Add cacheWidth/cacheHeight for memory optimization
+              cacheWidth: MediaQuery.of(context).size.width.toInt() * 2,
+            ),
           ),
-          
-          // Subtle dark overlay to ensure the thin white line is visible
-          Container(
-            color: Colors.black.withOpacity(0.2),
-          ),
-          
+
+          // Dark overlay - const
+          const _DarkOverlay(),
+
           // Progress Bar and Text at the bottom
           Positioned(
             bottom: 40,
@@ -76,54 +83,9 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
               animation: _progressAnimation,
               builder: (context, child) {
                 final percent = (_progressAnimation.value * 100).toInt();
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // App Logo / Name
-                    Text(
-                      'XMO',
-                      style: GoogleFonts.cormorantGaramond(
-                        color: Colors.white,
-                        fontSize: 32,
-                        fontStyle: FontStyle.italic,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 3.0,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    // Thin progress line container
-                    SizedBox(
-                      height: 1.5,
-                      child: Stack(
-                        children: [
-                          // Background line (faded)
-                          Container(
-                            width: double.infinity,
-                            color: Colors.white.withOpacity(0.2),
-                          ),
-                          // Foreground line (progress)
-                          FractionallySizedBox(
-                            widthFactor: _progressAnimation.value,
-                            alignment: Alignment.centerLeft,
-                            child: Container(
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    // Percentage text
-                    Text(
-                      '$percent%',
-                      style: GoogleFonts.inter(
-                        color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w400,
-                        letterSpacing: 2.0,
-                      ),
-                    ),
-                  ],
+                return _ProgressContent(
+                  progress: _progressAnimation.value,
+                  percent: percent,
                 );
               },
             ),
@@ -132,4 +94,85 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       ),
     );
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DARK OVERLAY - Extracted as const widget
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _DarkOverlay extends StatelessWidget {
+  const _DarkOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black.withValues(alpha: 0.2),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PROGRESS CONTENT - Optimized with RepaintBoundary
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _ProgressContent extends StatelessWidget {
+  final double progress;
+  final int percent;
+
+  const _ProgressContent({
+    required this.progress,
+    required this.percent,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return RepaintBoundary(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // App Logo / Name - Cache text style
+          Text('XMO', style: _logoTextStyle),
+          const SizedBox(height: 12),
+          // Progress bar
+          SizedBox(
+            height: 1.5,
+            child: Stack(
+              children: [
+                // Background line
+                Container(
+                  width: double.infinity,
+                  color: Colors.white.withValues(alpha: 0.2),
+                ),
+                // Foreground line (progress)
+                FractionallySizedBox(
+                  widthFactor: progress,
+                  alignment: Alignment.centerLeft,
+                  child: Container(color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          // Percentage text
+          Text('$percent%', style: _percentTextStyle),
+        ],
+      ),
+    );
+  }
+
+  // Cache text styles
+  static final _logoTextStyle = GoogleFonts.cormorantGaramond(
+    color: Colors.white,
+    fontSize: 32,
+    fontStyle: FontStyle.italic,
+    fontWeight: FontWeight.w500,
+    letterSpacing: 3.0,
+  );
+
+  static final _percentTextStyle = GoogleFonts.inter(
+    color: Colors.white,
+    fontSize: 13,
+    fontWeight: FontWeight.w400,
+    letterSpacing: 2.0,
+  );
 }

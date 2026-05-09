@@ -3,6 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
+import '../models/invite_link_models.dart';
+
+enum XmoRoomKind { direct, group, channel }
 
 /// Singleton service that wraps the Matrix Dart SDK.
 /// Homeserver: http://localhost:8008 (Synapse via Docker)
@@ -13,16 +16,92 @@ class MatrixService {
 
   static const String homeserverUrl = 'http://localhost:8008';
   static const String _authBoxName = 'xmo_auth';
+  static const String _channelBoxName = 'xmo_channels';
+  static const String _groupBoxName = 'xmo_groups';
+  static const String _inviteLinksStateType = 'xmo.invite.links';
+  static const String roomTypeStateType = 'xmo.room.type';
 
   late Client _client;
   late Box _authBox;
+  late Box _channelBox;
+  late Box _groupBox;
+  final Set<String> _channelIdCache = {};
+  final Set<String> _groupIdCache = {};
+  final Set<String> _publishedRoomIds = {};
+  bool _hasPublishedExisting = false;
+  String? _profileDisplayName;
+  String? _profileAvatarUrl;
 
   Client get client => _client;
 
   bool get isLoggedIn => _client.isLogged();
   String? get userId => _client.userID;
-  String? get displayName =>
-      _client.userID?.split(':').first.replaceFirst('@', '');
+  String? get displayName => _profileDisplayName?.trim().isNotEmpty == true
+      ? _profileDisplayName
+      : _client.userID?.split(':').first.replaceFirst('@', '');
+  String? get avatarUrl {
+    if (_profileAvatarUrl?.trim().isNotEmpty == true) {
+      return _profileAvatarUrl;
+    }
+    final userId = _client.userID;
+    if (userId == null) return null;
+    return _client.rooms
+        .map((room) =>
+            room.getState(EventTypes.RoomMember, userId)?.asUser.avatarUrl)
+        .firstWhere(
+          (avatar) => avatar != null,
+          orElse: () => null,
+        )
+        ?.toString();
+  }
+
+  Future<void> refreshProfile() async {
+    final userId = _client.userID;
+    if (userId == null) return;
+
+    try {
+      final profile = await _client.getProfileFromUserId(userId);
+      _profileDisplayName = profile.displayName;
+      _profileAvatarUrl = profile.avatarUrl?.toString();
+    } catch (e) {
+      debugPrint('[MatrixService] Failed to refresh profile: $e');
+    }
+  }
+
+  Future<void> updateProfile({
+    required String displayName,
+    Uint8List? avatarBytes,
+    String avatarFileName = 'avatar.jpg',
+  }) async {
+    final userId = _client.userID;
+    if (userId == null) throw Exception('User not logged in');
+
+    final cleanDisplayName = displayName.trim();
+    if (cleanDisplayName.isEmpty) {
+      throw Exception('Display name cannot be empty');
+    }
+
+    await _client.setDisplayName(userId, cleanDisplayName);
+    _profileDisplayName = cleanDisplayName;
+
+    if (avatarBytes != null && avatarBytes.isNotEmpty) {
+      final avatarMxc = await _client.uploadContent(
+        avatarBytes,
+        filename: avatarFileName,
+        contentType: _imageContentTypeForName(avatarFileName),
+      );
+      await _client.setAvatarUrl(userId, avatarMxc);
+      _profileAvatarUrl = avatarMxc.toString();
+    }
+  }
+
+  String _imageContentTypeForName(String fileName) {
+    final lower = fileName.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    return 'image/jpeg';
+  }
 
   /// Strips the :server part from a Matrix ID, returning just the username.
   static String cleanName(String matrixId) {
@@ -32,6 +111,69 @@ class MatrixService {
     return matrixId.replaceFirst('@', '');
   }
 
+  /// Builds a Matrix invite URL that can be copied, shared, or encoded as QR.
+  static String buildMatrixToLink(String roomIdOrAlias) {
+    return 'https://matrix.to/#/${Uri.encodeComponent(roomIdOrAlias)}';
+  }
+
+  /// Extracts a room ID or alias from supported invite/search formats.
+  /// Accepts matrix.to links, raw room IDs (!room:server), and aliases (#name:server).
+  static String? extractRoomIdentifier(String input) {
+    final value = input.trim();
+    if (value.isEmpty) return null;
+    if (value.startsWith('!') || value.startsWith('#')) return value;
+
+    final uri = Uri.tryParse(value);
+    if (uri == null) return null;
+
+    if (uri.host == 'matrix.to') {
+      final fragment = uri.fragment;
+      if (fragment.isEmpty) return null;
+      final rawIdentifier =
+          fragment.startsWith('/') ? fragment.substring(1) : fragment;
+      final decodedIdentifier = Uri.decodeComponent(rawIdentifier);
+      final identifier = decodedIdentifier.split('?').first;
+      if (identifier.startsWith('!') || identifier.startsWith('#')) {
+        return identifier;
+      }
+    }
+
+    return null;
+  }
+
+  /// Classifies an XMO room from Matrix state content.
+  /// Explicit xmo.room.type state wins over power-level heuristics.
+  static XmoRoomKind? classifyRoomKind({
+    Map<dynamic, dynamic>? typeContent,
+    Map<dynamic, dynamic>? powerLevelsContent,
+    required bool isDirectChat,
+    bool useGroupFallback = false,
+  }) {
+    if (typeContent?['is_direct'] == true || typeContent?['kind'] == 'direct') {
+      return XmoRoomKind.direct;
+    }
+    if (typeContent?['is_channel'] == true) return XmoRoomKind.channel;
+    if (typeContent?['is_group'] == true) return XmoRoomKind.group;
+
+    if (powerLevelsMarkChannel(powerLevelsContent)) {
+      return XmoRoomKind.channel;
+    }
+
+    if (isDirectChat) return XmoRoomKind.direct;
+    if (useGroupFallback) return XmoRoomKind.group;
+    return null;
+  }
+
+  /// Broadcast channels require elevated default message power.
+  static bool powerLevelsMarkChannel(Map<dynamic, dynamic>? content) {
+    final eventsDefault = content?['events_default'];
+    final usersDefault = content?['users_default'];
+    return eventsDefault is num &&
+        eventsDefault.toInt() >= 50 &&
+        (usersDefault == null ||
+            (usersDefault is num && usersDefault.toInt() == 0));
+  }
+
   // ─── Init ────────────────────────────────────────────────────────────────────
 
   Future<void> init() async {
@@ -39,6 +181,17 @@ class MatrixService {
 
     // Open credential storage box
     _authBox = await Hive.openBox(_authBoxName);
+
+    // Open channel ID cache (survives restarts — instant channel detection)
+    _channelBox = await Hive.openBox(_channelBoxName);
+    _loadChannelCache();
+
+    _groupBox = await Hive.openBox(_groupBoxName);
+    _loadGroupCache();
+
+    // Open persistent media cache box for thumbnails
+    await Hive.openBox<Uint8List>('xmo_media_cache');
+    await Hive.openBox('xmo_app_settings');
 
     _client = Client(
       'XMO',
@@ -202,7 +355,9 @@ class MatrixService {
 
   /// Get rooms where the user has been invited but hasn't joined yet
   List<Room> getInvitedRooms() {
-    return _client.rooms.where((r) => r.membership == Membership.invite).toList();
+    return _client.rooms
+        .where((r) => r.membership == Membership.invite)
+        .toList();
   }
 
   /// Auto-accept all pending room invites
@@ -211,9 +366,9 @@ class MatrixService {
     for (final room in invites) {
       try {
         await room.join();
-        print('[Matrix] Accepted invite to room: ${room.id}');
+        debugPrint('[Matrix] Accepted invite to room: ${room.id}');
       } catch (e) {
-        print('[Matrix] Failed to accept invite to ${room.id}: $e');
+        debugPrint('[Matrix] Failed to accept invite to ${room.id}: $e');
       }
     }
   }
@@ -223,28 +378,613 @@ class MatrixService {
     String? topic,
     bool isDirect = false,
   }) async {
-    return await _client.createRoom(
-      name: name,
-      topic: topic,
-      preset:
-          isDirect ? CreateRoomPreset.privateChat : CreateRoomPreset.publicChat,
-      isDirect: isDirect,
-    );
+    final aliasName = isDirect ? null : _toAliasName(name);
+    try {
+      final roomId = await _client.createRoom(
+        name: name,
+        topic: topic,
+        preset: isDirect
+            ? CreateRoomPreset.privateChat
+            : CreateRoomPreset.publicChat,
+        visibility: isDirect ? null : Visibility.public,
+        roomAliasName: aliasName,
+        isDirect: isDirect,
+      );
+      if (!isDirect) {
+        cacheGroupId(roomId);
+        _ensureDirectoryVisibility(roomId);
+      }
+      return roomId;
+    } catch (e) {
+      // If alias is taken, retry without alias — user's display name is unaffected
+      if (e.toString().contains('M_ROOM_IN_USE') && !isDirect) {
+        debugPrint('[Matrix] Alias taken, retrying without alias');
+        final roomId = await _client.createRoom(
+          name: name,
+          topic: topic,
+          preset: CreateRoomPreset.publicChat,
+          visibility: Visibility.public,
+          isDirect: false,
+        );
+        cacheGroupId(roomId);
+        _ensureDirectoryVisibility(roomId);
+        return roomId;
+      }
+      rethrow;
+    }
   }
 
   Future<String> createDirectRoom(String userId) async {
-    return await _client.createRoom(
+    final roomId = await _client.createRoom(
       invite: [userId],
       preset: CreateRoomPreset.privateChat,
       isDirect: true,
+      initialState: [
+        StateEvent(
+          type: roomTypeStateType,
+          stateKey: '',
+          content: {'is_direct': true, 'kind': 'direct'},
+        ),
+      ],
     );
+    await Room(id: roomId, client: _client).addToDirectChat(userId);
+    return roomId;
+  }
+
+  /// Creates a broadcast channel where only admins can send messages.
+  Future<String> createChannel({
+    required String name,
+    String? topic,
+    bool isPublic = true,
+  }) async {
+    final aliasName = isPublic ? _toAliasName(name) : null;
+    String roomId;
+    try {
+      roomId = await _client.createRoom(
+        name: name,
+        topic: topic,
+        preset: isPublic
+            ? CreateRoomPreset.publicChat
+            : CreateRoomPreset.privateChat,
+        visibility: isPublic ? Visibility.public : Visibility.private,
+        roomAliasName: aliasName,
+        powerLevelContentOverride: {
+          'events_default': 50,
+          'users_default': 0,
+        },
+        initialState: [
+          StateEvent(
+            type: roomTypeStateType,
+            stateKey: '',
+            content: {'is_channel': true},
+          )
+        ],
+      );
+    } catch (e) {
+      // If alias is taken, retry without alias — display name stays the same
+      if (e.toString().contains('M_ROOM_IN_USE') && isPublic) {
+        debugPrint('[Matrix] Alias taken, retrying without alias');
+        roomId = await _client.createRoom(
+          name: name,
+          topic: topic,
+          preset: CreateRoomPreset.publicChat,
+          visibility: Visibility.public,
+          powerLevelContentOverride: {
+            'events_default': 50,
+            'users_default': 0,
+          },
+          initialState: [
+            StateEvent(
+              type: roomTypeStateType,
+              stateKey: '',
+              content: {'is_channel': true},
+            )
+          ],
+        );
+      } else {
+        rethrow;
+      }
+    }
+    // ✅ Cache immediately so it survives hot restart before state syncs
+    cacheChannelId(roomId);
+    // ✅ Explicitly publish to directory
+    if (isPublic) _ensureDirectoryVisibility(roomId);
+    return roomId;
+  }
+
+  /// Converts a human room name to a valid, unique Matrix alias local part.
+  /// Appends a short timestamp suffix so users can create channels with
+  /// duplicate display names without hitting M_ROOM_IN_USE.
+  String _toAliasName(String name) {
+    final base = name
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+    final suffix = DateTime.now().millisecondsSinceEpoch.toString();
+    return '${base}_$suffix';
+  }
+
+  /// Explicitly sets a room's directory visibility to public.
+  /// Tracks already-published rooms to avoid redundant API calls.
+  void _ensureDirectoryVisibility(String roomId) {
+    if (_publishedRoomIds.contains(roomId)) return;
+    _publishedRoomIds.add(roomId);
+    Future.delayed(const Duration(milliseconds: 500), () async {
+      try {
+        await _client.setRoomVisibilityOnDirectory(roomId,
+            visibility: Visibility.public);
+        debugPrint('[Matrix] Published room $roomId to public directory');
+      } catch (e) {
+        debugPrint('[Matrix] Failed to publish room to directory: $e');
+      }
+    });
+  }
+
+  // ─── Channel ID Cache ──────────────────────────────────────────────────────
+
+  /// Returns true if this room is known to be a channel (from persistent cache).
+  bool isKnownChannel(String roomId) => _channelIdCache.contains(roomId);
+
+  /// Returns true if this room is known to be a group (from persistent cache).
+  bool isKnownGroup(String roomId) => _groupIdCache.contains(roomId);
+
+  /// Persist a room ID as a channel. Survives app restarts.
+  void cacheChannelId(String roomId) {
+    if (_groupIdCache.remove(roomId)) {
+      _groupBox.put('ids', _groupIdCache.toList());
+    }
+    if (_channelIdCache.add(roomId)) {
+      final list = _channelIdCache.toList();
+      _channelBox.put('ids', list);
+    }
+  }
+
+  /// Persist a room ID as a group. Survives app restarts.
+  void cacheGroupId(String roomId) {
+    if (_channelIdCache.remove(roomId)) {
+      _channelBox.put('ids', _channelIdCache.toList());
+    }
+    if (_groupIdCache.add(roomId)) {
+      final list = _groupIdCache.toList();
+      _groupBox.put('ids', list);
+    }
+  }
+
+  /// Load the persistent channel cache from Hive on startup.
+  void _loadChannelCache() {
+    final stored = _channelBox.get('ids', defaultValue: <dynamic>[]);
+    if (stored is List) {
+      _channelIdCache.addAll(stored.whereType<String>());
+    }
+  }
+
+  /// Load the persistent group cache from Hive on startup.
+  void _loadGroupCache() {
+    final stored = _groupBox.get('ids', defaultValue: <dynamic>[]);
+    if (stored is List) {
+      _groupIdCache.addAll(stored.whereType<String>());
+    }
+  }
+
+  /// After a sync, scan rooms and retroactively cache any detected channels.
+  /// Also publishes non-direct rooms to the public directory if they aren't listed.
+  void scanAndCacheChannels() {
+    for (final room in _client.rooms) {
+      final kind = classifyRoomKind(
+        typeContent: room.getState(roomTypeStateType)?.content,
+        powerLevelsContent: room.getState('m.room.power_levels')?.content,
+        isDirectChat: room.isDirectChat,
+      );
+      if (kind == XmoRoomKind.channel) {
+        cacheChannelId(room.id);
+        continue;
+      }
+      if (kind == XmoRoomKind.group) {
+        cacheGroupId(room.id);
+      }
+    }
+    // Retroactively publish non-direct rooms to the directory (once per session)
+    if (!_hasPublishedExisting) {
+      _hasPublishedExisting = true;
+      _publishExistingRoomsToDirectory();
+    }
+  }
+
+  /// Retroactively ensures all non-direct, public-preset rooms are listed
+  /// in the public room directory. Fixes rooms created before the visibility fix.
+  void _publishExistingRoomsToDirectory() {
+    for (final room in _client.rooms) {
+      if (room.isDirectChat) continue;
+      if (room.membership != Membership.join) continue;
+      // Only publish rooms the current user has admin power in
+      final ownPower = room.ownPowerLevel;
+      if (ownPower < 50) continue;
+      _ensureDirectoryVisibility(room.id);
+    }
   }
 
   Future<void> joinRoom(String roomIdOrAlias) async {
-    await _client.joinRoom(roomIdOrAlias);
+    final identifier = extractRoomIdentifier(roomIdOrAlias) ?? roomIdOrAlias;
+    await _client.joinRoom(identifier);
+    try {
+      await _client.oneShotSync();
+      scanAndCacheChannels();
+    } catch (e) {
+      debugPrint('[Matrix] Joined room, but immediate type sync failed: $e');
+    }
+  }
+
+  Future<bool> isPublicRoomChannel(
+    String roomId, {
+    bool forceRefresh = false,
+  }) async {
+    if (!forceRefresh) {
+      if (isKnownChannel(roomId)) return true;
+      if (isKnownGroup(roomId)) return false;
+    }
+
+    try {
+      final typeState = await _client.getRoomStateWithKey(
+        roomId,
+        roomTypeStateType,
+        '',
+      );
+      final kind = classifyRoomKind(
+        typeContent: typeState,
+        isDirectChat: false,
+      );
+      if (kind == XmoRoomKind.channel) {
+        cacheChannelId(roomId);
+        return true;
+      }
+      if (kind == XmoRoomKind.group) {
+        cacheGroupId(roomId);
+        return false;
+      }
+    } catch (e) {
+      debugPrint('[RoomType] Could not read xmo.room.type for $roomId: $e');
+    }
+
+    try {
+      final powerLevels = await _client.getRoomStateWithKey(
+        roomId,
+        EventTypes.RoomPowerLevels,
+        '',
+      );
+      if (powerLevelsMarkChannel(powerLevels)) {
+        cacheChannelId(roomId);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('[RoomType] Could not read power levels for $roomId: $e');
+    }
+
+    cacheGroupId(roomId);
+    return false;
+  }
+
+  /// Searches the server's public room directory for channels/rooms.
+  /// Uses a three-pronged approach (mirrors how user search works):
+  ///   1. Server-side search via filter (Synapse directory index)
+  ///   2. Broad fetch + client-side filter (catches poor indexing)
+  ///   3. Room alias resolution fallback (direct lookup by name)
+  Future<List<PublicRoomsChunk>> searchPublicRooms(String query) async {
+    final trimmedQuery = query.trim();
+    if (trimmedQuery.isEmpty) {
+      final result = await _client.queryPublicRooms(limit: 200);
+      return result.chunk;
+    }
+
+    final seen = <String>{};
+    final combined = <PublicRoomsChunk>[];
+
+    // Direct invite lookup: pasted matrix.to links, raw room IDs, or aliases.
+    final directIdentifier = extractRoomIdentifier(trimmedQuery);
+    if (directIdentifier != null) {
+      final room = await _publicRoomChunkFromIdentifier(directIdentifier);
+      if (room != null && seen.add(room.roomId)) {
+        combined.add(room);
+      }
+    }
+
+    // Prong 1: Server-side search (Synapse directory index)
+    try {
+      final serverResult = await _client.queryPublicRooms(
+        limit: 100,
+        filter: PublicRoomQueryFilter(genericSearchTerm: trimmedQuery),
+      );
+      for (final room in serverResult.chunk) {
+        if (seen.add(room.roomId)) combined.add(room);
+      }
+      debugPrint(
+          '[PublicSearch] Server-side returned ${serverResult.chunk.length} results');
+    } catch (e) {
+      debugPrint('[PublicSearch] Server-side search failed: $e');
+    }
+
+    // Prong 2: Broad fetch + client-side filter (catches poor indexing)
+    try {
+      final allResult = await _client.queryPublicRooms(limit: 200);
+      final lowerQuery = trimmedQuery.toLowerCase();
+      for (final room in allResult.chunk) {
+        if (seen.contains(room.roomId)) continue;
+        final name = room.name?.toLowerCase() ?? '';
+        final topic = room.topic?.toLowerCase() ?? '';
+        final id = room.roomId.toLowerCase();
+        if (name.contains(lowerQuery) ||
+            topic.contains(lowerQuery) ||
+            id.contains(lowerQuery)) {
+          seen.add(room.roomId);
+          combined.add(room);
+        }
+      }
+    } catch (e) {
+      debugPrint('[PublicSearch] Broad fetch failed: $e');
+    }
+
+    // Prong 3: Room alias resolution fallback (like user search by ID)
+    // Try to resolve #query:localhost directly — works even if directory is empty
+    if (combined.isEmpty) {
+      try {
+        final aliasName = trimmedQuery
+            .toLowerCase()
+            .replaceAll(RegExp(r'[^a-z0-9]'), '_')
+            .replaceAll(RegExp(r'_+'), '_')
+            .replaceAll(RegExp(r'^_|_$'), '');
+        final serverName = _client.userID?.split(':').last ?? 'localhost';
+        final fullAlias = '#$aliasName:$serverName';
+        debugPrint('[PublicSearch] Trying alias resolution: $fullAlias');
+        final aliasResult = await _client.getRoomIdByAlias(fullAlias);
+        final roomId = aliasResult.roomId;
+        if (roomId != null && !seen.contains(roomId)) {
+          // Fetch room details to build a proper PublicRoomsChunk
+          seen.add(roomId);
+          combined.add(PublicRoomsChunk(
+            numJoinedMembers: 0,
+            roomId: roomId,
+            worldReadable: false,
+            guestCanJoin: false,
+            name: trimmedQuery,
+            canonicalAlias: fullAlias,
+          ));
+          debugPrint('[PublicSearch] Found room via alias: $roomId');
+        }
+      } catch (e) {
+        debugPrint(
+            '[PublicSearch] Alias resolution failed (expected if no match): $e');
+      }
+    }
+
+    debugPrint(
+        '[PublicSearch] Combined total: ${combined.length} results for "$trimmedQuery"');
+    return combined;
+  }
+
+  Future<PublicRoomsChunk?> _publicRoomChunkFromIdentifier(
+    String identifier,
+  ) async {
+    if (identifier.startsWith('#')) {
+      try {
+        final aliasResult = await _client.getRoomIdByAlias(identifier);
+        final roomId = aliasResult.roomId;
+        if (roomId == null) return null;
+        return PublicRoomsChunk(
+          numJoinedMembers: 0,
+          roomId: roomId,
+          worldReadable: false,
+          guestCanJoin: false,
+          name: identifier,
+          canonicalAlias: identifier,
+        );
+      } catch (e) {
+        debugPrint('[PublicSearch] Invite alias lookup failed: $e');
+        return null;
+      }
+    }
+
+    if (identifier.startsWith('!')) {
+      final joinedRoom = getRoomById(identifier);
+      return PublicRoomsChunk(
+        numJoinedMembers: joinedRoom?.summary.mJoinedMemberCount ?? 0,
+        roomId: identifier,
+        worldReadable: false,
+        guestCanJoin: false,
+        name: joinedRoom != null ? getResolvedDisplayName(joinedRoom) : identifier,
+      );
+    }
+
+    return null;
   }
 
   Room? getRoomById(String roomId) => _client.getRoomById(roomId);
+
+  bool isDirectRoom(Room room) {
+    return classifyRoomKind(
+          typeContent: room.getState(roomTypeStateType)?.content,
+          powerLevelsContent:
+              room.getState(EventTypes.RoomPowerLevels)?.content,
+          isDirectChat: room.isDirectChat,
+        ) ==
+        XmoRoomKind.direct;
+  }
+
+  String? getDirectPeerUserId(Room room) {
+    final directChatMatrixID = room.directChatMatrixID;
+    if (directChatMatrixID != null) return directChatMatrixID;
+    if (!isDirectRoom(room)) return null;
+
+    final myUserId = _client.userID;
+    if (myUserId == null) return null;
+
+    final participantIds = _activeParticipantIds(room)
+      ..removeWhere((userId) => userId == myUserId);
+    return participantIds.length == 1 ? participantIds.first : null;
+  }
+
+  String getResolvedDisplayName(Room room) {
+    if (room.name.isNotEmpty) return room.name;
+
+    final peerUserId = getDirectPeerUserId(room);
+    if (peerUserId != null) {
+      return room
+          .unsafeGetUserFromMemoryOrFallback(peerUserId)
+          .calcDisplayname();
+    }
+
+    return room.getLocalizedDisplayname();
+  }
+
+  bool looksLikeLegacyDirectRoom(Room room, String otherUserId) {
+    if (room.name.isNotEmpty || room.canonicalAlias.isNotEmpty) return false;
+
+    final typeContent = room.getState(roomTypeStateType)?.content;
+    if (typeContent?['is_group'] == true ||
+        typeContent?['is_channel'] == true) {
+      return false;
+    }
+
+    final participants = _activeParticipantIds(room);
+    final myUserId = _client.userID;
+    if (myUserId == null) return false;
+
+    if (participants.length != 2 ||
+        !participants.contains(myUserId) ||
+        !participants.contains(otherUserId)) {
+      return false;
+    }
+
+    final kind = classifyRoomKind(
+      typeContent: typeContent,
+      powerLevelsContent: room.getState(EventTypes.RoomPowerLevels)?.content,
+      isDirectChat: room.isDirectChat,
+    );
+    return kind == null || kind == XmoRoomKind.direct;
+  }
+
+  Future<void> markRoomAsDirect(String roomId, String otherUserId) async {
+    final room = _client.getRoomById(roomId);
+    if (room == null) return;
+
+    await _client.setRoomStateWithKey(
+      roomId,
+      roomTypeStateType,
+      '',
+      {'is_direct': true, 'kind': 'direct'},
+    );
+    await room.addToDirectChat(otherUserId);
+  }
+
+  Future<void> repairDirectChatMappings() async {
+    for (final room in _client.rooms) {
+      if (room.membership != Membership.join &&
+          room.membership != Membership.invite) {
+        continue;
+      }
+
+      final peerUserId = getDirectPeerUserId(room);
+      if (peerUserId == null || room.directChatMatrixID == peerUserId) {
+        continue;
+      }
+
+      try {
+        await room.addToDirectChat(peerUserId);
+      } catch (e) {
+        debugPrint(
+            '[Matrix] Failed to repair direct mapping for ${room.id}: $e');
+      }
+    }
+  }
+
+  Set<String> _activeParticipantIds(Room room) {
+    final participantIds = <String>{};
+    for (final user in room.getParticipants()) {
+      participantIds.add(user.id);
+    }
+
+    final states = room.states[EventTypes.RoomMember];
+    if (states != null) {
+      for (final state in states.values) {
+        final membership = state.content['membership'];
+        if (membership == 'invite' || membership == 'join') {
+          final stateKey = state.stateKey;
+          if (stateKey != null && stateKey.isNotEmpty) {
+            participantIds.add(stateKey);
+          }
+        }
+      }
+    }
+
+    return participantIds;
+  }
+
+  Future<XmoInviteLink> generateTrackedInviteLink(String roomId) async {
+    final room = _client.getRoomById(roomId);
+    if (room == null) throw Exception('Room not found: $roomId');
+
+    final existingLinks = await getInviteLinks(roomId);
+    final now = DateTime.now();
+    final linkId = now.microsecondsSinceEpoch.toString();
+    final link = XmoInviteLink(
+      linkId: linkId,
+      url: '${buildMatrixToLink(room.id)}?xmo_invite=$linkId',
+      roomId: room.id,
+      createdAt: now,
+      createdBy: _client.userID ?? '',
+    );
+
+    await _saveInviteLinks(roomId, [...existingLinks, link]);
+    return link;
+  }
+
+  Future<List<XmoInviteLink>> getInviteLinks(String roomId) async {
+    final room = _client.getRoomById(roomId);
+    if (room == null) throw Exception('Room not found: $roomId');
+
+    final state = room.getState(_inviteLinksStateType);
+    final rawLinks = state?.content['links'];
+    if (rawLinks is! List) return const [];
+
+    return rawLinks
+        .whereType<Map>()
+        .map(XmoInviteLink.fromJson)
+        .where((link) => link.linkId.isNotEmpty && link.roomId.isNotEmpty)
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  Future<XmoInviteLink?> getActiveInviteLink(String roomId) async {
+    final links = await getInviteLinks(roomId);
+    for (final link in links) {
+      if (link.canBeUsed) return link;
+    }
+    return null;
+  }
+
+  Future<void> revokeInviteLink(String roomId, String linkId) async {
+    final links = await getInviteLinks(roomId);
+    final updatedLinks = links.map((link) {
+      if (link.linkId != linkId) return link;
+      return link.copyWith(isActive: false);
+    }).toList();
+
+    await _saveInviteLinks(roomId, updatedLinks);
+  }
+
+  Future<void> _saveInviteLinks(
+    String roomId,
+    List<XmoInviteLink> links,
+  ) async {
+    final room = _client.getRoomById(roomId);
+    if (room == null) throw Exception('Room not found: $roomId');
+
+    await room.client.setRoomStateWithKey(
+      roomId,
+      _inviteLinksStateType,
+      '',
+      {'links': links.map((link) => link.toJson()).toList()},
+    );
+  }
 
   // ─── Messaging ────────────────────────────────────────────────────────────
 
@@ -252,6 +992,113 @@ class MatrixService {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
     await room.sendTextEvent(message);
+  }
+
+  /// Sends a file/image/video to a room. The SDK handles mxc upload internally.
+  Future<void> sendFile(String roomId, MatrixFile file) async {
+    final room = _client.getRoomById(roomId);
+    if (room == null) throw Exception('Room not found: $roomId');
+    await room.sendFileEvent(file);
+  }
+
+  /// Sends a video with an embedded thumbnail.
+  /// The SDK's MatrixVideoFile has no thumbnail param, so we manually:
+  ///   1. Upload thumbnail bytes → thumbnail mxc URL
+  ///   2. Upload video bytes    → video mxc URL
+  ///   3. Call room.sendEvent() with both URLs in content
+  Future<void> sendVideoWithThumbnail({
+    required String roomId,
+    required Uint8List videoBytes,
+    required String videoFileName,
+    required String videoMimeType,
+    Uint8List? thumbBytes,
+  }) async {
+    final room = _client.getRoomById(roomId);
+    if (room == null) throw Exception('Room not found: $roomId');
+
+    // Step 1: Upload video
+    debugPrint('[sendVideo] Uploading video (${videoBytes.length} bytes)...');
+    final videoMxc = await _client.uploadContent(
+      videoBytes,
+      filename: videoFileName,
+      contentType: videoMimeType,
+    );
+    debugPrint('[sendVideo] Video uploaded: $videoMxc');
+
+    // Step 2: Build info map
+    final info = <String, dynamic>{
+      'mimetype': videoMimeType,
+      'size': videoBytes.length,
+    };
+
+    // Step 3: Upload thumbnail if we have one and embed it in info
+    if (thumbBytes != null && thumbBytes.isNotEmpty) {
+      try {
+        debugPrint(
+            '[sendVideo] Uploading thumbnail (${thumbBytes.length} bytes)...');
+        final thumbMxc = await _client.uploadContent(
+          thumbBytes,
+          filename: '${videoFileName}_thumb.jpg',
+          contentType: 'image/jpeg',
+        );
+        debugPrint('[sendVideo] Thumbnail uploaded: $thumbMxc');
+        info['thumbnail_url'] = thumbMxc.toString();
+        info['thumbnail_info'] = {
+          'mimetype': 'image/jpeg',
+          'size': thumbBytes.length,
+        };
+      } catch (e) {
+        debugPrint('[sendVideo] Thumbnail upload failed (non-fatal): $e');
+      }
+    }
+
+    // Step 4: Send the m.video event with both URLs
+    await room.sendEvent({
+      'msgtype': 'm.video',
+      'body': videoFileName,
+      'url': videoMxc.toString(),
+      'info': info,
+    });
+    debugPrint('[sendVideo] Event sent.');
+  }
+
+  /// Returns the current access token for authenticated requests.
+  String? get accessToken => _client.accessToken;
+
+  /// Resolves an mxc:// URI to an authenticated HTTP URL for display.
+  /// Uses the authenticated /_matrix/client/v1/media/ endpoints (Synapse 1.120+).
+  /// Falls back to legacy /_matrix/media/v3/ if needed.
+  Uri? getHttpUrl(String? mxcUrl, {int? width, int? height}) {
+    if (mxcUrl == null || !mxcUrl.startsWith('mxc://')) return null;
+    final parts = mxcUrl.substring(6).split('/'); // remove 'mxc://'
+    if (parts.length < 2) return null;
+    final server = parts[0];
+    final mediaId = parts.sublist(1).join('/');
+    final token = accessToken;
+
+    if (width != null && height != null) {
+      // Use authenticated client media endpoint for thumbnails
+      final queryParams = <String, String>{
+        'width': width.toString(),
+        'height': height.toString(),
+        'method': 'scale',
+      };
+      if (token != null) queryParams['access_token'] = token;
+      return Uri.parse(
+              '$homeserverUrl/_matrix/client/v1/media/thumbnail/$server/$mediaId')
+          .replace(queryParameters: queryParams);
+    }
+
+    // Use authenticated client media endpoint for downloads
+    if (token != null) {
+      return Uri.parse(
+        '$homeserverUrl/_matrix/client/v1/media/download/$server/$mediaId'
+        '?access_token=$token',
+      );
+    }
+    return Uri.parse(
+      '$homeserverUrl/_matrix/client/v1/media/download/$server/$mediaId',
+    );
   }
 
   Future<Timeline?> getTimeline(String roomId) async {

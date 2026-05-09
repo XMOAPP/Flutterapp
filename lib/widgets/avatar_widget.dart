@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme.dart';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// OPTIMIZED AVATAR WIDGET
+// ═══════════════════════════════════════════════════════════════════════════
+
 class AvatarWidget extends StatelessWidget {
   final String text;
   final String? colorHex;
@@ -28,65 +32,70 @@ class AvatarWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: imageUrl != null ? null : _parseColor(colorHex),
-            image: imageUrl != null
-                ? DecorationImage(
-                    image: NetworkImage(imageUrl!),
-                    fit: BoxFit.cover,
-                  )
-                : null,
+    // Use RepaintBoundary to isolate repaints
+    return RepaintBoundary(
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          _buildAvatar(),
+          if (showOnlineDot) _buildOnlineDot(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAvatar() {
+    final color = _parseColor(colorHex);
+    
+    // If there's an image URL, use cached network image
+    if (imageUrl != null) {
+      return Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          image: DecorationImage(
+            image: NetworkImage(imageUrl!),
+            fit: BoxFit.cover,
           ),
-          child: imageUrl == null
-              ? Center(
-                  child: Text(
-                    text.length > 2 ? text.substring(0, 2) : text,
-                    style: GoogleFonts.inter(
-                      color: kWhite,
-                      fontSize: size * 0.34,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                )
-              : null,
         ),
-        if (showOnlineDot)
-          Positioned(
-            bottom: 1,
-            right: 1,
-            child: Container(
-              width: size * 0.26,
-              height: size * 0.26,
-              decoration: BoxDecoration(
-                color: kBlue,
-                shape: BoxShape.circle,
-                border: Border.all(color: kBlack, width: 2),
-              ),
-            ),
+      );
+    }
+
+    // Otherwise, show initials
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color,
+      ),
+      child: Center(
+        child: Text(
+          text.length > 2 ? text.substring(0, 2) : text,
+          style: GoogleFonts.inter(
+            color: kWhite,
+            fontSize: size * 0.34,
+            fontWeight: FontWeight.bold,
           ),
-        if (isGroup)
-          Positioned(
-            bottom: -2,
-            right: -2,
-            child: Container(
-              width: size * 0.38,
-              height: size * 0.38,
-              decoration: BoxDecoration(
-                color: kDarkGrey,
-                shape: BoxShape.circle,
-                border: Border.all(color: kBlack, width: 1.5),
-              ),
-              child: Icon(Icons.group, color: kBlue, size: size * 0.22),
-            ),
-          ),
-      ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOnlineDot() {
+    return Positioned(
+      bottom: 1,
+      right: 1,
+      child: Container(
+        width: size * 0.26,
+        height: size * 0.26,
+        decoration: BoxDecoration(
+          color: kLimeGreen,
+          shape: BoxShape.circle,
+          border: Border.all(color: kBlack, width: 2),
+        ),
+      ),
     );
   }
 }

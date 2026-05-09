@@ -4,6 +4,9 @@ import 'package:provider/provider.dart';
 import '../theme.dart';
 import '../providers/chat_filter_provider.dart';
 import '../providers/matrix_provider.dart';
+import '../providers/group_provider.dart';
+import '../providers/story_provider.dart';
+import '../services/story_service.dart';
 import 'screens/splash_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
@@ -43,6 +46,12 @@ class XmoApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => ChatFilterProvider()),
         ChangeNotifierProvider.value(value: matrixProvider),
+        ChangeNotifierProvider(
+          create: (_) => GroupProvider(matrixProvider.service),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => StoryProvider(StoryService(matrixProvider.service)),
+        ),
       ],
       child: MaterialApp(
         title: 'xmo',

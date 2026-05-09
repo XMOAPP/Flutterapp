@@ -1,0 +1,604 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../../theme.dart';
+import '../../models/story_models.dart';
+import '../../providers/story_provider.dart';
+import '../../providers/matrix_provider.dart';
+import '../../widgets/story/story_avatar.dart';
+import '../../widgets/story/story_video_player.dart';
+import 'story_creator_screen.dart';
+import 'story_viewers_screen.dart';
+
+/// Full-screen story viewer with swipe navigation
+class StoryViewerScreen extends StatefulWidget {
+  final int initialUserIndex; // -1 for my story
+  final List<String> allUserStories; // List of user IDs with stories
+
+  const StoryViewerScreen({
+    super.key,
+    required this.initialUserIndex,
+    required this.allUserStories,
+  });
+
+  @override
+  State<StoryViewerScreen> createState() => _StoryViewerScreenState();
+}
+
+class _StoryViewerScreenState extends State<StoryViewerScreen> {
+  int _currentUserIndex = 0;
+  int _currentStoryIndex = 0;
+  List<Story> _currentUserStories = [];
+
+  Timer? _progressTimer;
+  double _progress = 0.0;
+  bool _isPaused = false;
+  String? _activeVideoStoryId;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentUserIndex = widget.initialUserIndex;
+    _loadCurrentUserStories();
+  }
+
+  @override
+  void dispose() {
+    _progressTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadCurrentUserStories() async {
+    final storyProvider = context.read<StoryProvider>();
+
+    if (_currentUserIndex == -1) {
+      // My stories
+      setState(() {
+        _currentUserStories =
+            storyProvider.myStories.where((s) => !s.isExpired).toList();
+      });
+    } else if (_currentUserIndex >= 0 &&
+        _currentUserIndex < widget.allUserStories.length) {
+      // Contact stories
+      final userId = widget.allUserStories[_currentUserIndex];
+      final userStories = storyProvider.contactStories.firstWhere(
+        (us) => us.userId == userId,
+        orElse: () => UserStories(userId: userId, userName: '', stories: []),
+      );
+      setState(() {
+        _currentUserStories = userStories.activeStories;
+      });
+    }
+
+    if (_currentUserStories.isNotEmpty) {
+      _startStoryProgress();
+      _markCurrentStoryAsViewed();
+    }
+  }
+
+  void _startStoryProgress() {
+    _progressTimer?.cancel();
+    _progress = 0.0;
+    _activeVideoStoryId = null;
+
+    if (_currentStoryIndex >= _currentUserStories.length) return;
+
+    final currentStory = _currentUserStories[_currentStoryIndex];
+    if (currentStory.mediaType == StoryMediaType.video &&
+        currentStory.mediaUrl != null) {
+      _activeVideoStoryId = currentStory.id;
+      setState(() {});
+      return;
+    }
+
+    const duration = Duration(seconds: 5); // 5 seconds per story
+    const interval = Duration(milliseconds: 50);
+    final increment = interval.inMilliseconds / duration.inMilliseconds;
+
+    _progressTimer = Timer.periodic(interval, (timer) {
+      if (_isPaused || !mounted) return;
+
+      if (_progress + increment >= 1.0) {
+        _nextStory();
+      } else {
+        setState(() => _progress += increment);
+      }
+    });
+  }
+
+  void _pauseStory() {
+    setState(() => _isPaused = true);
+  }
+
+  void _resumeStory() {
+    setState(() => _isPaused = false);
+  }
+
+  void _nextStory() {
+    if (_currentStoryIndex < _currentUserStories.length - 1) {
+      // Next story from same user
+      setState(() {
+        _currentStoryIndex++;
+        _progress = 0.0;
+      });
+      _markCurrentStoryAsViewed();
+      _startStoryProgress();
+    } else {
+      // Next user's stories
+      _nextUser();
+    }
+  }
+
+  void _previousStory() {
+    if (_currentStoryIndex > 0) {
+      // Previous story from same user
+      setState(() {
+        _currentStoryIndex--;
+        _progress = 0.0;
+      });
+      _startStoryProgress();
+    } else {
+      // Previous user's stories
+      _previousUser();
+    }
+  }
+
+  void _nextUser() {
+    if (_currentUserIndex < widget.allUserStories.length - 1) {
+      setState(() {
+        _currentUserIndex++;
+        _currentStoryIndex = 0;
+        _progress = 0.0;
+      });
+      _loadCurrentUserStories();
+    } else {
+      // End of stories
+      _closeViewer();
+    }
+  }
+
+  void _previousUser() {
+    if (_currentUserIndex > 0 || _currentUserIndex == -1) {
+      setState(() {
+        _currentUserIndex--;
+        _currentStoryIndex = 0;
+        _progress = 0.0;
+      });
+      _loadCurrentUserStories();
+    } else {
+      _closeViewer();
+    }
+  }
+
+  void _closeViewer() {
+    _progressTimer?.cancel();
+    if (!mounted) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+    });
+  }
+
+  Future<void> _markCurrentStoryAsViewed() async {
+    if (_currentUserIndex == -1) return; // Don't mark own stories
+
+    if (_currentStoryIndex < _currentUserStories.length) {
+      final story = _currentUserStories[_currentStoryIndex];
+      final storyProvider = context.read<StoryProvider>();
+      await storyProvider.markStoryAsViewed(story.userId, story.id);
+    }
+  }
+
+  Future<void> _deleteStory() async {
+    if (_currentStoryIndex >= _currentUserStories.length) return;
+
+    final story = _currentUserStories[_currentStoryIndex];
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: kDarkerGrey,
+        title: Text('Delete Story?', style: GoogleFonts.inter(color: kWhite)),
+        content: Text(
+          'This story will be deleted permanently.',
+          style: GoogleFonts.inter(color: kLightGrey),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.inter(color: kLightGrey)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Delete', style: GoogleFonts.inter(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final storyProvider = context.read<StoryProvider>();
+      final success = await storyProvider.deleteStory(story.id);
+
+      if (success && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Story deleted'),
+            backgroundColor: kLimeGreen,
+            duration: Duration(seconds: 2),
+          ),
+        );
+
+        // Reload stories
+        setState(() {
+          _currentUserStories.removeAt(_currentStoryIndex);
+          if (_currentUserStories.isEmpty) {
+            Navigator.pop(context);
+          } else if (_currentStoryIndex >= _currentUserStories.length) {
+            _currentStoryIndex = _currentUserStories.length - 1;
+          }
+        });
+      }
+    }
+  }
+
+  void _viewStoryViewers() {
+    if (_currentStoryIndex >= _currentUserStories.length) return;
+
+    final story = _currentUserStories[_currentStoryIndex];
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => StoryViewersScreen(storyId: story.id),
+      ),
+    );
+  }
+
+  void _addStory() {
+    _progressTimer?.cancel();
+    setState(() => _isPaused = true);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const StoryCreatorScreen(),
+      ),
+    ).then((_) {
+      if (!mounted) return;
+      setState(() => _isPaused = false);
+      _loadCurrentUserStories();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_currentUserStories.isEmpty) {
+      return const Scaffold(
+        backgroundColor: kBlack,
+        body: Center(
+          child: CircularProgressIndicator(color: kLimeGreen),
+        ),
+      );
+    }
+
+    final currentStory = _currentUserStories[_currentStoryIndex];
+    final isMyStory = _currentUserIndex == -1;
+
+    return Scaffold(
+      backgroundColor: kBlack,
+      body: GestureDetector(
+        onTapDown: (details) {
+          final screenWidth = MediaQuery.of(context).size.width;
+          if (details.globalPosition.dx < screenWidth / 3) {
+            _previousStory();
+          } else if (details.globalPosition.dx > screenWidth * 2 / 3) {
+            _nextStory();
+          }
+        },
+        onLongPressStart: (_) => _pauseStory(),
+        onLongPressEnd: (_) => _resumeStory(),
+        child: Stack(
+          children: [
+            // Story content
+            _buildStoryContent(currentStory),
+
+            // Top gradient overlay
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                height: 120,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.6),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // Progress bars
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 8,
+              left: 8,
+              right: 8,
+              child: _buildProgressBars(),
+            ),
+
+            // Header
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 28,
+              left: 12,
+              right: 12,
+              child: _buildHeader(currentStory, isMyStory),
+            ),
+
+            // Caption
+            if (currentStory.caption != null)
+              Positioned(
+                bottom: 80,
+                left: 16,
+                right: 16,
+                child: _buildCaption(currentStory.caption!),
+              ),
+
+            // Bottom actions (for my story)
+            if (isMyStory)
+              Positioned(
+                bottom: 20,
+                left: 16,
+                right: 16,
+                child: _buildMyStoryActions(currentStory),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStoryContent(Story story) {
+    if (story.mediaType == StoryMediaType.image && story.mediaUrl != null) {
+      // Convert MXC URL to HTTP URL
+      final matrixProvider = context.read<MatrixProvider>();
+      final httpUrl = matrixProvider.service.getHttpUrl(story.mediaUrl);
+
+      if (httpUrl != null) {
+        return Center(
+          child: Image.network(
+            httpUrl.toString(),
+            fit: BoxFit.contain,
+            loadingBuilder: (context, child, loadingProgress) {
+              if (loadingProgress == null) return child;
+              return Center(
+                child: CircularProgressIndicator(
+                  color: kLimeGreen,
+                  value: loadingProgress.expectedTotalBytes != null
+                      ? loadingProgress.cumulativeBytesLoaded /
+                          loadingProgress.expectedTotalBytes!
+                      : null,
+                ),
+              );
+            },
+            errorBuilder: (_, __, ___) => _buildTextStory(story),
+          ),
+        );
+      } else {
+        return _buildTextStory(story);
+      }
+    } else if (story.mediaType == StoryMediaType.video &&
+        story.mediaUrl != null) {
+      final matrixProvider = context.read<MatrixProvider>();
+      final httpUrl = matrixProvider.service.getHttpUrl(story.mediaUrl);
+
+      if (httpUrl != null) {
+        return StoryVideoPlayer.url(
+          key: ValueKey(story.mediaUrl),
+          url: httpUrl.toString(),
+          mimeType: story.mediaMimeType ?? 'video/mp4',
+          looping: false,
+          paused: _isPaused,
+          enableTapToPause: false,
+          onProgress: (progress) {
+            if (!mounted || _activeVideoStoryId != story.id) return;
+            if ((progress - _progress).abs() < 0.01 && progress < 1) return;
+            setState(() => _progress = progress);
+          },
+          onCompleted: () {
+            if (!mounted || _activeVideoStoryId != story.id) return;
+            _nextStory();
+          },
+        );
+      }
+      return _buildTextStory(story);
+    } else {
+      return _buildTextStory(story);
+    }
+  }
+
+  Widget _buildTextStory(Story story) {
+    return Container(
+      color: kDarkerGrey,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Text(
+            story.textContent ?? story.caption ?? '',
+            style: GoogleFonts.inter(
+              color: kWhite,
+              fontSize: 24,
+              fontWeight: FontWeight.w500,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProgressBars() {
+    return Row(
+      children: List.generate(_currentUserStories.length, (index) {
+        return Expanded(
+          child: Container(
+            height: 2,
+            margin: const EdgeInsets.symmetric(horizontal: 2),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(1),
+            ),
+            child: FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: index == _currentStoryIndex
+                  ? _progress
+                  : index < _currentStoryIndex
+                      ? 1.0
+                      : 0.0,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: kWhite,
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              ),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
+  Widget _buildHeader(Story story, bool isMyStory) {
+    return Row(
+      children: [
+        // Avatar
+        StoryAvatar(
+          userName: story.userName,
+          avatarUrl: story.userAvatarUrl,
+          size: 32,
+        ),
+        const SizedBox(width: 10),
+        // Name and time
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                isMyStory ? 'Your story' : story.userName,
+                style: GoogleFonts.inter(
+                  color: kWhite,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                _formatTimeAgo(story.createdAt),
+                style: GoogleFonts.inter(
+                  color: Colors.white70,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+        ),
+        // Close button
+        IconButton(
+          icon: const Icon(Icons.close, color: kWhite, size: 24),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCaption(String caption) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        caption,
+        style: GoogleFonts.inter(
+          color: kWhite,
+          fontSize: 13,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMyStoryActions(Story story) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        _buildActionButton(
+          icon: Icons.visibility,
+          label: '${story.viewCount}',
+          onTap: _viewStoryViewers,
+        ),
+        _buildActionButton(
+          icon: Icons.add_circle_outline,
+          onTap: _addStory,
+        ),
+        _buildActionButton(
+          icon: Icons.delete_outline,
+          onTap: _deleteStory,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActionButton({
+    required IconData icon,
+    String? label,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: kWhite, size: 18),
+            if (label != null) ...[
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                  color: kWhite,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatTimeAgo(DateTime dateTime) {
+    final now = DateTime.now();
+    final difference = now.difference(dateTime);
+
+    if (difference.inMinutes < 1) {
+      return 'Just now';
+    } else if (difference.inHours < 1) {
+      return '${difference.inMinutes}m ago';
+    } else if (difference.inHours < 24) {
+      return '${difference.inHours}h ago';
+    } else {
+      return '${difference.inDays}d ago';
+    }
+  }
+}

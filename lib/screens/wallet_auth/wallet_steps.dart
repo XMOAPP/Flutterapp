@@ -1,0 +1,281 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
+import '../../theme.dart';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WALLET AUTH STEPS
+// ═══════════════════════════════════════════════════════════════════════════
+
+class UsernameStep extends StatelessWidget {
+  final GlobalKey<FormState> formKey;
+  final TextEditingController controller;
+  final VoidCallback onContinue;
+
+  const UsernameStep({
+    super.key,
+    required this.formKey,
+    required this.controller,
+    required this.onContinue,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Form(
+      key: formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Center(
+            child: Text(
+              'USERNAME',
+              style: GoogleFonts.inter(
+                  color: kLightGrey,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.8),
+            ),
+          ),
+          const SizedBox(height: 6),
+          TextFormField(
+            controller: controller,
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9_\-]'))
+            ],
+            cursorColor: kWhite,
+            style: GoogleFonts.inter(color: kWhite, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: 'e.g. alice',
+              hintStyle: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
+              filled: true,
+              fillColor: kDarkGrey,
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(25),
+                  borderSide: BorderSide.none),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(25),
+                  borderSide: BorderSide.none),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(25),
+                  borderSide: const BorderSide(color: kWhite, width: 1)),
+              errorBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(25),
+                  borderSide:
+                      BorderSide(color: Colors.red.withValues(alpha: 0.6))),
+              focusedErrorBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(25),
+                  borderSide:
+                      BorderSide(color: Colors.red.withValues(alpha: 0.6), width: 2)),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+            ),
+            validator: (v) {
+              if (v == null || v.trim().isEmpty) return 'Username is required';
+              if (v.trim().length < 3) return 'Min 3 characters';
+              return null;
+            },
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Only letters, numbers, _ and - allowed',
+            style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
+          ),
+          const SizedBox(height: 24),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40),
+            child: SizedBox(
+              width: double.infinity,
+              height: 40,
+              child: ElevatedButton(
+                onPressed: onContinue,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kWhite,
+                  foregroundColor: kBlack,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                  elevation: 0,
+                ),
+                child: Text(
+                  'Continue',
+                  style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ConnectWalletStep extends StatelessWidget {
+  final List<String> wallets;
+  final bool isBusy;
+  final Function(String) onConnect;
+
+  const ConnectWalletStep({
+    super.key,
+    required this.wallets,
+    required this.isBusy,
+    required this.onConnect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Center(
+          child: Text(
+            'CHOOSE WALLET',
+            style: GoogleFonts.inter(
+                color: kLightGrey,
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.8),
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (isBusy)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 32),
+              child: CircularProgressIndicator(color: kWhite),
+            ),
+          )
+        else
+          ...wallets.map((name) => WalletTile(
+                name: name,
+                onTap: () => onConnect(name),
+              )),
+      ],
+    );
+  }
+}
+
+class SignMessageStep extends StatelessWidget {
+  final String connectedAddress;
+  final String username;
+  final bool isBusy;
+  final VoidCallback onSign;
+  final String Function(String) shortAddress;
+
+  const SignMessageStep({
+    super.key,
+    required this.connectedAddress,
+    required this.username,
+    required this.isBusy,
+    required this.onSign,
+    required this.shortAddress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: kDarkGrey,
+            borderRadius: BorderRadius.circular(25),
+          ),
+          child: Center(
+            child: Text(
+              shortAddress(connectedAddress),
+              style: GoogleFonts.inter(
+                  color: kWhite,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: kDarkGrey,
+            borderRadius: BorderRadius.circular(25),
+          ),
+          child: Center(
+            child: Text(
+              username,
+              style: GoogleFonts.inter(
+                  color: kWhite,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600),
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          'Your wallet will ask you to sign a message.\nNo transaction or gas fees required.',
+          textAlign: TextAlign.center,
+          style: GoogleFonts.inter(
+              color: kLightGrey, fontSize: 12, height: 1.6),
+        ),
+        const SizedBox(height: 24),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 40),
+          child: SizedBox(
+            width: double.infinity,
+            height: 40,
+            child: ElevatedButton(
+              onPressed: isBusy ? null : onSign,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kWhite,
+                foregroundColor: kBlack,
+                disabledBackgroundColor: kWhite.withValues(alpha: 0.5),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                elevation: 0,
+              ),
+              child: isBusy
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.5, color: kBlack))
+                  : Text(
+                      'Sign & Continue',
+                      style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class WalletTile extends StatelessWidget {
+  final String name;
+  final VoidCallback? onTap;
+
+  const WalletTile({
+    super.key,
+    required this.name,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+        decoration: BoxDecoration(
+          color: kDarkGrey,
+          borderRadius: BorderRadius.circular(25),
+        ),
+        child: Center(
+          child: Text(
+            name,
+            style: GoogleFonts.inter(
+              color: kWhite,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

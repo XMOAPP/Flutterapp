@@ -1,7 +1,10 @@
 import 'dart:async';
-import 'dart:js' as js;
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+
+// Conditional import for web-only functionality
+import 'wallet_service_stub.dart'
+    if (dart.library.html) 'wallet_service_web.dart';
 
 /// Handles Web3 wallet authentication via the xmoWallet JS bridge.
 /// Supports MetaMask, Brave Wallet, Coinbase Wallet, and any EIP-1193 wallet.
@@ -19,22 +22,7 @@ class WalletService {
   /// Returns a list of wallet names available in the browser.
   List<String> detectWallets() {
     if (!kIsWeb) return [];
-    try {
-      final bridge = js.context['xmoWallet'] as js.JsObject;
-      final result = bridge.callMethod('detectWallets', []) as String;
-      // Parse JSON array of wallet names
-      return result
-          .replaceAll('[', '')
-          .replaceAll(']', '')
-          .replaceAll('"', '')
-          .split(',')
-          .map((s) => s.trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
-    } catch (e) {
-      debugPrint('WalletService.detectWallets error: $e');
-      return ['WalletConnect'];
-    }
+    return detectWalletsImpl();
   }
 
   // ── Connect wallet ─────────────────────────────────────────────────────────
@@ -43,30 +31,9 @@ class WalletService {
   /// Returns the wallet address on success.
   Future<String> connectWallet(String walletName) async {
     if (!kIsWeb) throw UnsupportedError('Wallet auth is only supported on Web.');
-
-    final completer = Completer<String>();
-    try {
-      final bridge = js.context['xmoWallet'] as js.JsObject;
-      final promise = bridge.callMethod('connectBrowserWallet', [walletName]);
-
-      js.JsObject.fromBrowserObject(promise)
-        ..callMethod('then', [
-          js.allowInterop((account) {
-            _connectedAddress = account.toString();
-            if (!completer.isCompleted) completer.complete(_connectedAddress!);
-          })
-        ])
-        ..callMethod('catch', [
-          js.allowInterop((err) {
-            if (!completer.isCompleted) {
-              completer.completeError(err.toString());
-            }
-          })
-        ]);
-    } catch (e) {
-      completer.completeError(e.toString());
-    }
-    return completer.future;
+    
+    _connectedAddress = await connectWalletImpl(walletName);
+    return _connectedAddress!;
   }
 
   // ── Sign authentication message ────────────────────────────────────────────
@@ -86,35 +53,13 @@ class WalletService {
         'Issued At: $timestamp\n\n'
         'This request will not trigger a blockchain transaction.';
 
-    final completer = Completer<String>();
-    try {
-      final bridge = js.context['xmoWallet'] as js.JsObject;
-      final promise = bridge.callMethod('signMessage', [message]);
-
-      js.JsObject.fromBrowserObject(promise)
-        ..callMethod('then', [
-          js.allowInterop((sig) {
-            if (!completer.isCompleted) completer.complete(sig.toString());
-          })
-        ])
-        ..callMethod('catch', [
-          js.allowInterop((err) {
-            if (!completer.isCompleted) completer.completeError(err.toString());
-          })
-        ]);
-    } catch (e) {
-      completer.completeError(e.toString());
-    }
-    return completer.future;
+    return await signMessageImpl(message);
   }
 
   // ── Disconnect ─────────────────────────────────────────────────────────────
 
   void disconnect() {
-    try {
-      final bridge = js.context['xmoWallet'] as js.JsObject;
-      bridge.callMethod('disconnect', []);
-    } catch (_) {}
+    disconnectImpl();
     _connectedAddress = null;
   }
 

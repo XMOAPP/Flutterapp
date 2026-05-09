@@ -35,10 +35,10 @@ class OtpService {
         onCodeSent();
       } else {
         final err = jsonDecode(response.body)['error'] ?? 'Unknown error';
-        onError('Server error: \$err');
+        onError('Server error: $err');
       }
     } catch (e) {
-      debugPrint("HTTP Error: \$e");
+      debugPrint("HTTP Error: $e");
       onError('Failed to connect to email server. Is email_server.dart running?');
     }
   }

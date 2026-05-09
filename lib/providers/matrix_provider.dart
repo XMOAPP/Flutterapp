@@ -1,11 +1,67 @@
 import 'package:flutter/material.dart';
+import 'dart:typed_data';
 import 'package:matrix/matrix.dart';
 import '../services/matrix_service.dart';
 
 enum MatrixAuthState { uninitialized, loggedOut, loggingIn, loggedIn, error }
 
-/// ChangeNotifier wrapping MatrixService.
-/// Drives auth state, phone-based OTP login, and room list.
+extension RoomXmoExtension on Room {
+  /// Checks if this room is a broadcast channel.
+  /// Uses a three-layer check for reliability across hot restarts:
+  ///   1. Persistent Hive cache (instant, always available at startup)
+  ///   2. Custom xmo.room.type state event (from sync)
+  ///   3. Power level fingerprint fallback (events_default >= 50)
+  bool get isChannel {
+    final svc = MatrixService();
+
+    final kind = MatrixService.classifyRoomKind(
+      typeContent: getState(MatrixService.roomTypeStateType)?.content,
+      powerLevelsContent: getState('m.room.power_levels')?.content,
+      isDirectChat: isDirectChat,
+    );
+    if (kind == XmoRoomKind.group) {
+      svc.cacheGroupId(id);
+      return false;
+    }
+    if (kind == XmoRoomKind.channel) {
+      svc.cacheChannelId(id);
+      return true;
+    }
+
+    return svc.isKnownChannel(id);
+  }
+
+  /// Checks if this room is a group chat.
+  /// Uses persistent cache and Matrix state first, with a conservative
+  /// non-direct fallback so newly joined groups appear before full state loads.
+  bool get isGroup {
+    final svc = MatrixService();
+
+    final kind = MatrixService.classifyRoomKind(
+      typeContent: getState(MatrixService.roomTypeStateType)?.content,
+      powerLevelsContent: getState('m.room.power_levels')?.content,
+      isDirectChat: isDirectChat,
+    );
+    if (kind == XmoRoomKind.group) {
+      svc.cacheGroupId(id);
+      return true;
+    }
+    if (kind == XmoRoomKind.channel) {
+      svc.cacheChannelId(id);
+      return false;
+    }
+
+    if (svc.isKnownChannel(id)) return false;
+    if (svc.isKnownGroup(id)) return true;
+
+    return false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// OPTIMIZED MATRIX PROVIDER
+// ═══════════════════════════════════════════════════════════════════════════
+
 class MatrixProvider extends ChangeNotifier {
   final MatrixService _svc = MatrixService();
   MatrixService get service => _svc;
@@ -20,6 +76,7 @@ class MatrixProvider extends ChangeNotifier {
   bool get isLoading => _state == MatrixAuthState.loggingIn;
   String? get userId => _svc.userId;
   String? get displayName => _svc.displayName;
+  String? get avatarUrl => _svc.avatarUrl;
 
   List<Room> get rooms => _svc.getRooms();
 
@@ -28,11 +85,12 @@ class MatrixProvider extends ChangeNotifier {
   Future<void> init() async {
     try {
       await _svc.init();
-      _state =
-          _svc.isLoggedIn ? MatrixAuthState.loggedIn : MatrixAuthState.loggedOut;
+      _state = _svc.isLoggedIn
+          ? MatrixAuthState.loggedIn
+          : MatrixAuthState.loggedOut;
       if (_svc.isLoggedIn) {
+        await _svc.refreshProfile();
         _listenSync();
-        // Start syncing immediately to receive messages
         _svc.startSync();
       }
     } catch (e) {
@@ -42,18 +100,23 @@ class MatrixProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ─── Phone-based login (primary flow) ─────────────────────────────────────
+  // ─── Phone-based login ─────────────────────────────────────────────────────
 
-  /// Call after OTP is verified. Registers or logs in via Matrix silently.
   Future<bool> loginWithPhone(String phone, String email) async {
+    if (_state == MatrixAuthState.loggingIn) {
+      return false; // Prevent duplicate calls
+    }
+
     _state = MatrixAuthState.loggingIn;
     _error = null;
     notifyListeners();
+
     try {
       await _svc.loginOrRegisterWithPhone(phone, email);
+      await _svc.refreshProfile();
       _state = MatrixAuthState.loggedIn;
       _listenSync();
-      _svc.startSync(); // Start syncing to receive messages
+      _svc.startSync();
       notifyListeners();
       return true;
     } catch (e) {
@@ -64,17 +127,21 @@ class MatrixProvider extends ChangeNotifier {
     }
   }
 
-  // ─── Direct auth (kept for admin/testing) ─────────────────────────────────
+  // ─── Direct auth ───────────────────────────────────────────────────────────
 
   Future<bool> login(String username, String password) async {
+    if (_state == MatrixAuthState.loggingIn) return false;
+
     _state = MatrixAuthState.loggingIn;
     _error = null;
     notifyListeners();
+
     try {
       await _svc.login(username, password);
+      await _svc.refreshProfile();
       _state = MatrixAuthState.loggedIn;
       _listenSync();
-      _svc.startSync(); // Start syncing to receive messages
+      _svc.startSync();
       notifyListeners();
       return true;
     } catch (e) {
@@ -86,14 +153,18 @@ class MatrixProvider extends ChangeNotifier {
   }
 
   Future<bool> register(String username, String password) async {
+    if (_state == MatrixAuthState.loggingIn) return false;
+
     _state = MatrixAuthState.loggingIn;
     _error = null;
     notifyListeners();
+
     try {
       await _svc.register(username, password);
+      await _svc.refreshProfile();
       _state = MatrixAuthState.loggedIn;
       _listenSync();
-      _svc.startSync(); // Start syncing to receive messages
+      _svc.startSync();
       notifyListeners();
       return true;
     } catch (e) {
@@ -108,6 +179,28 @@ class MatrixProvider extends ChangeNotifier {
     await _svc.logout();
     _state = MatrixAuthState.loggedOut;
     notifyListeners();
+  }
+
+  Future<bool> updateProfile({
+    required String displayName,
+    Uint8List? avatarBytes,
+    String? avatarFileName,
+  }) async {
+    try {
+      _error = null;
+      await _svc.updateProfile(
+        displayName: displayName,
+        avatarBytes: avatarBytes,
+        avatarFileName: avatarFileName ?? 'avatar.jpg',
+      );
+      await _svc.refreshProfile();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      return false;
+    }
   }
 
   // ─── Rooms ────────────────────────────────────────────────────────────────
@@ -128,7 +221,11 @@ class MatrixProvider extends ChangeNotifier {
     await _svc.sendMessage(roomId, text);
   }
 
-  /// Searches the Matrix user directory for users matching [query].
+  void refreshRooms() {
+    _svc.scanAndCacheChannels();
+    notifyListeners();
+  }
+
   Future<List<Profile>> searchUsers(String query) async {
     try {
       return await _svc.searchUsers(query);
@@ -138,10 +235,8 @@ class MatrixProvider extends ChangeNotifier {
     }
   }
 
-  /// Creates or retrieves a direct chat room with [userId] and returns its ID.
   Future<String?> startDirectChat(String userId) async {
     try {
-      // Normalize the user ID
       String normalizedUserId = userId.trim();
       if (!normalizedUserId.startsWith('@')) {
         normalizedUserId = '@$normalizedUserId';
@@ -150,72 +245,72 @@ class MatrixProvider extends ChangeNotifier {
         normalizedUserId = '$normalizedUserId:localhost';
       }
 
-      print('[startDirectChat] Looking for existing DM with $normalizedUserId');
-      print('[startDirectChat] Current rooms count: ${_svc.client.rooms.length}');
+      debugPrint(
+          '[startDirectChat] Looking for existing DM with $normalizedUserId');
+      debugPrint(
+          '[startDirectChat] Current rooms count: ${_svc.client.rooms.length}');
 
-      // Force a sync to get latest room list
       await _svc.client.oneShotSync();
-      
-      // Auto-accept any pending invites first
       await _svc.acceptAllInvites();
-      
-      // Check all existing rooms (including invited ones) for a DM with this user
+      await _svc.repairDirectChatMappings();
+
+      final existingDirectRoomId =
+          _svc.client.getDirectChatFromUserId(normalizedUserId);
+      if (existingDirectRoomId != null) {
+        debugPrint(
+            '[startDirectChat] Reusing direct room from m.direct: $existingDirectRoomId');
+        return existingDirectRoomId;
+      }
+
       for (final room in _svc.client.rooms) {
-        print('[startDirectChat] Checking room ${room.id}: membership=${room.membership}, members=${room.summary.mJoinedMemberCount}');
-        
-        // Skip if we're not in the room (banned, left, etc.)
-        if (room.membership != Membership.join && room.membership != Membership.invite) {
+        debugPrint(
+            '[startDirectChat] Checking room ${room.id}: membership=${room.membership}, members=${room.summary.mJoinedMemberCount}');
+
+        if (room.membership != Membership.join &&
+            room.membership != Membership.invite) {
           continue;
         }
-        
-        // Get all participant IDs (including invited users)
-        final participantIds = <String>[];
-        for (final user in room.getParticipants()) {
-          participantIds.add(user.id);
-        }
-        
-        // Also check invited users
-        final states = room.states[EventTypes.RoomMember];
-        if (states != null) {
-          for (final state in states.values) {
-            final membership = state.content['membership'];
-            if (membership == 'invite' || membership == 'join') {
-              final stateKey = state.stateKey;
-              if (stateKey != null && !participantIds.contains(stateKey)) {
-                participantIds.add(stateKey);
-              }
-            }
-          }
-        }
-        
-        print('[startDirectChat] All participants (including invites): $participantIds');
-        
-        // Check if this room has the target user
-        if (participantIds.contains(normalizedUserId)) {
-          print('[startDirectChat] ✅ Found existing room: ${room.id}');
-          
-          // If it's an invite, accept it
+
+        final directPeerUserId = _svc.getDirectPeerUserId(room);
+        if (directPeerUserId == normalizedUserId) {
+          debugPrint(
+              '[startDirectChat] Found existing direct room: ${room.id}');
+
           if (room.membership == Membership.invite) {
-            print('[startDirectChat] Accepting invite to room ${room.id}');
+            debugPrint('[startDirectChat] Accepting invite to room ${room.id}');
             await room.join();
           }
-          
+
+          await _svc.markRoomAsDirect(room.id, normalizedUserId);
+          return room.id;
+        }
+
+        if (_svc.looksLikeLegacyDirectRoom(room, normalizedUserId)) {
+          debugPrint(
+              '[startDirectChat] Repairing legacy direct room: ${room.id}');
+
+          if (room.membership == Membership.invite) {
+            debugPrint('[startDirectChat] Accepting invite to room ${room.id}');
+            await room.join();
+          }
+
+          await _svc.markRoomAsDirect(room.id, normalizedUserId);
           return room.id;
         }
       }
-      
-      print('[startDirectChat] ❌ No existing DM found, creating new room with $normalizedUserId');
-      // No existing DM — create one
+
+      debugPrint(
+          '[startDirectChat] No existing DM found, creating new room with $normalizedUserId');
       final roomId = await _svc.createDirectRoom(normalizedUserId);
-      
-      // Wait a bit for the room to sync
+
       await Future.delayed(const Duration(milliseconds: 500));
       await _svc.client.oneShotSync();
-      
+      await _svc.repairDirectChatMappings();
+
       notifyListeners();
       return roomId;
     } catch (e) {
-      print('[startDirectChat] ❌ Error: $e');
+      debugPrint('[startDirectChat] Error: $e');
       _error = e.toString();
       notifyListeners();
       return null;
@@ -225,9 +320,12 @@ class MatrixProvider extends ChangeNotifier {
   // ─── Private ──────────────────────────────────────────────────────────────
 
   void _listenSync() {
-    _svc.onRoomsUpdate.listen((_) {
-      // Auto-accept any pending invites
-      _svc.acceptAllInvites();
+    _svc.onRoomsUpdate.listen((_) async {
+      await _svc.acceptAllInvites();
+      await _svc.repairDirectChatMappings();
+      // Scan every sync cycle: retroactively discover & cache channels
+      // whose state events have now arrived (covers joined rooms from other devices)
+      _svc.scanAndCacheChannels();
       notifyListeners();
     });
   }

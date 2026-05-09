@@ -1,14 +1,23 @@
 import 'dart:async';
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import 'package:provider/provider.dart';
 import '../providers/matrix_provider.dart';
-import '../services/matrix_service.dart';
+import '../models/group_models.dart';
+import '../services/group_service.dart';
 import '../theme.dart';
 import 'matrix_chat_screen.dart';
+import 'user_search/search_bar_widget.dart';
+import 'user_search/user_tile.dart';
+import 'user_search/search_states.dart';
 
-/// Search for users by username and start a direct chat.
+// ═══════════════════════════════════════════════════════════════════════════
+// USER SEARCH SCREEN - Refactored
+// ═══════════════════════════════════════════════════════════════════════════
+
 class UserSearchScreen extends StatefulWidget {
   const UserSearchScreen({super.key});
 
@@ -46,20 +55,18 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
   }
 
   Future<void> _performSearch(String query) async {
+    if (!mounted) return;
+
     setState(() {
       _searching = true;
       _error = null;
     });
-    final provider = context.read<MatrixProvider>();
-    
-    // First try: Search user directory
-    final results = await provider.searchUsers(query);
 
-    // Filter out the current user from results
+    final provider = context.read<MatrixProvider>();
+    final results = await provider.searchUsers(query);
     final myId = provider.userId;
     final filtered = results.where((p) => p.userId != myId).toList();
 
-    // If directory search found results, show them
     if (filtered.isNotEmpty) {
       if (mounted) {
         setState(() {
@@ -70,8 +77,6 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
       return;
     }
 
-    // Second try: Treat query as a direct Matrix ID
-    // Normalize the Matrix ID
     String matrixId = query.trim();
     if (!matrixId.startsWith('@')) {
       matrixId = '@$matrixId';
@@ -80,10 +85,10 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
       matrixId = '$matrixId:localhost';
     }
 
-    // Try to get user profile directly
     try {
-      final profile = await provider.service.client.getProfileFromUserId(matrixId);
-      
+      final profile =
+          await provider.service.client.getProfileFromUserId(matrixId);
+
       if (mounted && profile.userId != myId) {
         setState(() {
           _results = [profile];
@@ -92,16 +97,15 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
         return;
       }
     } catch (e) {
-      // User doesn't exist or error occurred
       debugPrint('Direct Matrix ID lookup failed: $e');
     }
 
-    // No results from either method
     if (mounted) {
       setState(() {
         _results = [];
         _searching = false;
-        _error = 'No user found for "$query"\n\nTry entering the exact username (e.g., "kiran" or "kiranpeter")';
+        _error =
+            'No user found for "$query"\n\nTry entering the exact username (e.g., "kiran" or "kiranpeter")';
       });
     }
   }
@@ -132,6 +136,348 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
     }
   }
 
+  Future<Room?> _waitForCreatedRoom(
+    MatrixProvider provider,
+    String roomId,
+  ) async {
+    final delays = <Duration>[
+      Duration.zero,
+      const Duration(milliseconds: 250),
+      const Duration(milliseconds: 500),
+      const Duration(milliseconds: 900),
+      const Duration(milliseconds: 1400),
+    ];
+
+    for (final delay in delays) {
+      if (delay != Duration.zero) {
+        await Future.delayed(delay);
+      }
+
+      final room = provider.service.getRoomById(roomId);
+      if (room != null) return room;
+
+      try {
+        await provider.service.client.oneShotSync();
+      } catch (e) {
+        debugPrint(
+            '[RoomOpen] oneShotSync failed while waiting for $roomId: $e');
+      }
+    }
+
+    return provider.service.getRoomById(roomId);
+  }
+
+  Future<Room?> _waitForCreatedRoomByName(
+    MatrixProvider provider,
+    String roomName,
+    Set<String> existingRoomIds,
+  ) async {
+    final matrixService = provider.service;
+
+    final delays = <Duration>[
+      Duration.zero,
+      const Duration(milliseconds: 300),
+      const Duration(milliseconds: 700),
+      const Duration(milliseconds: 1200),
+      const Duration(milliseconds: 1800),
+    ];
+
+    for (final delay in delays) {
+      if (delay != Duration.zero) {
+        await Future.delayed(delay);
+      }
+
+      final matches = provider.rooms.where((room) {
+        if (existingRoomIds.contains(room.id)) return false;
+        if (room.membership != Membership.join) return false;
+        return matrixService.getResolvedDisplayName(room).trim() == roomName;
+      }).toList();
+      if (matches.isNotEmpty) return matches.first;
+
+      try {
+        await provider.service.client.oneShotSync();
+      } catch (e) {
+        debugPrint(
+            '[RoomOpen] oneShotSync failed while finding "$roomName": $e');
+      }
+    }
+
+    final matches = provider.rooms.where((room) {
+      if (existingRoomIds.contains(room.id)) return false;
+      if (room.membership != Membership.join) return false;
+      return matrixService.getResolvedDisplayName(room).trim() == roomName;
+    }).toList();
+    return matches.isNotEmpty ? matches.first : null;
+  }
+
+  Future<void> _openCreatedRoom(MatrixProvider provider, String roomId) async {
+    final room = await _waitForCreatedRoom(provider, roomId);
+    provider.refreshRooms();
+
+    if (!mounted) return;
+    setState(() => _startingChat = false);
+
+    if (room != null) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => MatrixChatScreen(
+            room: room,
+            matrixProvider: provider,
+          ),
+        ),
+      );
+      return;
+    }
+
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Created successfully. It will appear on Home shortly.'),
+        backgroundColor: kLimeGreen,
+      ),
+    );
+  }
+
+  void _showCreateChannelDialog() {
+    final nameCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: kDarkerGrey,
+        title: Text('New Channel', style: GoogleFonts.inter(color: kWhite)),
+        content: TextField(
+          controller: nameCtrl,
+          style: const TextStyle(color: kWhite),
+          decoration: const InputDecoration(
+            hintText: 'Channel Name',
+            hintStyle: TextStyle(color: Colors.white54),
+            enabledBorder:
+                UnderlineInputBorder(borderSide: BorderSide(color: kLimeGreen)),
+            focusedBorder:
+                UnderlineInputBorder(borderSide: BorderSide(color: kLimeGreen)),
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child:
+                const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () async {
+              if (nameCtrl.text.trim().isEmpty) return;
+              Navigator.pop(ctx);
+
+              setState(() => _startingChat = true);
+              final provider = context.read<MatrixProvider>();
+              try {
+                final roomId = await provider.service.createChannel(
+                  name: nameCtrl.text.trim(),
+                  isPublic: true,
+                );
+                await _openCreatedRoom(provider, roomId);
+              } catch (e) {
+                if (!mounted) return;
+                setState(() {
+                  _startingChat = false;
+                  _error = 'Failed to create channel: $e';
+                });
+              }
+            },
+            child: const Text('Create', style: TextStyle(color: kLimeGreen)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showCreateGroupDialog() {
+    final nameCtrl = TextEditingController();
+    final descCtrl = TextEditingController();
+    GroupType groupType = GroupType.private;
+    JoinRule joinRule = JoinRule.invite;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: kDarkerGrey,
+          title: Text('New Group', style: GoogleFonts.inter(color: kWhite)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  style: const TextStyle(color: kWhite),
+                  decoration: const InputDecoration(
+                    labelText: 'Group Name',
+                    labelStyle: TextStyle(color: kLightGrey),
+                    hintText: 'Enter group name',
+                    hintStyle: TextStyle(color: Colors.white54),
+                    enabledBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: kLimeGreen)),
+                    focusedBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: kLimeGreen)),
+                  ),
+                  autofocus: true,
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: descCtrl,
+                  style: const TextStyle(color: kWhite),
+                  decoration: const InputDecoration(
+                    labelText: 'Description (Optional)',
+                    labelStyle: TextStyle(color: kLightGrey),
+                    hintText: 'What is this group about?',
+                    hintStyle: TextStyle(color: Colors.white54),
+                    enabledBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: kLimeGreen)),
+                    focusedBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: kLimeGreen)),
+                  ),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 20),
+                Text('Group Type',
+                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 12)),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: RadioListTile<GroupType>(
+                        title: const Text('Private',
+                            style: TextStyle(color: kWhite, fontSize: 14)),
+                        value: GroupType.private,
+                        groupValue: groupType,
+                        activeColor: kLimeGreen,
+                        contentPadding: EdgeInsets.zero,
+                        onChanged: (value) {
+                          setDialogState(() => groupType = value!);
+                        },
+                      ),
+                    ),
+                    Expanded(
+                      child: RadioListTile<GroupType>(
+                        title: const Text('Public',
+                            style: TextStyle(color: kWhite, fontSize: 14)),
+                        value: GroupType.public,
+                        groupValue: groupType,
+                        activeColor: kLimeGreen,
+                        contentPadding: EdgeInsets.zero,
+                        onChanged: (value) {
+                          setDialogState(() => groupType = value!);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text('Who Can Join?',
+                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 12)),
+                const SizedBox(height: 8),
+                RadioListTile<JoinRule>(
+                  title: const Text('Invite Only',
+                      style: TextStyle(color: kWhite, fontSize: 14)),
+                  value: JoinRule.invite,
+                  groupValue: joinRule,
+                  activeColor: kLimeGreen,
+                  contentPadding: EdgeInsets.zero,
+                  onChanged: (value) {
+                    setDialogState(() => joinRule = value!);
+                  },
+                ),
+                RadioListTile<JoinRule>(
+                  title: const Text('Open',
+                      style: TextStyle(color: kWhite, fontSize: 14)),
+                  value: JoinRule.open,
+                  groupValue: joinRule,
+                  activeColor: kLimeGreen,
+                  contentPadding: EdgeInsets.zero,
+                  onChanged: (value) {
+                    setDialogState(() => joinRule = value!);
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child:
+                  const Text('Cancel', style: TextStyle(color: Colors.white54)),
+            ),
+            TextButton(
+              onPressed: () async {
+                if (nameCtrl.text.trim().isEmpty) return;
+                Navigator.pop(ctx);
+
+                setState(() => _startingChat = true);
+                final matrixProvider = context.read<MatrixProvider>();
+                final navigator = Navigator.of(context);
+                final groupName = nameCtrl.text.trim();
+                final groupDescription = descCtrl.text.trim();
+                final existingRoomIds =
+                    matrixProvider.rooms.map((room) => room.id).toSet();
+
+                String? roomId;
+                try {
+                  debugPrint('[GroupCreation] Starting group creation...');
+                  // Use GroupService directly (same pattern as channel uses MatrixService directly)
+                  final groupService = GroupService(matrixProvider.service);
+                  roomId = await groupService.createGroup(
+                    name: groupName,
+                    description:
+                        groupDescription.isEmpty ? null : groupDescription,
+                    type: groupType,
+                    joinRule: joinRule,
+                  );
+                  debugPrint(
+                      '[GroupCreation] Group created with roomId: $roomId');
+                  await _openCreatedRoom(matrixProvider, roomId);
+                } catch (e) {
+                  debugPrint('[GroupCreation] Error: $e');
+                  if (!mounted) return;
+                  if (roomId != null) {
+                    await _openCreatedRoom(matrixProvider, roomId);
+                    return;
+                  }
+                  final room = await _waitForCreatedRoomByName(
+                    matrixProvider,
+                    groupName,
+                    existingRoomIds,
+                  );
+                  if (!mounted) return;
+                  if (room != null) {
+                    matrixProvider.refreshRooms();
+                    setState(() => _startingChat = false);
+                    navigator.pushReplacement(
+                      MaterialPageRoute(
+                        builder: (_) => MatrixChatScreen(
+                          room: room,
+                          matrixProvider: matrixProvider,
+                        ),
+                      ),
+                    );
+                    return;
+                  }
+                  setState(() {
+                    _startingChat = false;
+                    _error = 'Failed to create group: $e';
+                  });
+                }
+              },
+              child: const Text('Create', style: TextStyle(color: kLimeGreen)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -146,253 +492,82 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
         title: Text(
           'New Chat',
           style: GoogleFonts.inter(
-              color: kWhite, fontSize: 18, fontWeight: FontWeight.w600),
+            color: kWhite,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
       body: Column(
         children: [
-          // ── Search bar ──────────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            child: Container(
-              decoration: BoxDecoration(
-                color: kDarkGrey,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.06)),
-              ),
-              child: TextField(
-                controller: _searchCtrl,
-                autofocus: true,
-                style: GoogleFonts.inter(color: kWhite, fontSize: 14),
-                decoration: InputDecoration(
-                  hintText: 'Search by username...',
-                  hintStyle: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
-                  prefixIcon: const Icon(Icons.search, color: kLightGrey, size: 20),
-                  suffixIcon: _searchCtrl.text.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.close, color: kLightGrey, size: 18),
-                          onPressed: () {
-                            _searchCtrl.clear();
-                            setState(() {
-                              _results = [];
-                              _error = null;
-                            });
-                          },
-                        )
-                      : null,
-                  border: InputBorder.none,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                ),
-                onChanged: _onSearchChanged,
-              ),
-            ),
+          UserSearchBar(
+            controller: _searchCtrl,
+            onChanged: _onSearchChanged,
+            onClear: () {
+              _searchCtrl.clear();
+              setState(() {
+                _results = [];
+                _error = null;
+              });
+            },
           ),
-
-          // ── Loading / starting chat overlay ──────────────────────────────
           if (_startingChat)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(
-                child: Column(
-                  children: [
-                    CircularProgressIndicator(color: kBlue),
-                    SizedBox(height: 12),
-                    Text('Starting chat...',
-                        style: TextStyle(color: kLightGrey, fontSize: 13)),
-                  ],
-                ),
-              ),
-            ),
-
-          // ── Search indicator ─────────────────────────────────────────────
-          if (_searching && !_startingChat)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Center(
-                child: CircularProgressIndicator(color: kBlue),
-              ),
-            ),
-
-          // ── Error / empty state ──────────────────────────────────────────
+            const LoadingIndicator(message: 'Starting chat...'),
+          if (_searching && !_startingChat) const LoadingIndicator(),
           if (_error != null && !_searching && !_startingChat)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-              child: Center(
-                child: Column(
-                  children: [
-                    const Icon(Icons.person_search_outlined,
-                        color: kMediumGrey, size: 48),
-                    const SizedBox(height: 12),
-                    Text(
-                      _error!,
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.inter(color: kLightGrey, fontSize: 13, height: 1.5),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-          // ── Empty initial state ──────────────────────────────────────────
+            ErrorState(error: _error!),
           if (_results.isEmpty &&
               !_searching &&
               !_startingChat &&
               _error == null &&
               _searchCtrl.text.isEmpty)
             Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.people_outline,
-                        color: kBlue.withValues(alpha: 0.3), size: 64),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Search for a user to start chatting',
-                      style: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
+              child: ListView(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                children: [
+                  ListTile(
+                    leading: const CircleAvatar(
+                      backgroundColor: kDarkGrey,
+                      child: Icon(Icons.campaign_outlined, color: kLimeGreen),
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Type a username or Matrix ID',
+                    title: Text(
+                      'New Channel',
                       style: GoogleFonts.inter(
-                          color: kMediumGrey, fontSize: 12),
+                          color: kWhite, fontWeight: FontWeight.w600),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Examples: kiran, @kiran:localhost',
+                    onTap: () {
+                      _showCreateChannelDialog();
+                    },
+                  ),
+                  ListTile(
+                    leading: const CircleAvatar(
+                      backgroundColor: kDarkGrey,
+                      child: Icon(Icons.group_add_outlined, color: kLimeGreen),
+                    ),
+                    title: Text(
+                      'New Group',
                       style: GoogleFonts.inter(
-                          color: kMediumGrey, fontSize: 11),
+                          color: kWhite, fontWeight: FontWeight.w600),
                     ),
-                  ],
-                ),
+                    onTap: _showCreateGroupDialog,
+                  ),
+                ],
               ),
             ),
-
-          // ── Results ─────────────────────────────────────────────────────
           if (_results.isNotEmpty && !_startingChat)
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 itemCount: _results.length,
-                itemBuilder: (_, i) => _UserTile(
+                itemBuilder: (_, i) => UserTile(
+                  key: ValueKey(_results[i].userId),
                   profile: _results[i],
                   onTap: () => _startChat(_results[i]),
                 ),
               ),
             ),
         ],
-      ),
-    );
-  }
-}
-
-class _UserTile extends StatefulWidget {
-  final Profile profile;
-  final VoidCallback onTap;
-
-  const _UserTile({required this.profile, required this.onTap});
-
-  @override
-  State<_UserTile> createState() => _UserTileState();
-}
-
-class _UserTileState extends State<_UserTile> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final cleanUsername = MatrixService.cleanName(widget.profile.userId);
-    final displayName = widget.profile.displayName;
-    final hasDisplayName =
-        displayName != null && displayName.isNotEmpty && displayName != cleanUsername;
-
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          margin: const EdgeInsets.symmetric(vertical: 2),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            color: _hovered ? kDarkGrey : Colors.transparent,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Row(
-            children: [
-              // Avatar
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      kBlue.withValues(alpha: 0.8),
-                      kBlue,
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  shape: BoxShape.circle,
-                ),
-                child: Center(
-                  child: Text(
-                    cleanUsername.isNotEmpty
-                        ? cleanUsername[0].toUpperCase()
-                        : '?',
-                    style: GoogleFonts.inter(
-                        color: kBlack,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 14),
-
-              // Name & username
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      hasDisplayName ? displayName : cleanUsername,
-                      style: GoogleFonts.inter(
-                        color: kWhite,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    if (hasDisplayName)
-                      Text(
-                        '@$cleanUsername',
-                        style: GoogleFonts.inter(
-                            color: kLightGrey, fontSize: 12),
-                      ),
-                  ],
-                ),
-              ),
-
-              // Chat icon
-              AnimatedOpacity(
-                duration: const Duration(milliseconds: 150),
-                opacity: _hovered ? 1.0 : 0.4,
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: kBlue.withValues(alpha: _hovered ? 0.2 : 0.08),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.chat_bubble_outline,
-                      color: kBlue, size: 16),
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
