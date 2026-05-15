@@ -130,7 +130,20 @@ class StoryRing extends StatelessWidget {
     }
 
     final contentSize = size - 9;
-    if (story.mediaType == StoryMediaType.image && story.mediaUrl != null) {
+    if (_isVideoStory(story)) {
+      return ClipOval(
+        child: StoryVideoThumbnail(
+          story: story,
+          fallback: storyVideoFallback(
+            width: contentSize,
+            height: contentSize,
+          ),
+          playIcon: const SizedBox.shrink(),
+        ),
+      );
+    }
+
+    if (_isImageStory(story)) {
       return Consumer<MatrixProvider>(
         builder: (context, matrixProvider, _) {
           final httpUrl = matrixProvider.service.getHttpUrl(
@@ -155,24 +168,23 @@ class StoryRing extends StatelessWidget {
       );
     }
 
-    if (story.mediaType == StoryMediaType.video && story.mediaUrl != null) {
-      return ClipOval(
-        child: StoryVideoThumbnail(
-          story: story,
-          fallback: storyVideoFallback(
-            width: contentSize,
-            height: contentSize,
-          ),
-          playIcon: Icon(
-            Icons.play_circle_fill_rounded,
-            color: kWhite,
-            size: contentSize * 0.42,
-          ),
-        ),
-      );
-    }
-
     return _buildStoryTextFallback(contentSize, story);
+  }
+
+  bool _isVideoStory(Story story) {
+    final mimeType = story.mediaMimeType?.toLowerCase() ?? '';
+    return story.mediaUrl != null &&
+        (story.mediaType == StoryMediaType.video ||
+            mimeType.startsWith('video/') ||
+            story.thumbnailUrl != null);
+  }
+
+  bool _isImageStory(Story story) {
+    final mimeType = story.mediaMimeType?.toLowerCase() ?? '';
+    return story.mediaUrl != null &&
+        story.mediaType == StoryMediaType.image &&
+        !mimeType.startsWith('video/') &&
+        story.thumbnailUrl == null;
   }
 
   Widget _buildStoryTextFallback(double contentSize, Story story) {

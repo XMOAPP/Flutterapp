@@ -27,21 +27,16 @@ class PinnedMessagesBanner extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: const BoxDecoration(
-          color: kDarkerGrey,
-          border: Border(
-            bottom: BorderSide(color: kMediumGrey, width: 1),
-          ),
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+        decoration: const BoxDecoration(color: kDarkerGrey),
         child: Row(
           children: [
             const Icon(
               Icons.push_pin,
               color: kLimeGreen,
-              size: 20,
+              size: 16,
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 9),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -51,16 +46,15 @@ class PinnedMessagesBanner extends StatelessWidget {
                     count > 1 ? '$count Pinned Messages' : 'Pinned Message',
                     style: GoogleFonts.inter(
                       color: kLimeGreen,
-                      fontSize: 12,
+                      fontSize: 10.5,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const SizedBox(height: 2),
                   Text(
                     '$senderName: $messagePreview',
                     style: GoogleFonts.inter(
                       color: kLightGrey,
-                      fontSize: 13,
+                      fontSize: 11.5,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -71,7 +65,7 @@ class PinnedMessagesBanner extends StatelessWidget {
             const Icon(
               Icons.chevron_right,
               color: kLightGrey,
-              size: 20,
+              size: 16,
             ),
           ],
         ),

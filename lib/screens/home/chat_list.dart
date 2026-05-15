@@ -3,7 +3,6 @@ import 'package:matrix/matrix.dart';
 import 'package:provider/provider.dart';
 import '../../providers/chat_filter_provider.dart';
 import '../../providers/matrix_provider.dart';
-import '../../services/app_settings_service.dart';
 import 'matrix_room_tile.dart';
 
 /// Main chat list body with filtering and search - Matrix only
@@ -12,13 +11,7 @@ class ChatList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<AppSettings>(
-      future: AppSettingsService().load(),
-      builder: (context, settingsSnapshot) {
-        final showUnreadBadge =
-            settingsSnapshot.data?.notificationsEnabled ?? true;
-
-        return Selector2<ChatFilterProvider, MatrixProvider, ChatListData>(
+    return Selector2<ChatFilterProvider, MatrixProvider, ChatListData>(
       selector: (_, filterProvider, matrixProvider) {
         final matrixService = matrixProvider.service;
         return ChatListData(
@@ -123,12 +116,9 @@ class ChatList extends StatelessWidget {
             return MatrixRoomTile(
               key: ValueKey(room.id),
               room: room,
-              showUnreadBadge: showUnreadBadge,
             );
           },
         );
-      },
-    );
       },
     );
   }

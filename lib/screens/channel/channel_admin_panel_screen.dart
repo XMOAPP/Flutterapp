@@ -357,10 +357,6 @@ class _ChannelAdminPanelScreenState extends State<ChannelAdminPanelScreen> {
         subscriber.displayName,
         style: GoogleFonts.inter(color: kWhite, fontSize: 13),
       ),
-      subtitle: Text(
-        subscriber.userId,
-        style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
-      ),
       trailing: IconButton(
         icon: const Icon(Icons.add_moderator, color: kLimeGreen, size: 20),
         onPressed: () => _showPromoteDialog(subscriber),

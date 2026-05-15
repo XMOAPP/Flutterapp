@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../providers/matrix_provider.dart';
 import '../models/group_models.dart';
 import '../services/group_service.dart';
+import '../services/matrix_service.dart';
 import '../theme.dart';
 import 'matrix_chat_screen.dart';
 import 'user_search/search_bar_widget.dart';
@@ -82,7 +83,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
       matrixId = '@$matrixId';
     }
     if (!matrixId.contains(':')) {
-      matrixId = '$matrixId:localhost';
+      matrixId = '$matrixId:${MatrixService.matrixServerName}';
     }
 
     try {

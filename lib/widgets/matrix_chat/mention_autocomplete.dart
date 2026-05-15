@@ -78,15 +78,6 @@ class MentionAutocomplete extends StatelessWidget {
           fontSize: 14,
         ),
       ),
-      subtitle: Text(
-        member.userId,
-        style: GoogleFonts.inter(
-          color: kLightGrey,
-          fontSize: 11,
-        ),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
       trailing: _buildRoleBadge(member.role),
       onTap: () => onMemberSelected(member),
     );

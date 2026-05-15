@@ -1,0 +1,239 @@
+// ignore_for_file: experimental_member_use
+
+import 'dart:async';
+import 'dart:typed_data';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:matrix/matrix.dart';
+import '../../../theme.dart';
+import 'voice_waveform.dart';
+
+class AudioMessageBubble extends StatefulWidget {
+  final Event event;
+  final bool isMe;
+  final String time;
+  final Future<MatrixFile> Function(Event) downloadAttachment;
+  final Widget Function(Event) buildMessageStatus;
+
+  const AudioMessageBubble({
+    super.key,
+    required this.event,
+    required this.isMe,
+    required this.time,
+    required this.downloadAttachment,
+    required this.buildMessageStatus,
+  });
+
+  @override
+  State<AudioMessageBubble> createState() => _AudioMessageBubbleState();
+}
+
+class _AudioMessageBubbleState extends State<AudioMessageBubble> {
+  final AudioPlayer _player = AudioPlayer();
+  bool _loading = false;
+  bool _prepared = false;
+  StreamSubscription<PlayerState>? _playerStateSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _playerStateSub = _player.playerStateStream.listen((state) {
+      if (state.processingState == ProcessingState.completed) {
+        _player.seek(Duration.zero);
+        _player.pause();
+      }
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _playerStateSub?.cancel();
+    _player.dispose();
+    super.dispose();
+  }
+
+  Future<void> _togglePlayback() async {
+    if (_player.playing) {
+      await _player.pause();
+      return;
+    }
+
+    if (!_prepared) {
+      setState(() => _loading = true);
+      try {
+        final matrixFile = await widget.downloadAttachment(widget.event);
+        await _player.setAudioSource(
+          _BytesAudioSource(
+            matrixFile.bytes,
+            contentType: _mimeType,
+          ),
+        );
+        _prepared = true;
+      } finally {
+        if (mounted) setState(() => _loading = false);
+      }
+    }
+
+    await _player.play();
+  }
+
+  String get _mimeType {
+    final info = widget.event.content['info'];
+    if (info is Map && info['mimetype'] is String) {
+      return info['mimetype'] as String;
+    }
+    return 'audio/mp4';
+  }
+
+  Duration get _eventDuration {
+    final info = widget.event.content['info'];
+    final raw = info is Map ? info['duration'] : null;
+    final millis = raw is num ? raw.toInt() : int.tryParse(raw?.toString() ?? '');
+    return Duration(milliseconds: millis ?? 0);
+  }
+
+  String _format(Duration duration) {
+    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final duration = _player.duration ?? _eventDuration;
+    final isPlaying = _player.playing;
+    final accent = widget.isMe ? kLimeGreen : const Color(0xFF3B82F6);
+    final inactive = widget.isMe
+        ? kLimeGreen.withValues(alpha: 0.25)
+        : Colors.white.withValues(alpha: 0.22);
+
+    return StreamBuilder<Duration>(
+      stream: _player.positionStream,
+      initialData: _player.position,
+      builder: (context, snapshot) {
+        final position = snapshot.data ?? Duration.zero;
+        final progress = duration.inMilliseconds <= 0
+            ? 0.0
+            : position.inMilliseconds / duration.inMilliseconds;
+
+        return ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 280, maxWidth: 330),
+          child: SizedBox(
+            height: 58,
+            child: Stack(
+              children: [
+                Align(
+                  alignment: Alignment.topCenter,
+                  child: SizedBox(
+                    height: 48,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        GestureDetector(
+                          onTap: _loading ? null : _togglePlayback,
+                          child: Container(
+                            width: 42,
+                            height: 42,
+                            decoration: BoxDecoration(
+                              color: accent,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: accent.withValues(alpha: 0.25),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: _loading
+                                ? const Padding(
+                                    padding: EdgeInsets.all(13),
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: kBlack,
+                                    ),
+                                  )
+                                : Icon(
+                                    isPlaying
+                                        ? Icons.pause_rounded
+                                        : Icons.play_arrow_rounded,
+                                    color: widget.isMe ? kBlack : kWhite,
+                                    size: 27,
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: VoiceWaveform(
+                            color: accent,
+                            inactiveColor: inactive,
+                            progress: progress,
+                            height: 30,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Row(
+                    children: [
+                      const SizedBox(width: 54),
+                      Text(
+                        _format(_prepared || isPlaying ? position : duration),
+                        style: GoogleFonts.inter(
+                          color: widget.isMe
+                              ? kLimeGreen.withValues(alpha: 0.75)
+                              : kLightGrey,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        widget.time,
+                        style: GoogleFonts.inter(
+                          color: widget.isMe
+                              ? kLimeGreen.withValues(alpha: 0.6)
+                              : kLightGrey,
+                          fontSize: 10,
+                        ),
+                      ),
+                      if (widget.isMe) ...[
+                        const SizedBox(width: 4),
+                        widget.buildMessageStatus(widget.event),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _BytesAudioSource extends StreamAudioSource {
+  final Uint8List bytes;
+  final String contentType;
+
+  _BytesAudioSource(this.bytes, {required this.contentType});
+
+  @override
+  Future<StreamAudioResponse> request([int? start, int? end]) async {
+    start ??= 0;
+    end ??= bytes.length;
+    return StreamAudioResponse(
+      sourceLength: bytes.length,
+      contentLength: end - start,
+      offset: start,
+      stream: Stream.value(bytes.sublist(start, end)),
+      contentType: contentType,
+    );
+  }
+}

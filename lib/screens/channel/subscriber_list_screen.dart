@@ -225,10 +225,6 @@ class _SubscriberListScreenState extends State<SubscriberListScreen> {
             ),
         ],
       ),
-      subtitle: Text(
-        subscriber.userId,
-        style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
-      ),
       trailing: _isAdmin && !isMe && !subscriber.isAdmin
           ? IconButton(
               icon: const Icon(Icons.block, color: Colors.red, size: 18),

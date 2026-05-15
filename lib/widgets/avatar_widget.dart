@@ -24,12 +24,6 @@ class AvatarWidget extends StatelessWidget {
     this.isGroup = false,
   });
 
-  Color _parseColor(String? hex) {
-    if (hex == null) return kMediumGrey;
-    final h = hex.replaceAll('#', '');
-    return Color(int.parse('FF$h', radix: 16));
-  }
-
   @override
   Widget build(BuildContext context) {
     // Use RepaintBoundary to isolate repaints
@@ -45,8 +39,6 @@ class AvatarWidget extends StatelessWidget {
   }
 
   Widget _buildAvatar() {
-    final color = _parseColor(colorHex);
-    
     // If there's an image URL, use cached network image
     if (imageUrl != null) {
       return Container(
@@ -66,15 +58,15 @@ class AvatarWidget extends StatelessWidget {
     return Container(
       width: size,
       height: size,
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         shape: BoxShape.circle,
-        color: color,
+        color: kDarkGrey,
       ),
       child: Center(
         child: Text(
           text.length > 2 ? text.substring(0, 2) : text,
           style: GoogleFonts.inter(
-            color: kWhite,
+            color: kLimeGreen,
             fontSize: size * 0.34,
             fontWeight: FontWeight.bold,
           ),

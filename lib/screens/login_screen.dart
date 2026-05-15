@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import '../config/app_config.dart';
 import '../providers/matrix_provider.dart';
 import '../services/otp_service.dart';
 import '../theme.dart';
@@ -76,6 +77,19 @@ class _LoginScreenState extends State<LoginScreen>
         ),
       );
 
+      if (!AppConfig.requireEmailOtp) {
+        final ok = await provider.register(username, password);
+        if (!mounted) return;
+        Navigator.pop(context);
+
+        if (ok) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const HomeScreen()),
+          );
+        }
+        return;
+      }
+
       await OtpService().sendEmailOtp(
         email: email,
         onCodeSent: () {
@@ -122,46 +136,60 @@ class _LoginScreenState extends State<LoginScreen>
       body: FadeTransition(
         opacity: _fadeAnim,
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
+          child: SingleChildScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: EdgeInsets.fromLTRB(
+              28,
+              16,
+              28,
+              16 + MediaQuery.viewInsetsOf(context).bottom,
+            ),
             child: Form(
               key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const Spacer(),
-                  _buildTitle(),
-                  const SizedBox(height: 20),
-                  UsernameField(controller: _usernameCtrl),
-                  const SizedBox(height: 12),
-                  if (_isRegisterMode) ...[
-                    EmailField(controller: _emailCtrl),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: MediaQuery.sizeOf(context).height -
+                      MediaQuery.paddingOf(context).vertical -
+                      32,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    SizedBox(height: _isRegisterMode ? 12 : 80),
+                    _buildTitle(),
+                    const SizedBox(height: 20),
+                    UsernameField(controller: _usernameCtrl),
                     const SizedBox(height: 12),
-                    PhoneField(controller: _phoneCtrl),
-                    const SizedBox(height: 12),
-                  ],
-                  PasswordField(controller: _passwordCtrl),
-                  if (_isRegisterMode) ...[
-                    const SizedBox(height: 12),
-                    ConfirmPasswordField(
-                      controller: _confirmCtrl,
-                      passwordController: _passwordCtrl,
+                    if (_isRegisterMode) ...[
+                      EmailField(controller: _emailCtrl),
+                      const SizedBox(height: 12),
+                      PhoneField(controller: _phoneCtrl),
+                      const SizedBox(height: 12),
+                    ],
+                    PasswordField(controller: _passwordCtrl),
+                    if (_isRegisterMode) ...[
+                      const SizedBox(height: 12),
+                      ConfirmPasswordField(
+                        controller: _confirmCtrl,
+                        passwordController: _passwordCtrl,
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    LoginErrorDisplay(isRegisterMode: _isRegisterMode),
+                    const SizedBox(height: 24),
+                    SubmitButton(
+                      isRegisterMode: _isRegisterMode,
+                      onPressed: _submit,
                     ),
+                    const SizedBox(height: 12),
+                    ToggleAuthModeButton(
+                      isRegisterMode: _isRegisterMode,
+                      onToggle: () =>
+                          setState(() => _isRegisterMode = !_isRegisterMode),
+                    ),
+                    const SizedBox(height: 12),
                   ],
-                  const SizedBox(height: 8),
-                  LoginErrorDisplay(isRegisterMode: _isRegisterMode),
-                  const Spacer(),
-                  SubmitButton(
-                    isRegisterMode: _isRegisterMode,
-                    onPressed: _submit,
-                  ),
-                  const SizedBox(height: 12),
-                  ToggleAuthModeButton(
-                    isRegisterMode: _isRegisterMode,
-                    onToggle: () => setState(() => _isRegisterMode = !_isRegisterMode),
-                  ),
-                  const SizedBox(height: 12),
-                ],
+                ),
               ),
             ),
           ),

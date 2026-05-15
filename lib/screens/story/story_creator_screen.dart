@@ -11,6 +11,9 @@ import '../../theme.dart';
 import '../../models/story_models.dart';
 import '../../providers/story_provider.dart';
 import '../../widgets/story/story_video_player.dart';
+import '../camera_capture_screen.dart';
+import '../web_video_view_stub.dart' if (dart.library.js_interop) '../web_video_view.dart'
+    as web_video;
 
 /// Story Creator Screen - Create image/video/text stories
 class StoryCreatorScreen extends StatefulWidget {
@@ -32,6 +35,14 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
   bool _uploading = false;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _recoverLostStoryPhoto();
+    });
+  }
+
+  @override
   void dispose() {
     _captionController.dispose();
     super.dispose();
@@ -47,17 +58,7 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
       );
 
       if (pickedFile != null) {
-        final bytes = await pickedFile.readAsBytes();
-        setState(() {
-          _selectedMedia = bytes;
-          _selectedVideoThumbnail = null;
-          _selectedMediaMimeType = pickedFile.mimeType ??
-              lookupMimeType(pickedFile.name) ??
-              lookupMimeType(pickedFile.path) ??
-              'image/jpeg';
-          _selectedMediaFileName = pickedFile.name;
-          _mediaType = StoryMediaType.image;
-        });
+        await _setPickedImage(pickedFile);
       }
     } catch (e) {
       if (mounted) {
@@ -116,6 +117,12 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
     try {
       if (videoBytes.isEmpty) return null;
 
+      final webThumbnail =
+          await web_video.generateVideoThumbnail(videoBytes, mimeType);
+      if (webThumbnail != null && webThumbnail.isNotEmpty) {
+        return webThumbnail;
+      }
+
       final tempDir = await getTemporaryDirectory();
       tempVideoFile = File(
         '${tempDir.path}/story_thumb_source_${DateTime.now().microsecondsSinceEpoch}${_fileExtensionForMime(mimeType)}',
@@ -140,6 +147,73 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
         // Temporary source cleanup is best-effort.
       }
     }
+  }
+
+  Future<XFile?> _retrieveLostPickedImage() async {
+    try {
+      final response = await _imagePicker.retrieveLostData();
+      if (response.isEmpty || response.files == null || response.files!.isEmpty) {
+        return null;
+      }
+      return response.files!.first;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _recoverLostStoryPhoto() async {
+    final pickedFile = await _retrieveLostPickedImage();
+    if (!mounted || pickedFile == null) return;
+    await _setPickedImage(pickedFile, fallbackPrefix: 'story_photo');
+  }
+
+  Future<void> _setPickedImage(
+    XFile pickedFile, {
+    String fallbackPrefix = 'story_image',
+  }) async {
+    final bytes = await pickedFile.readAsBytes();
+    if (bytes.isEmpty || !mounted) return;
+
+    setState(() {
+      _selectedMedia = bytes;
+      _selectedVideoThumbnail = null;
+      _selectedMediaMimeType = pickedFile.mimeType ??
+          lookupMimeType(pickedFile.name, headerBytes: bytes) ??
+          lookupMimeType(pickedFile.path, headerBytes: bytes) ??
+          'image/jpeg';
+      _selectedMediaFileName = pickedFile.name.isNotEmpty
+          ? pickedFile.name
+          : '${fallbackPrefix}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      _mediaType = StoryMediaType.image;
+    });
+  }
+
+  Future<void> _showCameraPicker() async {
+    final result = await Navigator.push<CameraCaptureResult>(
+      context,
+      MaterialPageRoute(builder: (_) => const CameraCaptureScreen()),
+    );
+    if (!mounted || result == null || result.bytes.isEmpty) return;
+
+    final isVideo = result.type == CameraCaptureMediaType.video;
+    final thumbnailBytes = isVideo
+        ? await _generateVideoThumbnail(
+            videoBytes: result.bytes,
+            mimeType: result.mimeType,
+          )
+        : null;
+    if (!mounted) return;
+
+    setState(() {
+      _selectedMedia = result.bytes;
+      _selectedVideoThumbnail = thumbnailBytes;
+      _selectedMediaMimeType = result.mimeType;
+      _selectedMediaFileName = result.fileName;
+      if (result.caption.trim().isNotEmpty) {
+        _captionController.text = result.caption.trim();
+      }
+      _mediaType = isVideo ? StoryMediaType.video : StoryMediaType.image;
+    });
   }
 
   String _fileExtensionForMime(String mimeType) {
@@ -322,6 +396,11 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
                   icon: Icons.photo_library,
                   label: 'Photo',
                   onTap: _pickImage,
+                ),
+                _buildMediaButton(
+                  icon: Icons.camera_alt,
+                  label: 'Camera',
+                  onTap: _showCameraPicker,
                 ),
                 _buildMediaButton(
                   icon: Icons.videocam,

@@ -28,6 +28,7 @@ class DirectChatService {
     // Get shared media count
     final timeline = await room.getTimeline();
     final mediaCount = timeline.events.where((e) {
+      if (e.redacted) return false;
       final msgType = e.messageType;
       return msgType == MessageTypes.Image ||
           msgType == MessageTypes.Video ||
@@ -89,6 +90,7 @@ class DirectChatService {
 
     final timeline = await room.getTimeline();
     final mediaEvents = timeline.events.where((e) {
+      if (e.redacted) return false;
       final msgType = e.messageType;
       return msgType == MessageTypes.Image ||
           msgType == MessageTypes.Video ||
@@ -282,7 +284,9 @@ class DirectChatService {
 
     // Get all messages
     final timeline = await room.getTimeline();
-    final messages = timeline.events.where((e) => e.type == EventTypes.Message).toList();
+    final messages = timeline.events
+        .where((e) => !e.redacted && e.type == EventTypes.Message)
+        .toList();
 
     // Redact all messages
     for (final message in messages) {
@@ -300,7 +304,9 @@ class DirectChatService {
     if (room == null) throw Exception('Room not found: $roomId');
 
     final timeline = await room.getTimeline();
-    final messages = timeline.events.where((e) => e.type == EventTypes.Message).toList();
+    final messages = timeline.events
+        .where((e) => !e.redacted && e.type == EventTypes.Message)
+        .toList();
 
     final buffer = StringBuffer();
     buffer.writeln('Chat Export: ${_matrixService.getResolvedDisplayName(room)}');
@@ -329,6 +335,7 @@ class DirectChatService {
 
     return timeline.events
         .where((e) =>
+            !e.redacted &&
             e.type == EventTypes.Message &&
             e.body.toLowerCase().contains(lowerQuery))
         .toList();

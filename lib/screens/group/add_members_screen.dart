@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/group_service.dart';
+import '../../services/matrix_service.dart';
 
 /// Add Members Screen - Search and invite users to the group
 class AddMembersScreen extends StatefulWidget {
@@ -86,7 +87,7 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
       matrixId = '@$matrixId';
     }
     if (!matrixId.contains(':')) {
-      matrixId = '$matrixId:localhost';
+      matrixId = '$matrixId:${MatrixService.matrixServerName}';
     }
 
     try {
@@ -313,10 +314,6 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
       title: Text(
         displayName,
         style: GoogleFonts.inter(color: kWhite, fontSize: 13),
-      ),
-      subtitle: Text(
-        profile.userId,
-        style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
       ),
       trailing: Checkbox(
         value: isSelected,

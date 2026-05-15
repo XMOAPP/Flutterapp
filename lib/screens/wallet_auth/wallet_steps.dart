@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../theme.dart';
 
@@ -143,11 +144,43 @@ class ConnectWalletStep extends StatelessWidget {
             ),
           )
         else
-          ...wallets.map((name) => WalletTile(
-                name: name,
-                onTap: () => onConnect(name),
-              )),
+          if (wallets.isEmpty)
+            const _WalletUnavailableMessage()
+          else
+            ...wallets.map((name) => WalletTile(
+                  name: name,
+                  onTap: () => onConnect(name),
+                )),
       ],
+    );
+  }
+}
+
+class _WalletUnavailableMessage extends StatelessWidget {
+  const _WalletUnavailableMessage();
+
+  @override
+  Widget build(BuildContext context) {
+    const message = kIsWeb
+        ? 'No browser wallet found. Open XMO in a browser with MetaMask or another EIP-1193 wallet installed.'
+        : 'Wallet connection is currently available only on web. Use username/password on this phone build.';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+      decoration: BoxDecoration(
+        color: kDarkGrey,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Text(
+        message,
+        textAlign: TextAlign.center,
+        style: GoogleFonts.inter(
+          color: kLightGrey,
+          fontSize: 13,
+          height: 1.4,
+        ),
+      ),
     );
   }
 }

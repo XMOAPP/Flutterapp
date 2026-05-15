@@ -34,6 +34,15 @@ class _VideoContentState extends State<VideoContent> {
       final w = (info['w'] as num?)?.toDouble();
       final h = (info['h'] as num?)?.toDouble();
       if (w != null && h != null && w > 0 && h > 0) return w / h;
+
+      final thumbnailInfo = info['thumbnail_info'];
+      if (thumbnailInfo is Map) {
+        final thumbW = (thumbnailInfo['w'] as num?)?.toDouble();
+        final thumbH = (thumbnailInfo['h'] as num?)?.toDouble();
+        if (thumbW != null && thumbH != null && thumbW > 0 && thumbH > 0) {
+          return thumbW / thumbH;
+        }
+      }
     }
     return 16 / 9;
   }
@@ -48,8 +57,9 @@ class _VideoContentState extends State<VideoContent> {
   @override
   Widget build(BuildContext context) {
     final aspectRatio = _getAspectRatio();
-    const double thumbWidth = 220;
-    final double thumbHeight = (thumbWidth / aspectRatio).clamp(120.0, 260.0);
+    final thumbSize = _displaySizeForRatio(aspectRatio);
+    final thumbWidth = thumbSize.width;
+    final thumbHeight = thumbSize.height;
     
     // Check global static cache synchronously
     final cachedBytes = MediaHandler.getCachedThumbnail(widget.event.eventId);
@@ -127,6 +137,42 @@ class _VideoContentState extends State<VideoContent> {
         );
       },
     );
+  }
+
+  Size _displaySizeForRatio(double aspectRatio) {
+    const maxWidth = 292.0;
+    const maxHeight = 360.0;
+    const minReadableHeight = 96.0;
+
+    final ratio = aspectRatio.isFinite && aspectRatio > 0
+        ? aspectRatio
+        : 16 / 9;
+
+    double width;
+    double height;
+
+    if (ratio >= 1) {
+      width = maxWidth;
+      height = width / ratio;
+      if (height > maxHeight) {
+        height = maxHeight;
+        width = height * ratio;
+      }
+    } else {
+      height = maxHeight;
+      width = height * ratio;
+      if (width > maxWidth) {
+        width = maxWidth;
+        height = width / ratio;
+      }
+    }
+
+    if (height < minReadableHeight) {
+      height = minReadableHeight;
+      width = (height * ratio).clamp(140.0, maxWidth);
+    }
+
+    return Size(width, height);
   }
 }
 

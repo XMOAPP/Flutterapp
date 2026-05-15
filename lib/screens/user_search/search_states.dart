@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../services/matrix_service.dart';
 import '../../theme.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -90,7 +91,7 @@ class EmptyState extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Examples: kiran, @kiran:localhost',
+            'Examples: kiran, @kiran:${MatrixService.matrixServerName}',
             style: GoogleFonts.inter(color: kMediumGrey, fontSize: 11),
           ),
         ],

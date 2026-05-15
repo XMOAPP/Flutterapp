@@ -1,6 +1,4 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
-import '../../theme.dart';
 import '../user_search_screen.dart';
 
 /// Floating action button for creating new chats
@@ -9,22 +7,29 @@ class NewChatFAB extends StatelessWidget {
 
   static final _fabDecoration = BoxDecoration(
     shape: BoxShape.circle,
+    gradient: const LinearGradient(
+      begin: Alignment.centerLeft,
+      end: Alignment.centerRight,
+      colors: [
+        Color(0xFF283848),
+        Color(0xFF203040),
+        Color(0xFF182030),
+        Color(0xFF181820),
+        Color(0xFF181828),
+      ],
+    ),
     boxShadow: [
       BoxShadow(
-        color: kWhite.withValues(alpha: 0.15),
-        blurRadius: 15,
-        spreadRadius: 2,
+        color: Colors.white.withValues(alpha: 0.22),
+        blurRadius: 10,
+        spreadRadius: 1,
+      ),
+      BoxShadow(
+        color: const Color(0xFF203040).withValues(alpha: 0.38),
+        blurRadius: 12,
+        offset: const Offset(0, 4),
       ),
     ],
-  );
-
-  static final _containerDecoration = BoxDecoration(
-    shape: BoxShape.circle,
-    color: kWhite.withValues(alpha: 0.01),
-    border: Border.all(
-      color: kWhite.withValues(alpha: 0.2),
-      width: 1,
-    ),
   );
 
   @override
@@ -34,29 +39,29 @@ class NewChatFAB extends StatelessWidget {
       height: 56,
       child: DecoratedBox(
         decoration: _fabDecoration,
-        child: ClipOval(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 2, sigmaY: 2),
-            child: DecoratedBox(
-              decoration: _containerDecoration,
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const UserSearchScreen(),
-                    ),
-                  ),
-                  child: const Center(
-                    child: Icon(
-                      Icons.chat_outlined,
-                      color: kLimeGreen,
-                      size: 24,
-                    ),
+        child: Material(
+          color: Colors.transparent,
+          shape: const CircleBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const UserSearchScreen(),
+              ),
+            ),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Center(
+                  child: Image.asset(
+                    'assets/images/ghost_cute_optimized.gif',
+                    width: 64,
+                    height: 64,
+                    fit: BoxFit.contain,
                   ),
                 ),
-              ),
+              ],
             ),
           ),
         ),

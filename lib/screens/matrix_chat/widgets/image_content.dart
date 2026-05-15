@@ -71,7 +71,7 @@ class ImageContent extends StatelessWidget {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(20),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 260, maxHeight: 300),
+              constraints: const BoxConstraints(maxWidth: 292, maxHeight: 336),
               child: Image.memory(
                 bytes,
                 fit: BoxFit.cover,

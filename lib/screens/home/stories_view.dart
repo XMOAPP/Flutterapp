@@ -352,8 +352,18 @@ class StoriesView extends StatelessWidget {
       return _buildTextPreview(story);
     }
 
+    // For video stories
+    if (_isVideoStory(story)) {
+      return StoryVideoThumbnail(
+        story: story,
+        loading: _buildLoadingPreview(),
+        fallback: storyVideoFallback(),
+        playIcon: const SizedBox.shrink(),
+      );
+    }
+
     // For image stories
-    if (story.mediaType == StoryMediaType.image && story.mediaUrl != null) {
+    if (_isImageStory(story)) {
       return Consumer<MatrixProvider>(
         builder: (context, matrixProvider, _) {
           // Convert MXC URL to HTTP URL with thumbnail size
@@ -386,22 +396,24 @@ class StoriesView extends StatelessWidget {
       );
     }
 
-    // For video stories
-    if (story.mediaType == StoryMediaType.video && story.mediaUrl != null) {
-      return StoryVideoThumbnail(
-        story: story,
-        loading: _buildLoadingPreview(),
-        fallback: storyVideoFallback(),
-        playIcon: const Icon(
-          Icons.play_circle_outline,
-          color: kLimeGreen,
-          size: 48,
-        ),
-      );
-    }
-
     // Fallback to text or caption
     return _buildTextPreview(story);
+  }
+
+  bool _isVideoStory(Story story) {
+    final mimeType = story.mediaMimeType?.toLowerCase() ?? '';
+    return story.mediaUrl != null &&
+        (story.mediaType == StoryMediaType.video ||
+            mimeType.startsWith('video/') ||
+            story.thumbnailUrl != null);
+  }
+
+  bool _isImageStory(Story story) {
+    final mimeType = story.mediaMimeType?.toLowerCase() ?? '';
+    return story.mediaUrl != null &&
+        story.mediaType == StoryMediaType.image &&
+        !mimeType.startsWith('video/') &&
+        story.thumbnailUrl == null;
   }
 
   Widget _buildLoadingPreview() {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import 'package:provider/provider.dart';
@@ -6,6 +7,11 @@ import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/direct_chat_service.dart';
 import '../../models/direct_chat_models.dart';
+import '../../widgets/matrix_chat/fullscreen_image_viewer.dart';
+import '../../widgets/matrix_chat/fullscreen_video_player.dart';
+import '../matrix_chat/media_handler.dart';
+import '../web_download_stub.dart' if (dart.library.js_interop) '../web_download.dart'
+    as web_download;
 
 /// Shared Media Screen - Shows all media shared in direct chat
 class SharedMediaScreen extends StatefulWidget {
@@ -290,25 +296,103 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 
-  void _openMedia(SharedMediaItem item) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Opening ${item.filename}...'),
-        backgroundColor: kDarkerGrey,
-        duration: const Duration(seconds: 1),
-      ),
-    );
-    // TODO: Implement media viewer
+  Future<void> _openMedia(SharedMediaItem item) async {
+    try {
+      final event = await _findEvent(item.eventId);
+      if (event == null) throw Exception('Message not found');
+
+      final matrixFile = await _downloadMatrixFile(event);
+      if (!mounted) return;
+
+      if (item.type == MediaType.image) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => FullscreenImageViewer(
+              imageBytes: matrixFile.bytes,
+              title: matrixFile.name,
+              event: event,
+            ),
+          ),
+        );
+      } else if (item.type == MediaType.video) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => FullscreenVideoPlayer(
+              videoBytes: matrixFile.bytes,
+              mimeType: matrixFile.mimeType,
+              title: matrixFile.name,
+            ),
+          ),
+        );
+      } else {
+        await _downloadFile(item);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to open: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
-  void _downloadFile(SharedMediaItem item) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Downloading ${item.filename}...'),
-        backgroundColor: kDarkerGrey,
-        duration: const Duration(seconds: 2),
-      ),
+  Future<void> _downloadFile(SharedMediaItem item) async {
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Downloading ${item.filename}...'),
+          backgroundColor: kDarkerGrey,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+
+      final event = await _findEvent(item.eventId);
+      if (event == null) throw Exception('Message not found');
+
+      final matrixFile = await _downloadMatrixFile(event);
+      await web_download.downloadFile(matrixFile.bytes, matrixFile.name);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(kIsWeb
+              ? 'Downloaded: ${matrixFile.name}'
+              : 'Downloaded successfully'),
+          backgroundColor: const Color(0xFF1A2A1A),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to download: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<Event?> _findEvent(String eventId) async {
+    final timeline = await widget.room.getTimeline();
+    for (final event in timeline.events) {
+      if (event.eventId == eventId) return event;
+    }
+    return widget.room.getEventById(eventId);
+  }
+
+  Future<MatrixFile> _downloadMatrixFile(Event event) {
+    final matrixProvider = context.read<MatrixProvider>();
+    final mediaHandler = MediaHandler(
+      matrixProvider: matrixProvider,
+      context: context,
     );
-    // TODO: Implement file download
+    return event.downloadAndDecryptAttachment(
+      downloadCallback: mediaHandler.authenticatedDownload(),
+    );
   }
 }

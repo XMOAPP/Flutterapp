@@ -4,3 +4,5 @@ export 'widgets/image_content.dart';
 export 'widgets/video_content.dart';
 export 'widgets/text_file_bubble.dart';
 export 'widgets/tappable_file_chip.dart';
+export 'widgets/audio_message_bubble.dart';
+export 'widgets/voice_waveform.dart';

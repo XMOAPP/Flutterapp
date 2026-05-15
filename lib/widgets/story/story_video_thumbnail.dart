@@ -1,12 +1,15 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 
 import '../../models/story_models.dart';
 import '../../providers/matrix_provider.dart';
 import '../../theme.dart';
+import '../../screens/web_video_view_stub.dart'
+    if (dart.library.js_interop) '../../screens/web_video_view.dart' as web_video;
 
 class StoryVideoThumbnail extends StatefulWidget {
   final Story story;
@@ -113,6 +116,22 @@ class _StoryVideoThumbnailState extends State<StoryVideoThumbnail> {
     final matrixProvider = context.read<MatrixProvider>();
     final httpUrl = matrixProvider.service.getHttpUrl(mediaUrl);
     if (httpUrl == null) return null;
+
+    try {
+      final response = await http.get(httpUrl);
+      if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
+        final webThumb = await web_video.generateVideoThumbnail(
+          response.bodyBytes,
+          widget.story.mediaMimeType ?? 'video/mp4',
+        );
+        if (webThumb != null && webThumb.isNotEmpty) {
+          _generatedCache[cacheKey] = webThumb;
+          return webThumb;
+        }
+      }
+    } catch (_) {
+      // Fall through to the platform plugin URL-based generator.
+    }
 
     try {
       final bytes = await VideoThumbnail.thumbnailData(

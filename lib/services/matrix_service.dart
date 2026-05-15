@@ -1,20 +1,30 @@
 import 'dart:convert';
+import 'dart:io' as io;
 import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
+import '../config/app_config.dart';
 import '../models/invite_link_models.dart';
 
 enum XmoRoomKind { direct, group, channel }
 
+class MatrixUploadCancelledException implements Exception {
+  const MatrixUploadCancelledException();
+
+  @override
+  String toString() => 'Upload cancelled';
+}
+
 /// Singleton service that wraps the Matrix Dart SDK.
-/// Homeserver: http://localhost:8008 (Synapse via Docker)
+/// Matrix homeserver wrapper. Configure deployment with --dart-define.
 class MatrixService {
   static final MatrixService _instance = MatrixService._internal();
   factory MatrixService() => _instance;
   MatrixService._internal();
 
-  static const String homeserverUrl = 'http://localhost:8008';
+  static const String homeserverUrl = AppConfig.homeserverUrl;
+  static const String matrixServerName = AppConfig.matrixServerName;
   static const String _authBoxName = 'xmo_auth';
   static const String _channelBoxName = 'xmo_channels';
   static const String _groupBoxName = 'xmo_groups';
@@ -724,7 +734,7 @@ class MatrixService {
     }
 
     // Prong 3: Room alias resolution fallback (like user search by ID)
-    // Try to resolve #query:localhost directly — works even if directory is empty
+    // Try to resolve a local room alias directly; works even if directory is empty.
     if (combined.isEmpty) {
       try {
         final aliasName = trimmedQuery
@@ -732,7 +742,8 @@ class MatrixService {
             .replaceAll(RegExp(r'[^a-z0-9]'), '_')
             .replaceAll(RegExp(r'_+'), '_')
             .replaceAll(RegExp(r'^_|_$'), '');
-        final serverName = _client.userID?.split(':').last ?? 'localhost';
+        final serverName =
+            _client.userID?.split(':').last ?? matrixServerName;
         final fullAlias = '#$aliasName:$serverName';
         debugPrint('[PublicSearch] Trying alias resolution: $fullAlias');
         final aliasResult = await _client.getRoomIdByAlias(fullAlias);
@@ -994,11 +1005,178 @@ class MatrixService {
     await room.sendTextEvent(message);
   }
 
+  Future<void> sendAudio({
+    required String roomId,
+    required Uint8List audioBytes,
+    required String fileName,
+    required String mimeType,
+    required int durationMs,
+    bool isVoiceMessage = true,
+    void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
+    bool Function()? isCancelled,
+  }) async {
+    final room = _client.getRoomById(roomId);
+    if (room == null) throw Exception('Room not found: $roomId');
+
+    final audioMxc = await _uploadContentWithProgress(
+      audioBytes,
+      filename: fileName,
+      contentType: mimeType,
+      onProgress: onUploadProgress,
+      isCancelled: isCancelled,
+    );
+    _throwIfCancelled(isCancelled);
+
+    await room.sendEvent({
+      'msgtype': 'm.audio',
+      'body': fileName,
+      'filename': fileName,
+      'url': audioMxc.toString(),
+      'info': {
+        'mimetype': mimeType,
+        'size': audioBytes.length,
+        if (durationMs > 0) 'duration': durationMs,
+      },
+      if (isVoiceMessage) 'org.matrix.msc3245.voice': {},
+    });
+  }
+
+  Future<void> forwardMessage({
+    required Event event,
+    required String targetRoomId,
+  }) async {
+    if (event.redacted) {
+      throw Exception('Deleted messages cannot be forwarded');
+    }
+    if (event.type != EventTypes.Message && event.type != EventTypes.Sticker) {
+      throw Exception('This message type cannot be forwarded');
+    }
+
+    final targetRoom = _client.getRoomById(targetRoomId);
+    if (targetRoom == null) throw Exception('Room not found: $targetRoomId');
+    if (!targetRoom.canSendEvent(EventTypes.Message)) {
+      throw Exception('You cannot send messages in this chat');
+    }
+
+    final content = _forwardableContent(event);
+    await targetRoom.sendEvent(content, type: event.type);
+  }
+
+  Map<String, dynamic> _forwardableContent(Event event) {
+    final editedContent = event.content['m.new_content'];
+    final source = editedContent is Map
+        ? Map<String, dynamic>.from(editedContent)
+        : Map<String, dynamic>.from(event.content);
+
+    final copied = jsonDecode(jsonEncode(source)) as Map<String, dynamic>;
+    copied.remove('m.relates_to');
+    copied.remove('m.new_content');
+    copied['xmo.forwarded'] = {
+      'event_id': event.eventId,
+      'room_id': event.room.id,
+      'sender': event.senderId,
+    };
+
+    if (copied['body'] is String) {
+      copied['body'] = _stripReplyFallback(copied['body'] as String);
+    }
+    if (copied['formatted_body'] is String) {
+      copied['formatted_body'] =
+          _stripFormattedReplyFallback(copied['formatted_body'] as String);
+      if ((copied['formatted_body'] as String).trim().isEmpty) {
+        copied.remove('formatted_body');
+        copied.remove('format');
+      }
+    }
+
+    return copied;
+  }
+
+  String _stripReplyFallback(String body) {
+    if (!body.startsWith('> ')) return body;
+    final lines = body.split('\n');
+    final separatorIndex = lines.indexWhere((line) => line.trim().isEmpty);
+    if (separatorIndex == -1 || separatorIndex == lines.length - 1) {
+      return body;
+    }
+    return lines.sublist(separatorIndex + 1).join('\n');
+  }
+
+  String _stripFormattedReplyFallback(String html) {
+    final replyEnd = html.indexOf('</mx-reply>');
+    if (replyEnd == -1) return html;
+    return html.substring(replyEnd + '</mx-reply>'.length).trimLeft();
+  }
+
   /// Sends a file/image/video to a room. The SDK handles mxc upload internally.
   Future<void> sendFile(String roomId, MatrixFile file) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
     await room.sendFileEvent(file);
+  }
+
+  Future<void> sendFileWithProgress({
+    required String roomId,
+    required Uint8List bytes,
+    required String fileName,
+    required String mimeType,
+    void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
+    bool Function()? isCancelled,
+  }) async {
+    final room = _client.getRoomById(roomId);
+    if (room == null) throw Exception('Room not found: $roomId');
+
+    final fileMxc = await _uploadContentWithProgress(
+      bytes,
+      filename: fileName,
+      contentType: mimeType,
+      onProgress: onUploadProgress,
+      isCancelled: isCancelled,
+    );
+    _throwIfCancelled(isCancelled);
+
+    await room.sendEvent({
+      'msgtype': 'm.file',
+      'body': fileName,
+      'filename': fileName,
+      'url': fileMxc.toString(),
+      'info': {
+        'mimetype': mimeType,
+        'size': bytes.length,
+      },
+    });
+  }
+
+  Future<void> sendImageWithCaption({
+    required String roomId,
+    required Uint8List bytes,
+    required String fileName,
+    required String mimeType,
+    String caption = '',
+    void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
+  }) async {
+    final room = _client.getRoomById(roomId);
+    if (room == null) throw Exception('Room not found: $roomId');
+
+    final imageMxc = await _uploadContentWithProgress(
+      bytes,
+      filename: fileName,
+      contentType: mimeType,
+      onProgress: onUploadProgress,
+    );
+    final cleanCaption = caption.trim();
+
+    await room.sendEvent({
+      'msgtype': 'm.image',
+      'body': cleanCaption.isEmpty ? fileName : cleanCaption,
+      'filename': fileName,
+      if (cleanCaption.isNotEmpty) 'xmo_caption': cleanCaption,
+      'url': imageMxc.toString(),
+      'info': {
+        'mimetype': mimeType,
+        'size': bytes.length,
+      },
+    });
   }
 
   /// Sends a video with an embedded thumbnail.
@@ -1012,16 +1190,24 @@ class MatrixService {
     required String videoFileName,
     required String videoMimeType,
     Uint8List? thumbBytes,
+    int? videoWidth,
+    int? videoHeight,
+    int? durationMs,
+    int? thumbnailWidth,
+    int? thumbnailHeight,
+    String caption = '',
+    void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
   }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
 
     // Step 1: Upload video
     debugPrint('[sendVideo] Uploading video (${videoBytes.length} bytes)...');
-    final videoMxc = await _client.uploadContent(
+    final videoMxc = await _uploadContentWithProgress(
       videoBytes,
       filename: videoFileName,
       contentType: videoMimeType,
+      onProgress: onUploadProgress,
     );
     debugPrint('[sendVideo] Video uploaded: $videoMxc');
 
@@ -1029,6 +1215,9 @@ class MatrixService {
     final info = <String, dynamic>{
       'mimetype': videoMimeType,
       'size': videoBytes.length,
+      if (videoWidth != null && videoWidth > 0) 'w': videoWidth,
+      if (videoHeight != null && videoHeight > 0) 'h': videoHeight,
+      if (durationMs != null && durationMs > 0) 'duration': durationMs,
     };
 
     // Step 3: Upload thumbnail if we have one and embed it in info
@@ -1046,20 +1235,106 @@ class MatrixService {
         info['thumbnail_info'] = {
           'mimetype': 'image/jpeg',
           'size': thumbBytes.length,
+          if (thumbnailWidth != null && thumbnailWidth > 0) 'w': thumbnailWidth,
+          if (thumbnailHeight != null && thumbnailHeight > 0) 'h': thumbnailHeight,
         };
       } catch (e) {
         debugPrint('[sendVideo] Thumbnail upload failed (non-fatal): $e');
       }
     }
 
+    final cleanCaption = caption.trim();
+
     // Step 4: Send the m.video event with both URLs
     await room.sendEvent({
       'msgtype': 'm.video',
-      'body': videoFileName,
+      'body': cleanCaption.isEmpty ? videoFileName : cleanCaption,
+      'filename': videoFileName,
+      if (cleanCaption.isNotEmpty) 'xmo_caption': cleanCaption,
       'url': videoMxc.toString(),
       'info': info,
     });
     debugPrint('[sendVideo] Event sent.');
+  }
+
+  Future<Uri> _uploadContentWithProgress(
+    Uint8List content, {
+    String? filename,
+    String? contentType,
+    void Function(int uploadedBytes, int totalBytes)? onProgress,
+    bool Function()? isCancelled,
+  }) async {
+    if (onProgress == null) {
+      return _client.uploadContent(
+        content,
+        filename: filename,
+        contentType: contentType,
+      );
+    }
+
+    final mediaConfig = await _client.getConfig();
+    final maxMediaSize = mediaConfig.mUploadSize;
+    if (maxMediaSize != null && maxMediaSize < content.lengthInBytes) {
+      throw FileTooBigMatrixException(content.lengthInBytes, maxMediaSize);
+    }
+
+    final token = accessToken;
+    if (token == null || token.isEmpty) {
+      throw Exception('Missing Matrix access token');
+    }
+
+    final uploadUri = Uri.parse(homeserverUrl).resolveUri(
+      Uri(
+        path: '/_matrix/media/v3/upload',
+        queryParameters: {
+          if (filename != null && filename.isNotEmpty) 'filename': filename,
+        },
+      ),
+    );
+
+    final client = io.HttpClient();
+    try {
+      _throwIfCancelled(isCancelled);
+      final request = await client.postUrl(uploadUri);
+      request.contentLength = content.lengthInBytes;
+      request.headers.set(io.HttpHeaders.authorizationHeader, 'Bearer $token');
+      if (contentType != null && contentType.isNotEmpty) {
+        request.headers.set(io.HttpHeaders.contentTypeHeader, contentType);
+      }
+
+      const chunkSize = 16 * 1024;
+      var uploaded = 0;
+      onProgress(0, content.lengthInBytes);
+
+      for (var offset = 0; offset < content.length; offset += chunkSize) {
+        _throwIfCancelled(isCancelled);
+        final end = (offset + chunkSize).clamp(0, content.length);
+        request.add(content.sublist(offset, end));
+        await request.flush();
+        uploaded = end;
+        onProgress(uploaded, content.lengthInBytes);
+      }
+      _throwIfCancelled(isCancelled);
+
+      final response = await request.close();
+      _throwIfCancelled(isCancelled);
+      final responseBytes = await consolidateHttpClientResponseBytes(response);
+      if (response.statusCode != io.HttpStatus.ok) {
+        throw Exception(
+          'Upload failed (${response.statusCode}): ${utf8.decode(responseBytes)}',
+        );
+      }
+      final responseJson = jsonDecode(utf8.decode(responseBytes));
+      return Uri.parse(responseJson['content_uri'] as String);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  void _throwIfCancelled(bool Function()? isCancelled) {
+    if (isCancelled != null && isCancelled()) {
+      throw const MatrixUploadCancelledException();
+    }
   }
 
   /// Returns the current access token for authenticated requests.

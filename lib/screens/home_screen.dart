@@ -164,7 +164,10 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      floatingActionButton: const NewChatFAB(),
+      floatingActionButton: const Padding(
+        padding: EdgeInsets.only(bottom: 72),
+        child: NewChatFAB(),
+      ),
     );
   }
 

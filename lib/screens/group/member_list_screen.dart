@@ -487,10 +487,6 @@ class _MemberListScreenState extends State<MemberListScreen> {
           if (member.restriction != null) _buildRestrictedBadge(),
         ],
       ),
-      subtitle: Text(
-        member.userId,
-        style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
-      ),
       onTap: (_canModerate || _canManageAdmins) && !isMe
           ? () => _showMemberActions(member)
           : null,

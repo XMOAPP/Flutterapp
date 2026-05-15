@@ -12,6 +12,7 @@ class MessageBubble extends StatelessWidget {
   final Future<Uint8List?> Function(Event, {bool getThumbnail}) loadImageBytes;
   final Future<void> Function(Event) playVideo;
   final Future<void> Function(Event) downloadAndOpenFile;
+  final Future<MatrixFile> Function(Event)? downloadAttachment;
   final void Function(Uint8List, String, Event) openFullscreenImage;
 
   const MessageBubble({
@@ -21,6 +22,7 @@ class MessageBubble extends StatelessWidget {
     required this.loadImageBytes,
     required this.playVideo,
     required this.downloadAndOpenFile,
+    this.downloadAttachment,
     required this.openFullscreenImage,
   });
 
@@ -92,7 +94,9 @@ class MessageBubble extends StatelessWidget {
                 isAudio: isAudio,
                 isFile: isFile,
                 downloadAndOpenFile: downloadAndOpenFile,
+                downloadAttachment: downloadAttachment,
                 buildMessageStatus: _buildMessageStatus,
+                loadImageBytes: loadImageBytes,
               ),
       ),
     );

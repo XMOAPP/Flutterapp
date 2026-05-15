@@ -123,7 +123,7 @@ class _UnreadBadge extends StatelessWidget {
       constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFF6F8293),
+        color: kAudioBlue,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Center(
@@ -182,7 +182,7 @@ class ChannelBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: kLimeGreen.withValues(alpha: 0.15),
+        color: const Color(0xFF1A2A1A),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Row(

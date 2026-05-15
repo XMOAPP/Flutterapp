@@ -1,28 +1,42 @@
-// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
+// Web-only file download and video playback helpers.
+// Migrated from deprecated dart:html to package:web + dart:js_interop.
 
-import 'dart:html' as html;
+import 'dart:js_interop';
 import 'dart:typed_data';
 
+import 'package:web/web.dart' as web;
+
 /// Triggers a browser download of the given bytes as a file.
-void downloadFile(Uint8List bytes, String fileName) {
-  final blob = html.Blob([bytes]);
-  final url = html.Url.createObjectUrlFromBlob(blob);
-  final anchor = html.AnchorElement(href: url)
-    ..setAttribute('download', fileName)
-    ..style.display = 'none';
-  html.document.body?.append(anchor);
+Future<String> downloadFile(
+  Uint8List bytes,
+  String fileName, {
+  String? mimeType,
+}) async {
+  final jsArray = bytes.toJS;
+  final blob = web.Blob([jsArray].toJS);
+  final url = web.URL.createObjectURL(blob);
+
+  final anchor =
+      web.document.createElement('a') as web.HTMLAnchorElement;
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.style.display = 'none';
+
+  web.document.body?.append(anchor);
   anchor.click();
   anchor.remove();
-  html.Url.revokeObjectUrl(url);
+  web.URL.revokeObjectURL(url);
+  return fileName;
 }
 
 /// Opens a video blob URL in a new browser tab for in-app playback.
-void playVideo(Uint8List bytes, String mimeType) {
-  final blob = html.Blob([bytes], mimeType);
-  final url = html.Url.createObjectUrlFromBlob(blob);
-  html.window.open(url, '_blank');
+Future<void> playVideo(Uint8List bytes, String mimeType) async {
+  final jsArray = bytes.toJS;
+  final blob = web.Blob([jsArray].toJS, web.BlobPropertyBag(type: mimeType));
+  final url = web.URL.createObjectURL(blob);
+  web.window.open(url, '_blank');
   // Revoke after a delay so the tab has time to load
   Future.delayed(const Duration(seconds: 10), () {
-    html.Url.revokeObjectUrl(url);
+    web.URL.revokeObjectURL(url);
   });
 }

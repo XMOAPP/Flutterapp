@@ -8,6 +8,7 @@ import '../../services/channel_service.dart';
 import '../../services/matrix_service.dart';
 import '../../models/channel_models.dart';
 import '../../widgets/story/story_avatar.dart';
+import '../direct_chat/shared_media_screen.dart';
 import 'channel_settings_screen.dart';
 import 'subscriber_list_screen.dart';
 import 'channel_admin_panel_screen.dart';
@@ -29,6 +30,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
   List<ChannelSubscriber> _subscribers = [];
   List<ChannelAdmin> _admins = [];
   int _subscriberCount = 0;
+  int _sharedMediaCount = 0;
   bool _loading = true;
 
   @override
@@ -45,12 +47,14 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
       final subscribers = await _channelService.getSubscribers(widget.room.id);
       final admins = await _channelService.getAdmins(widget.room.id);
       final count = await _channelService.getSubscriberCount(widget.room.id);
+      final sharedMediaCount = await _loadSharedMediaCount();
 
       if (mounted) {
         setState(() {
           _subscribers = subscribers;
           _admins = admins;
           _subscriberCount = count;
+          _sharedMediaCount = sharedMediaCount;
           _loading = false;
         });
       }
@@ -60,6 +64,17 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
         setState(() => _loading = false);
       }
     }
+  }
+
+  Future<int> _loadSharedMediaCount() async {
+    final timeline = await widget.room.getTimeline();
+    return timeline.events.where((event) {
+      final msgType = event.messageType;
+      return msgType == MessageTypes.Image ||
+          msgType == MessageTypes.Video ||
+          msgType == MessageTypes.Audio ||
+          msgType == MessageTypes.File;
+    }).length;
   }
 
   bool get _isAdmin => widget.room.ownPowerLevel >= 50;
@@ -102,6 +117,10 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
 
                   // Actions
                   _buildActionButtons(),
+
+                  const SizedBox(height: 8),
+
+                  _buildSharedMediaSection(),
 
                   const SizedBox(height: 8),
 
@@ -226,10 +245,15 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
   Widget _buildActionButtons() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          Expanded(
-            child: _buildActionButton(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final itemWidth = (constraints.maxWidth - 24) / 4;
+          return Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _buildActionButton(
+                width: itemWidth,
               icon: Icons.share_outlined,
               label: 'Share Link',
               onTap: () {
@@ -241,11 +265,9 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
                 );
               },
             ),
-          ),
-          if (_isAdmin) const SizedBox(width: 8),
-          if (_isAdmin)
-            Expanded(
-              child: _buildActionButton(
+              if (_isAdmin)
+                _buildActionButton(
+                  width: itemWidth,
                 icon: Icons.settings_outlined,
                 label: 'Settings',
                 onTap: () {
@@ -257,11 +279,9 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
                   ).then((_) => _loadChannelData());
                 },
               ),
-            ),
-          if (_isAdmin) const SizedBox(width: 8),
-          if (_isAdmin)
-            Expanded(
-              child: _buildActionButton(
+              if (_isAdmin)
+                _buildActionButton(
+                  width: itemWidth,
                 icon: Icons.admin_panel_settings_outlined,
                 label: 'Admin Panel',
                 onTap: () {
@@ -273,11 +293,9 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
                   ).then((_) => _loadChannelData());
                 },
               ),
-            ),
-          if (_isAdmin) const SizedBox(width: 8),
-          if (_isAdmin)
-            Expanded(
-              child: _buildActionButton(
+              if (_isAdmin)
+                _buildActionButton(
+                  width: itemWidth,
                 icon: Icons.bar_chart_outlined,
                 label: 'Statistics',
                 onTap: () {
@@ -289,44 +307,89 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
                   );
                 },
               ),
-            ),
-        ],
+            ],
+          );
+        },
       ),
     );
   }
 
   Widget _buildActionButton({
+    required double width,
     required IconData icon,
     required String label,
     required VoidCallback onTap,
   }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: kDarkerGrey,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: kLimeGreen, size: 20),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: GoogleFonts.inter(
-                color: kWhite,
-                fontSize: 10,
-                fontWeight: FontWeight.w500,
+    return SizedBox(
+      width: width,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: kDarkerGrey,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: kLimeGreen, size: 20),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                  color: kWhite,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildSharedMediaSection() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: kDarkerGrey,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ListTile(
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        leading: const Icon(
+          Icons.photo_library_outlined,
+          color: kLimeGreen,
+          size: 22,
+        ),
+        title: Text(
+          'Shared Media',
+          style: GoogleFonts.inter(
+            color: kWhite,
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
+        ),
+        subtitle: Text(
+          '$_sharedMediaCount item${_sharedMediaCount == 1 ? '' : 's'}',
+          style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
+        ),
+        trailing: const Icon(Icons.chevron_right, color: kLightGrey, size: 18),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => SharedMediaScreen(room: widget.room),
+            ),
+          );
+        },
       ),
     );
   }

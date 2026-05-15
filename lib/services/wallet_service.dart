@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 
 // Conditional import for web-only functionality
 import 'wallet_service_stub.dart'
-    if (dart.library.html) 'wallet_service_web.dart';
+    if (dart.library.js_interop) 'wallet_service_web.dart';
 
 /// Handles Web3 wallet authentication via the xmoWallet JS bridge.
 /// Supports MetaMask, Brave Wallet, Coinbase Wallet, and any EIP-1193 wallet.

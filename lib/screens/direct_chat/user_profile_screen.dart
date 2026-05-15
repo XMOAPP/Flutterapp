@@ -303,17 +303,6 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             ),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 6),
-
-          // User ID
-          Text(
-            _profile!.userId,
-            style: GoogleFonts.inter(
-              color: kLightGrey,
-              fontSize: 12,
-            ),
-            textAlign: TextAlign.center,
-          ),
         ],
       ),
     );

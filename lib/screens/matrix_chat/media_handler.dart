@@ -1,12 +1,18 @@
-import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:hive/hive.dart';
 import 'package:matrix/matrix.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
 import '../../providers/matrix_provider.dart';
-import '../web_video_view_stub.dart' if (dart.library.html) '../web_video_view.dart' as web_video;
+import '../web_video_view_stub.dart' if (dart.library.js_interop) '../web_video_view.dart' as web_video;
+import '../native_thumb_stub.dart' if (dart.library.io) '../native_thumb_io.dart';
+import '../native_video_metadata_stub.dart'
+    if (dart.library.io) '../native_video_metadata_io.dart';
 
 /// Handles all media-related operations (upload, download, caching)
 class MediaHandler {
@@ -262,7 +268,7 @@ class MediaHandler {
           final mimeType = (info is Map ? info['mimetype'] as String? : null) ?? 'video/mp4';
           
           // Generate thumbnail from partial video
-          final generatedThumb = await web_video.generateVideoThumbnail(
+          final generatedThumb = await _generateVideoThumbnail(
             partialVideoBytes,
             mimeType,
           );
@@ -288,7 +294,7 @@ class MediaHandler {
         if (videoBytes.isNotEmpty) {
           debugPrint('[VideoThumb] Downloaded full video: ${videoBytes.length} bytes, generating thumbnail...');
           
-          final generatedThumb = await web_video.generateVideoThumbnail(
+          final generatedThumb = await _generateVideoThumbnail(
             videoBytes,
             matrixFile.mimeType,
           );
@@ -312,6 +318,36 @@ class MediaHandler {
 
     _imageLoading[cacheKey] = future;
     return future;
+  }
+
+  /// Platform-aware video thumbnail generation.
+  /// On web: uses canvas-based frame grab via web_video.
+  /// On native (Android/iOS): writes bytes to a temp file and uses video_thumbnail plugin.
+  Future<Uint8List?> _generateVideoThumbnail(
+    Uint8List videoBytes,
+    String mimeType,
+  ) async {
+    if (videoBytes.isEmpty) return null;
+
+    // 1. Try web implementation first (returns null on native platforms via stub)
+    final webThumb = await web_video.generateVideoThumbnail(videoBytes, mimeType);
+    if (webThumb != null && webThumb.isNotEmpty) {
+      return webThumb;
+    }
+
+    // 2. Native fallback — video_thumbnail requires a file path, not raw bytes.
+    //    We write a temp file, extract the frame, then immediately delete it.
+    if (kIsWeb) return null; // web already tried above
+    return _generateNativeThumbnail(videoBytes);
+  }
+
+  Future<Uint8List?> _generateNativeThumbnail(Uint8List videoBytes) async {
+    try {
+      return await generateNativeThumbnail(videoBytes);
+    } catch (e) {
+      debugPrint('[VideoThumb] Native fallback generation failed: $e');
+      return null;
+    }
   }
 
   /// Pick and send file
@@ -350,6 +386,246 @@ class MediaHandler {
     } finally {
       setUploading(false);
     }
+  }
+
+  /// Pick and send an audio file.
+  Future<void> pickAndSendAudio(
+    String roomId,
+    Function(bool) setUploading,
+  ) async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.audio,
+      withData: true,
+      allowMultiple: false,
+    );
+    if (result == null || result.files.isEmpty) return;
+
+    final picked = result.files.first;
+    final bytes = picked.bytes;
+    if (bytes == null || bytes.isEmpty) return;
+
+    final fileName = picked.name;
+    final mimeType = lookupMimeType(fileName) ?? 'audio/mpeg';
+
+    setUploading(true);
+
+    try {
+      final matrixFile = MatrixAudioFile(
+        bytes: bytes,
+        name: fileName,
+        mimeType: mimeType,
+      );
+      await matrixProvider.service.sendFile(roomId, matrixFile);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to send audio: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  /// Capture a photo with the native camera and send it as an image.
+  Future<void> captureAndSendPhoto(
+    String roomId,
+    Function(bool) setUploading,
+    CameraDevice cameraDevice,
+  ) async {
+    final picker = ImagePicker();
+    final photo = await picker.pickImage(
+          source: ImageSource.camera,
+          preferredCameraDevice: cameraDevice,
+          maxWidth: 1440,
+          maxHeight: 1920,
+          imageQuality: 82,
+        ) ??
+        await _retrieveLostPickedImage(picker);
+    if (photo == null) return;
+
+    await sendPickedPhoto(roomId, setUploading, photo);
+  }
+
+  Future<bool> recoverLostPhoto(
+    String roomId,
+    Function(bool) setUploading,
+  ) async {
+    final photo = await _retrieveLostPickedImage(ImagePicker());
+    if (photo == null) return false;
+    await sendPickedPhoto(roomId, setUploading, photo);
+    return true;
+  }
+
+  Future<void> sendPickedPhoto(
+    String roomId,
+    Function(bool) setUploading,
+    XFile photo,
+  ) async {
+    final bytes = await photo.readAsBytes();
+    if (bytes.isEmpty) return;
+
+    final fileName = photo.name.isNotEmpty
+        ? photo.name
+        : 'photo_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    final mimeType = lookupMimeType(fileName, headerBytes: bytes) ??
+        photo.mimeType ??
+        'image/jpeg';
+
+    await sendPhotoBytes(
+      roomId,
+      setUploading,
+      bytes: bytes,
+      fileName: fileName,
+      mimeType: mimeType,
+    );
+  }
+
+  Future<void> sendPhotoBytes(
+    String roomId,
+    Function(bool) setUploading, {
+    required Uint8List bytes,
+    required String fileName,
+    required String mimeType,
+    String caption = '',
+    void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
+  }) async {
+    if (bytes.isEmpty) return;
+
+    setUploading(true);
+
+    try {
+      await matrixProvider.service.sendImageWithCaption(
+        roomId: roomId,
+        bytes: bytes,
+        fileName: fileName,
+        mimeType: mimeType,
+        caption: caption,
+        onUploadProgress: onUploadProgress,
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to send photo: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  Future<void> sendVideoBytes(
+    String roomId,
+    Function(bool) setUploading, {
+    required Uint8List bytes,
+    required String fileName,
+    required String mimeType,
+    String caption = '',
+    void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
+  }) async {
+    if (bytes.isEmpty) return;
+
+    setUploading(true);
+
+    try {
+      final videoMetadata = await _readVideoMetadata(bytes);
+      Uint8List? thumbBytes;
+      ({int width, int height})? thumbDimensions;
+      try {
+        debugPrint('[Send] Generating camera video thumbnail before upload...');
+        thumbBytes = await _generateVideoThumbnail(bytes, mimeType);
+        if (thumbBytes != null && thumbBytes.isNotEmpty) {
+          thumbDimensions = await _decodeImageDimensions(thumbBytes);
+        }
+      } catch (e) {
+        debugPrint('[Send] Camera video thumbnail failed (non-fatal): $e');
+      }
+
+      await matrixProvider.service.sendVideoWithThumbnail(
+        roomId: roomId,
+        videoBytes: bytes,
+        videoFileName: fileName,
+        videoMimeType: mimeType,
+        thumbBytes: thumbBytes,
+        videoWidth: videoMetadata?.width,
+        videoHeight: videoMetadata?.height,
+        durationMs: videoMetadata?.durationMs,
+        thumbnailWidth: thumbDimensions?.width,
+        thumbnailHeight: thumbDimensions?.height,
+        caption: caption,
+        onUploadProgress: onUploadProgress,
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to send video: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  Future<Uint8List?> createVideoPreviewThumbnail(
+    Uint8List bytes,
+    String mimeType,
+  ) {
+    return _generateVideoThumbnail(bytes, mimeType);
+  }
+
+  Future<({int? width, int? height, int? durationMs})?>
+      readVideoPreviewMetadata(Uint8List bytes) async {
+    final metadata = await _readVideoMetadata(bytes);
+    if (metadata == null) return null;
+    return (
+      width: metadata.width,
+      height: metadata.height,
+      durationMs: metadata.durationMs,
+    );
+  }
+
+  Future<XFile?> _retrieveLostPickedImage(ImagePicker picker) async {
+    try {
+      final response = await picker.retrieveLostData();
+      if (response.isEmpty || response.files == null || response.files!.isEmpty) {
+        return null;
+      }
+      return response.files!.first;
+    } catch (e) {
+      debugPrint('[Camera] Failed to retrieve lost image picker data: $e');
+      return null;
+    }
+  }
+
+  Future<({int width, int height})?> _decodeImageDimensions(
+    Uint8List bytes,
+  ) async {
+    if (bytes.isEmpty) return null;
+    try {
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final image = frame.image;
+      final dimensions = (width: image.width, height: image.height);
+      image.dispose();
+      return dimensions;
+    } catch (e) {
+      debugPrint('[Media] Failed to decode image dimensions: $e');
+      return null;
+    }
+  }
+
+  Future<NativeVideoMetadata?> _readVideoMetadata(Uint8List bytes) async {
+    if (bytes.isEmpty || kIsWeb) return null;
+    return readNativeVideoMetadata(bytes);
   }
 
   /// Pick and send image
@@ -430,12 +706,17 @@ class MediaHandler {
 
     try {
       if (mimeType.startsWith('video/')) {
+        final videoMetadata = await _readVideoMetadata(bytes);
         // Generate thumbnail at send time — embedded in the event so
         // every receiver loads it instantly (one HTTP GET, no canvas).
         Uint8List? thumbBytes;
+        ({int width, int height})? thumbDimensions;
         try {
           debugPrint('[Send] Generating video thumbnail before upload...');
-          thumbBytes = await web_video.generateVideoThumbnail(bytes, mimeType);
+          thumbBytes = await _generateVideoThumbnail(bytes, mimeType);
+          if (thumbBytes != null && thumbBytes.isNotEmpty) {
+            thumbDimensions = await _decodeImageDimensions(thumbBytes);
+          }
           debugPrint('[Send] Thumbnail: ${thumbBytes?.length ?? 0} bytes');
         } catch (e) {
           debugPrint('[Send] Thumbnail generation failed (non-fatal): $e');
@@ -447,6 +728,11 @@ class MediaHandler {
           videoFileName: fileName,
           videoMimeType: mimeType,
           thumbBytes: thumbBytes,
+          videoWidth: videoMetadata?.width,
+          videoHeight: videoMetadata?.height,
+          durationMs: videoMetadata?.durationMs,
+          thumbnailWidth: thumbDimensions?.width,
+          thumbnailHeight: thumbDimensions?.height,
         );
       } else {
         final matrixFile = MatrixImageFile(

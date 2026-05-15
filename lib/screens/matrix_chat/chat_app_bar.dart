@@ -4,6 +4,7 @@ import 'package:matrix/matrix.dart';
 import '../../theme.dart';
 import '../../services/matrix_service.dart';
 import '../../services/direct_chat_service.dart';
+import '../../services/voip_service.dart';
 import '../../providers/matrix_provider.dart';
 import '../../widgets/direct_chat/online_status_indicator.dart';
 import '../../widgets/story/story_avatar.dart';
@@ -71,10 +72,25 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
     );
   }
 
+  Future<void> _startDirectCall(BuildContext context, bool video) async {
+    try {
+      await VoipService().startCall(room, video: video);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unable to start ${video ? 'video' : 'voice'} call: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final matrixService = MatrixService();
     final memberCount = room.summary.mJoinedMemberCount ?? 0;
+    final audienceLabel = _isChannel ? 'subscribers' : 'members';
     final name = MatrixService.cleanName(
       matrixService.getResolvedDisplayName(room),
     );
@@ -119,7 +135,7 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                         Text(
-                          '$memberCount members',
+                          '$memberCount $audienceLabel',
                           style: GoogleFonts.inter(
                               color: kLightGrey, fontSize: 11),
                         ),
@@ -130,6 +146,18 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
               ),
             ),
       actions: [
+        if (_isDirect) ...[
+          IconButton(
+            tooltip: 'Voice call',
+            icon: const Icon(Icons.call, color: kWhite, size: 21),
+            onPressed: () => _startDirectCall(context, false),
+          ),
+          IconButton(
+            tooltip: 'Video call',
+            icon: const Icon(Icons.videocam, color: kWhite, size: 23),
+            onPressed: () => _startDirectCall(context, true),
+          ),
+        ],
         PopupMenuButton<String>(
           icon: const Icon(Icons.more_vert, color: kWhite, size: 22),
           color: kDarkerGrey,
@@ -216,7 +244,7 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
             context,
             title: _isChannel ? 'Delete Channel?' : 'Delete Group?',
             message: _isChannel
-                ? 'This will permanently delete the channel for all members. This action cannot be undone.'
+                ? 'This will permanently delete the channel for all subscribers. This action cannot be undone.'
                 : 'This will permanently delete the group for all members. This action cannot be undone.',
             confirmText: 'Delete',
             onConfirm: onDeleteGroup!,

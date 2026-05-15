@@ -18,6 +18,7 @@ class MediaMessageBubble extends StatelessWidget {
   final Future<void> Function(Event) playVideo;
   final void Function(Uint8List, String, Event) openFullscreenImage;
   final Widget Function(Event) buildMessageStatus;
+  final bool isEdited;
 
   const MediaMessageBubble({
     super.key,
@@ -31,10 +32,16 @@ class MediaMessageBubble extends StatelessWidget {
     required this.playVideo,
     required this.openFullscreenImage,
     required this.buildMessageStatus,
+    this.isEdited = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final caption = event.content['xmo_caption'] is String
+        ? (event.content['xmo_caption'] as String).trim()
+        : '';
+    final durationMs = isImage ? null : _videoDurationMs;
+
     return Column(
       crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: [
@@ -64,6 +71,27 @@ class MediaMessageBubble extends StatelessWidget {
                 loadVideoThumbnail: loadVideoThumbnail,
                 playVideo: playVideo,
               ),
+            if (durationMs != null && durationMs > 0)
+              Positioned(
+                top: 8,
+                left: 8,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    _formatDuration(durationMs),
+                    style: GoogleFonts.inter(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
             // Tick and time overlay at bottom-right inside the media
             Positioned(
               bottom: 8,
@@ -74,31 +102,96 @@ class MediaMessageBubble extends StatelessWidget {
                   color: Colors.black.withValues(alpha: 0.6),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (isMe) ...[
-                      const Icon(
-                        Icons.done_all,
-                        color: Colors.white,
-                        size: 14,
-                      ),
-                      const SizedBox(width: 4),
-                    ],
-                    Text(
-                      time,
-                      style: GoogleFonts.inter(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
+                child: _buildTimeRow(color: Colors.white),
               ),
             ),
           ],
         ),
+        if (caption.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          _buildCaptionBubble(caption),
+        ],
+      ],
+    );
+  }
+
+  int? get _videoDurationMs {
+    final info = event.content['info'];
+    if (info is! Map) return null;
+    final raw = info['duration'];
+    if (raw is num) return raw.round();
+    if (raw is String) return int.tryParse(raw);
+    return null;
+  }
+
+  String _formatDuration(int durationMs) {
+    final duration = Duration(milliseconds: durationMs);
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    final seconds = duration.inSeconds.remainder(60);
+    if (hours > 0) {
+      return '$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  Widget _buildCaptionBubble(String caption) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 260),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: isMe ? const Color(0xFF1A2A1A) : const Color(0xFF2C2C2E),
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(isMe ? 18 : 4),
+            topRight: const Radius.circular(18),
+            bottomLeft: const Radius.circular(18),
+            bottomRight: Radius.circular(isMe ? 4 : 18),
+          ),
+        ),
+        child: Text(
+          caption,
+          style: GoogleFonts.inter(
+            color: isMe ? kLimeGreen : kWhite,
+            fontSize: 14,
+            height: 1.25,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTimeRow({required Color color}) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          time,
+          style: GoogleFonts.inter(
+            color: color,
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        if (isMe) ...[
+          const SizedBox(width: 4),
+          Icon(
+            Icons.done_all,
+            color: color,
+            size: 14,
+          ),
+        ],
+        if (isEdited) ...[
+          const SizedBox(width: 4),
+          Text(
+            'edited',
+            style: GoogleFonts.inter(
+              color: color.withValues(alpha: 0.75),
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
       ],
     );
   }

@@ -1,12 +1,17 @@
+// ignore_for_file: deprecated_member_use, use_build_context_synchronously
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
+import '../../models/group_models.dart';
+import '../../services/group_service.dart';
 import '../../services/matrix_service.dart';
 import '../../widgets/story/story_avatar.dart';
 import '../app_settings_screen.dart';
 import '../login_screen.dart';
+import '../matrix_chat_screen.dart';
 import '../profile_settings_screen.dart';
 
 /// Main navigation drawer for the app
@@ -30,7 +35,8 @@ class XmoDrawer extends StatelessWidget {
                 DrawerHeader(data: data),
                 const Divider(color: kDarkGrey, height: 1),
                 const SizedBox(height: 8),
-                const CreateRoomTile(),
+                const NewChannelTile(),
+                const NewGroupTile(),
                 ..._buildMenuItems(context),
                 const Spacer(),
                 const Divider(color: kDarkGrey, height: 1),
@@ -50,22 +56,65 @@ class XmoDrawer extends StatelessWidget {
       {'icon': Icons.contacts_outlined, 'label': 'Contacts'},
       {'icon': Icons.phone_outlined, 'label': 'Calls'},
       {'icon': Icons.bookmark_outline, 'label': 'Saved Messages'},
+      {'icon': Icons.download_outlined, 'label': 'Downloads'},
       {'icon': Icons.settings_outlined, 'label': 'Settings'},
-      {'icon': Icons.info_outline, 'label': 'About xmo'},
+      {'icon': Icons.volunteer_activism_outlined, 'label': 'Donation'},
     ];
 
     return items.map((item) {
       final label = item['label'] as String;
-      return ListTile(
-        leading: Icon(item['icon'] as IconData, color: kWhite, size: 22),
-        title: Text(
+      Widget leadingWidget;
+      Widget titleWidget;
+
+      if (label == 'Donation') {
+        leadingWidget = SizedBox(
+          width: 22,
+          height: 22,
+          child: OverflowBox(
+            maxWidth: 100, // Let the image grow outside the 22x22 box
+            maxHeight: 100,
+            child: Image.asset(
+              'assets/images/no_bg_transparent(1).gif',
+              width: 60, // Sweet spot between 46 and 80
+              height: 60,
+              fit: BoxFit.contain,
+            ),
+          ),
+        );
+        titleWidget = ShaderMask(
+          blendMode: BlendMode.srcIn,
+          shaderCallback: (bounds) => const LinearGradient(
+            colors: [
+              Color(0xFF20D7A3), // Teal on the left
+              Color(0xFF1686D9), // Blue on the right
+            ],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+          ).createShader(Rect.fromLTWH(0, 0, bounds.width, bounds.height)),
+          child: Text(
+            label,
+            style: GoogleFonts.inter(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        );
+      } else {
+        leadingWidget = Icon(item['icon'] as IconData, color: kWhite, size: 22);
+        titleWidget = Text(
           label,
           style: GoogleFonts.inter(
             color: kWhite,
             fontSize: 15,
             fontWeight: FontWeight.w500,
           ),
-        ),
+        );
+      }
+
+      return ListTile(
+        leading: leadingWidget,
+        title: titleWidget,
         onTap: () {
           Navigator.pop(context);
           if (label == 'My Profile') {
@@ -151,16 +200,15 @@ class DrawerHeader extends StatelessWidget {
   }
 }
 
-/// Create new Matrix room tile
-class CreateRoomTile extends StatelessWidget {
-  const CreateRoomTile({super.key});
+class NewChannelTile extends StatelessWidget {
+  const NewChannelTile({super.key});
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: const Icon(Icons.add_circle_outline, color: kLimeGreen, size: 22),
+      leading: const Icon(Icons.campaign_outlined, color: kLimeGreen, size: 22),
       title: Text(
-        'New Matrix Room',
+        'New Channel',
         style: GoogleFonts.inter(
           color: kLimeGreen,
           fontSize: 15,
@@ -169,58 +217,278 @@ class CreateRoomTile extends StatelessWidget {
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
       onTap: () {
+        final rootContext = Navigator.of(context).context;
         Navigator.pop(context);
-        _showCreateRoomDialog(context);
+        Future.microtask(() => _showCreateGroupDialog(rootContext));
       },
     );
   }
 
-  void _showCreateRoomDialog(BuildContext context) {
-    final ctrl = TextEditingController();
-    final provider = context.read<MatrixProvider>();
+  void _showCreateGroupDialog(BuildContext context) {
+    final nameCtrl = TextEditingController();
+    final descCtrl = TextEditingController();
+    GroupType groupType = GroupType.private;
+    JoinRule joinRule = JoinRule.invite;
 
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: kDarkerGrey,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'New Matrix Room',
-          style: GoogleFonts.inter(color: kWhite, fontWeight: FontWeight.w600),
-        ),
-        content: TextField(
-          controller: ctrl,
-          style: GoogleFonts.inter(color: kWhite),
-          autofocus: true,
-          decoration: InputDecoration(
-            hintText: 'Room name',
-            hintStyle: GoogleFonts.inter(color: kLightGrey),
-            enabledBorder: const UnderlineInputBorder(
-              borderSide: BorderSide(color: kDarkGrey),
-            ),
-            focusedBorder: const UnderlineInputBorder(
-              borderSide: BorderSide(color: kLimeGreen),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: kDarkerGrey,
+          title: Text('New Group', style: GoogleFonts.inter(color: kWhite)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  style: const TextStyle(color: kWhite),
+                  decoration: const InputDecoration(
+                    labelText: 'Group Name',
+                    labelStyle: TextStyle(color: kLightGrey),
+                    hintText: 'Enter group name',
+                    hintStyle: TextStyle(color: Colors.white54),
+                    enabledBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: kLimeGreen)),
+                    focusedBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: kLimeGreen)),
+                  ),
+                  autofocus: true,
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: descCtrl,
+                  style: const TextStyle(color: kWhite),
+                  decoration: const InputDecoration(
+                    labelText: 'Description (Optional)',
+                    labelStyle: TextStyle(color: kLightGrey),
+                    hintText: 'What is this group about?',
+                    hintStyle: TextStyle(color: Colors.white54),
+                    enabledBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: kLimeGreen)),
+                    focusedBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: kLimeGreen)),
+                  ),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 20),
+                Text('Group Type',
+                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 12)),
+                Row(
+                  children: [
+                    Expanded(
+                      child: RadioListTile<GroupType>(
+                        title: const Text('Private',
+                            style: TextStyle(color: kWhite, fontSize: 14)),
+                        value: GroupType.private,
+                        groupValue: groupType,
+                        activeColor: kLimeGreen,
+                        contentPadding: EdgeInsets.zero,
+                        onChanged: (value) {
+                          setDialogState(() => groupType = value!);
+                        },
+                      ),
+                    ),
+                    Expanded(
+                      child: RadioListTile<GroupType>(
+                        title: const Text('Public',
+                            style: TextStyle(color: kWhite, fontSize: 14)),
+                        value: GroupType.public,
+                        groupValue: groupType,
+                        activeColor: kLimeGreen,
+                        contentPadding: EdgeInsets.zero,
+                        onChanged: (value) {
+                          setDialogState(() => groupType = value!);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                Text('Who Can Join?',
+                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 12)),
+                RadioListTile<JoinRule>(
+                  title: const Text('Invite Only',
+                      style: TextStyle(color: kWhite, fontSize: 14)),
+                  value: JoinRule.invite,
+                  groupValue: joinRule,
+                  activeColor: kLimeGreen,
+                  contentPadding: EdgeInsets.zero,
+                  onChanged: (value) {
+                    setDialogState(() => joinRule = value!);
+                  },
+                ),
+                RadioListTile<JoinRule>(
+                  title: const Text('Open',
+                      style: TextStyle(color: kWhite, fontSize: 14)),
+                  value: JoinRule.open,
+                  groupValue: joinRule,
+                  activeColor: kLimeGreen,
+                  contentPadding: EdgeInsets.zero,
+                  onChanged: (value) {
+                    setDialogState(() => joinRule = value!);
+                  },
+                ),
+              ],
             ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child:
+                  const Text('Cancel', style: TextStyle(color: Colors.white54)),
+            ),
+            TextButton(
+              onPressed: () async {
+                final name = nameCtrl.text.trim();
+                if (name.isEmpty) return;
+                Navigator.pop(ctx);
+                final provider = context.read<MatrixProvider>();
+                final groupService = GroupService(provider.service);
+                await _createAndOpenRoom(
+                  context: context,
+                  provider: provider,
+                  createRoom: () => groupService.createGroup(
+                    name: name,
+                    description: descCtrl.text.trim().isEmpty
+                        ? null
+                        : descCtrl.text.trim(),
+                    type: groupType,
+                    joinRule: joinRule,
+                  ),
+                  errorPrefix: 'Failed to create group',
+                );
+              },
+              child: const Text('Create', style: TextStyle(color: kLimeGreen)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+Future<void> _createAndOpenRoom({
+  required BuildContext context,
+  required MatrixProvider provider,
+  required Future<String> Function() createRoom,
+  required String errorPrefix,
+}) async {
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const Center(
+      child: CircularProgressIndicator(color: kLimeGreen),
+    ),
+  );
+
+  try {
+    final roomId = await createRoom();
+    await provider.service.client.oneShotSync();
+    provider.refreshRooms();
+    final room = provider.service.getRoomById(roomId);
+
+    if (context.mounted) Navigator.pop(context);
+    if (!context.mounted) return;
+
+    if (room != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => MatrixChatScreen(
+            room: room,
+            matrixProvider: provider,
+          ),
+        ),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Created successfully. It will appear on Home shortly.'),
+        backgroundColor: kLimeGreen,
+      ),
+    );
+  } catch (e) {
+    if (context.mounted) Navigator.pop(context);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$errorPrefix: $e'),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+}
+
+class NewGroupTile extends StatelessWidget {
+  const NewGroupTile({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.group_add_outlined, color: kLimeGreen, size: 22),
+      title: Text(
+        'New Group',
+        style: GoogleFonts.inter(
+          color: kLimeGreen,
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
+      onTap: () {
+        final rootContext = Navigator.of(context).context;
+        Navigator.pop(context);
+        Future.microtask(() => _showCreateChannelDialog(rootContext));
+      },
+    );
+  }
+
+  void _showCreateChannelDialog(BuildContext context) {
+    final nameCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: kDarkerGrey,
+        title: Text('New Channel', style: GoogleFonts.inter(color: kWhite)),
+        content: TextField(
+          controller: nameCtrl,
+          style: const TextStyle(color: kWhite),
+          decoration: const InputDecoration(
+            hintText: 'Channel Name',
+            hintStyle: TextStyle(color: Colors.white54),
+            enabledBorder:
+                UnderlineInputBorder(borderSide: BorderSide(color: kLimeGreen)),
+            focusedBorder:
+                UnderlineInputBorder(borderSide: BorderSide(color: kLimeGreen)),
+          ),
+          autofocus: true,
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.inter(color: kLightGrey)),
+            onPressed: () => Navigator.pop(ctx),
+            child:
+                const Text('Cancel', style: TextStyle(color: Colors.white54)),
           ),
           TextButton(
             onPressed: () async {
-              if (ctrl.text.trim().isEmpty) return;
-              Navigator.pop(context);
-              await provider.createRoom(ctrl.text.trim());
+              final name = nameCtrl.text.trim();
+              if (name.isEmpty) return;
+              Navigator.pop(ctx);
+              final provider = context.read<MatrixProvider>();
+              await _createAndOpenRoom(
+                context: context,
+                provider: provider,
+                createRoom: () => provider.service.createChannel(
+                  name: name,
+                  isPublic: true,
+                ),
+                errorPrefix: 'Failed to create channel',
+              );
             },
-            child: Text(
-              'Create',
-              style: GoogleFonts.inter(
-                color: kLimeGreen,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            child: const Text('Create', style: TextStyle(color: kLimeGreen)),
           ),
         ],
       ),

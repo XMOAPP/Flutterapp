@@ -242,7 +242,8 @@ class MatrixProvider extends ChangeNotifier {
         normalizedUserId = '@$normalizedUserId';
       }
       if (!normalizedUserId.contains(':')) {
-        normalizedUserId = '$normalizedUserId:localhost';
+        normalizedUserId =
+            '$normalizedUserId:${MatrixService.matrixServerName}';
       }
 
       debugPrint(

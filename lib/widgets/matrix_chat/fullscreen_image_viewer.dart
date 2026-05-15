@@ -1,9 +1,9 @@
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import '../../theme.dart';
-import '../../screens/web_download_stub.dart' if (dart.library.html) '../../screens/web_download.dart' as web_download;
+import '../../screens/web_download_stub.dart' if (dart.library.js_interop) '../../screens/web_download.dart' as web_download;
 
 /// Fullscreen image viewer with zoom and download functionality
 class FullscreenImageViewer extends StatelessWidget {
@@ -20,12 +20,13 @@ class FullscreenImageViewer extends StatelessWidget {
 
   Future<void> _saveImage(BuildContext context) async {
     try {
-      web_download.downloadFile(imageBytes, title);
+      await web_download.downloadFile(imageBytes, title);
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Downloaded: $title'),
+            content:
+                Text(kIsWeb ? 'Downloaded: $title' : 'Downloaded successfully'),
             backgroundColor: const Color(0xFF1A2A1A),
             duration: const Duration(seconds: 2),
           ),

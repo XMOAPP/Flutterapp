@@ -85,8 +85,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     if (_currentStoryIndex >= _currentUserStories.length) return;
 
     final currentStory = _currentUserStories[_currentStoryIndex];
-    if (currentStory.mediaType == StoryMediaType.video &&
-        currentStory.mediaUrl != null) {
+    if (_isVideoStory(currentStory)) {
       _activeVideoStoryId = currentStory.id;
       setState(() {});
       return;
@@ -231,15 +230,23 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
           ),
         );
 
-        // Reload stories
+        _progressTimer?.cancel();
+
+        var shouldClose = false;
         setState(() {
           _currentUserStories.removeAt(_currentStoryIndex);
           if (_currentUserStories.isEmpty) {
-            Navigator.pop(context);
+            shouldClose = true;
           } else if (_currentStoryIndex >= _currentUserStories.length) {
             _currentStoryIndex = _currentUserStories.length - 1;
           }
         });
+
+        if (shouldClose) {
+          _closeViewer();
+        } else {
+          _startStoryProgress();
+        }
       }
     }
   }
@@ -289,7 +296,17 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
       backgroundColor: kBlack,
       body: GestureDetector(
         onTapDown: (details) {
-          final screenWidth = MediaQuery.of(context).size.width;
+          final mediaQuery = MediaQuery.of(context);
+          final screenWidth = mediaQuery.size.width;
+          final screenHeight = mediaQuery.size.height;
+          final tapY = details.globalPosition.dy;
+
+          // Let header and bottom action buttons handle their own taps.
+          if (tapY < mediaQuery.padding.top + 72 ||
+              (isMyStory && tapY > screenHeight - 96)) {
+            return;
+          }
+
           if (details.globalPosition.dx < screenWidth / 3) {
             _previousStory();
           } else if (details.globalPosition.dx > screenWidth * 2 / 3) {
@@ -363,7 +380,33 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   }
 
   Widget _buildStoryContent(Story story) {
-    if (story.mediaType == StoryMediaType.image && story.mediaUrl != null) {
+    if (_isVideoStory(story)) {
+      final matrixProvider = context.read<MatrixProvider>();
+      final httpUrl = matrixProvider.service.getHttpUrl(story.mediaUrl);
+
+      if (httpUrl != null) {
+        return StoryVideoPlayer.url(
+          key: ValueKey('${story.id}:${story.mediaUrl}'),
+          url: httpUrl.toString(),
+          mimeType: story.mediaMimeType ?? 'video/mp4',
+          looping: false,
+          paused: _isPaused,
+          enableTapToPause: false,
+          onProgress: (progress) {
+            if (!mounted || _activeVideoStoryId != story.id) return;
+            if ((progress - _progress).abs() < 0.01 && progress < 1) return;
+            setState(() => _progress = progress);
+          },
+          onCompleted: () {
+            if (!mounted || _activeVideoStoryId != story.id) return;
+            _nextStory();
+          },
+        );
+      }
+      return _buildTextStory(story);
+    }
+
+    if (_isImageStory(story)) {
       // Convert MXC URL to HTTP URL
       final matrixProvider = context.read<MatrixProvider>();
       final httpUrl = matrixProvider.service.getHttpUrl(story.mediaUrl);
@@ -391,34 +434,25 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
       } else {
         return _buildTextStory(story);
       }
-    } else if (story.mediaType == StoryMediaType.video &&
-        story.mediaUrl != null) {
-      final matrixProvider = context.read<MatrixProvider>();
-      final httpUrl = matrixProvider.service.getHttpUrl(story.mediaUrl);
-
-      if (httpUrl != null) {
-        return StoryVideoPlayer.url(
-          key: ValueKey(story.mediaUrl),
-          url: httpUrl.toString(),
-          mimeType: story.mediaMimeType ?? 'video/mp4',
-          looping: false,
-          paused: _isPaused,
-          enableTapToPause: false,
-          onProgress: (progress) {
-            if (!mounted || _activeVideoStoryId != story.id) return;
-            if ((progress - _progress).abs() < 0.01 && progress < 1) return;
-            setState(() => _progress = progress);
-          },
-          onCompleted: () {
-            if (!mounted || _activeVideoStoryId != story.id) return;
-            _nextStory();
-          },
-        );
-      }
-      return _buildTextStory(story);
     } else {
       return _buildTextStory(story);
     }
+  }
+
+  bool _isVideoStory(Story story) {
+    final mimeType = story.mediaMimeType?.toLowerCase() ?? '';
+    return story.mediaUrl != null &&
+        (story.mediaType == StoryMediaType.video ||
+            mimeType.startsWith('video/') ||
+            story.thumbnailUrl != null);
+  }
+
+  bool _isImageStory(Story story) {
+    final mimeType = story.mediaMimeType?.toLowerCase() ?? '';
+    return story.mediaUrl != null &&
+        story.mediaType == StoryMediaType.image &&
+        !mimeType.startsWith('video/') &&
+        story.thumbnailUrl == null;
   }
 
   Widget _buildTextStory(Story story) {

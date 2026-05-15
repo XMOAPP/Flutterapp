@@ -7,6 +7,7 @@ const Color kDarkerGrey = Color(0xFF111111);
 const Color kMediumGrey = Color(0xFF2A2A2A);
 const Color kLightGrey = Color(0xFF888888);
 const Color kLimeGreen = Color(0xFFA3E635);
+const Color kAudioBlue = Color(0xFF3B82F6);
 const Color kBlueGrey = Color(0xFF3A3A3C); // Message bubble grey for unread badges
 const Color kWhite = Color(0xFFFFFFFF);
 

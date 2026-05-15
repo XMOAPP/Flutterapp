@@ -26,7 +26,6 @@ class UserSearchBar extends StatelessWidget {
         decoration: BoxDecoration(
           color: kDarkGrey,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
         ),
         child: TextField(
           controller: controller,

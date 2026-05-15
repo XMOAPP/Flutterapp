@@ -19,30 +19,30 @@ class StoryAvatar extends StatelessWidget {
     required this.userName,
     this.avatarUrl,
     required this.size,
-    this.backgroundColor = kLimeGreen,
-    this.textColor = kBlack,
+    this.backgroundColor = kDarkGrey,
+    this.textColor = kLimeGreen,
     this.border,
     this.fallbackIcon,
   });
 
   @override
   Widget build(BuildContext context) {
+    final resolvedUrl = _resolveAvatarUrl(context);
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: backgroundColor,
         shape: BoxShape.circle,
+        color: backgroundColor,
         border: border,
       ),
       child: ClipOval(
-        child: _buildContent(context),
+        child: _buildContent(resolvedUrl),
       ),
     );
   }
 
-  Widget _buildContent(BuildContext context) {
-    final resolvedUrl = _resolveAvatarUrl(context);
+  Widget _buildContent(String? resolvedUrl) {
     if (resolvedUrl != null) {
       return Image.network(
         resolvedUrl,
@@ -90,4 +90,5 @@ class StoryAvatar extends StatelessWidget {
       ),
     );
   }
+
 }

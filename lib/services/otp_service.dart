@@ -1,7 +1,7 @@
 import 'dart:convert';
-import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../config/app_config.dart';
 
 /// Handles Email OTP Authentication via local SMTP server.
 class OtpService {
@@ -9,42 +9,76 @@ class OtpService {
   factory OtpService() => _instance;
   OtpService._internal();
 
-  String? _currentOtp;
+  Uri get _otpBaseUri {
+    final value = AppConfig.otpServerUrl.trim();
+    final normalized = value.endsWith('/')
+        ? value.substring(0, value.length - 1)
+        : value;
+    return Uri.parse(normalized);
+  }
 
-  /// Generates an OTP locally and sends it to the [email] via local backend.
+  Uri _endpoint(String path) {
+    final base = _otpBaseUri;
+    return base.replace(path: '${base.path}/$path');
+  }
+
+  /// Requests the backend to generate and send an OTP to [email].
   Future<void> sendEmailOtp({
     required String email,
     required VoidCallback onCodeSent,
     required Function(String) onError,
   }) async {
     try {
-      // Generate random 6 digit code
-      _currentOtp = (Random().nextInt(900000) + 100000).toString();
-      
-      // Make HTTP request to our local email_server.dart
       final response = await http.post(
-        Uri.parse('http://localhost:3000'),
+        _endpoint('send'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'email': email,
-          'otp': _currentOtp,
         }),
       );
 
       if (response.statusCode == 200) {
         onCodeSent();
       } else {
-        final err = jsonDecode(response.body)['error'] ?? 'Unknown error';
+        final err = _decodeError(response.body);
         onError('Server error: $err');
       }
     } catch (e) {
       debugPrint("HTTP Error: $e");
-      onError('Failed to connect to email server. Is email_server.dart running?');
+      onError('Failed to connect to OTP server.');
     }
   }
 
-  /// Verifies the OTP [code] entered by the user.
-  Future<bool> verifyOtp(String code) async {
-    return _currentOtp != null && code == _currentOtp;
+  /// Verifies [code] for [email] on the backend.
+  Future<bool> verifyOtp({
+    required String email,
+    required String code,
+  }) async {
+    try {
+      final response = await http.post(
+        _endpoint('verify'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'otp': code,
+        }),
+      );
+
+      if (response.statusCode != 200) return false;
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return data['success'] == true;
+    } catch (e) {
+      debugPrint("HTTP Error: $e");
+      return false;
+    }
+  }
+
+  String _decodeError(String body) {
+    try {
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      return data['error']?.toString() ?? 'Unknown error';
+    } catch (_) {
+      return body.isEmpty ? 'Unknown error' : body;
+    }
   }
 }

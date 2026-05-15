@@ -166,7 +166,10 @@ class _OtpScreenState extends State<OtpScreen>
       _error = null;
     });
 
-    final isValid = await OtpService().verifyOtp(code);
+    final isValid = await OtpService().verifyOtp(
+      email: widget.email,
+      code: code,
+    );
 
     if (!isValid) {
       if (!mounted) return;
