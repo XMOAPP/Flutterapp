@@ -3,8 +3,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
+import 'package:provider/provider.dart';
 import '../../theme.dart';
+import '../../providers/matrix_provider.dart';
 import '../../services/matrix_service.dart';
+import '../../widgets/story/story_avatar.dart';
 
 /// Group Settings Screen - Edit group name, description, avatar, and settings
 class GroupSettingsScreen extends StatefulWidget {
@@ -21,9 +24,10 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
   final _descCtrl = TextEditingController();
   bool _loading = false;
   bool _isPublic = false;
-  bool _historyVisible = true;
   Uint8List? _selectedAvatarBytes;
   String? _selectedAvatarName;
+  String? _avatarUrl;
+  bool _removeAvatar = false;
 
   String get _resolvedRoomName =>
       MatrixService().getResolvedDisplayName(widget.room);
@@ -34,10 +38,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
     _nameCtrl.text = _resolvedRoomName;
     _descCtrl.text = widget.room.topic;
     _isPublic = widget.room.joinRules == JoinRules.public;
-    
-    // Get history visibility
-    final historyState = widget.room.getState(EventTypes.HistoryVisibility);
-    _historyVisible = historyState?.content['history_visibility'] == 'shared';
+    _avatarUrl = _resolveRoomAvatarUrl();
   }
 
   @override
@@ -54,16 +55,18 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
         type: FileType.image,
         withData: true,
       );
-      
+
       debugPrint('[GroupSettings] FilePicker result: ${result != null}');
-      
+
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.first;
-        debugPrint('[GroupSettings] File selected: ${file.name}, bytes: ${file.bytes?.length}');
+        debugPrint(
+            '[GroupSettings] File selected: ${file.name}, bytes: ${file.bytes?.length}');
         if (file.bytes != null) {
           setState(() {
             _selectedAvatarBytes = file.bytes;
             _selectedAvatarName = file.name;
+            _removeAvatar = false;
           });
           debugPrint('[GroupSettings] Avatar bytes set successfully');
         }
@@ -90,14 +93,20 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
       if (_nameCtrl.text.trim() != _resolvedRoomName) {
         await widget.room.setName(_nameCtrl.text.trim());
       }
-      
+
       // Update description
       if (_descCtrl.text.trim() != widget.room.topic) {
         await widget.room.setDescription(_descCtrl.text.trim());
       }
-      
-      // Update avatar if selected
-      if (_selectedAvatarBytes != null) {
+
+      if (_removeAvatar) {
+        await widget.room.client.setRoomStateWithKey(
+          widget.room.id,
+          'm.room.avatar',
+          '',
+          <String, dynamic>{},
+        );
+      } else if (_selectedAvatarBytes != null) {
         final matrixFile = MatrixFile(
           bytes: _selectedAvatarBytes!,
           name: _selectedAvatarName ?? 'avatar.jpg',
@@ -105,7 +114,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
         );
         await widget.room.setAvatar(matrixFile);
       }
-      
+
       // Update privacy settings (join rules)
       final newJoinRule = _isPublic ? 'public' : 'invite';
       await widget.room.client.setRoomStateWithKey(
@@ -114,23 +123,24 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
         '',
         {'join_rule': newJoinRule},
       );
-      
+
       // Update history visibility
       await widget.room.client.setRoomStateWithKey(
         widget.room.id,
         EventTypes.HistoryVisibility,
         '',
-        {'history_visibility': _historyVisible ? 'shared' : 'invited'},
+        {'history_visibility': 'shared'},
       );
-      
+
       if (mounted) {
+        context.read<MatrixProvider>().refreshRooms();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Settings saved successfully'),
             backgroundColor: kLimeGreen,
           ),
         );
-        Navigator.pop(context);
+        Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
@@ -152,6 +162,62 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
     if (lower.endsWith('.webp')) return 'image/webp';
     if (lower.endsWith('.gif')) return 'image/gif';
     return 'image/jpeg';
+  }
+
+  Widget _buildAvatarPreview() {
+    if (_removeAvatar) {
+      return StoryAvatar(
+        userName: _resolvedRoomName,
+        avatarUrl: null,
+        size: 80,
+        fallbackIcon: Icons.group,
+      );
+    }
+
+    final selectedBytes = _selectedAvatarBytes;
+    if (selectedBytes != null) {
+      return ClipOval(
+        child: Image.memory(
+          selectedBytes,
+          width: 80,
+          height: 80,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+        ),
+      );
+    }
+
+    return StoryAvatar(
+      userName: _resolvedRoomName,
+      avatarUrl: _avatarUrl ?? _resolveRoomAvatarUrl(),
+      size: 80,
+      fallbackIcon: Icons.group,
+    );
+  }
+
+  String? _resolveRoomAvatarUrl() {
+    final roomAvatar = widget.room.avatar?.toString();
+    if (roomAvatar != null && roomAvatar.isNotEmpty) return roomAvatar;
+
+    final avatarState = widget.room.getState('m.room.avatar');
+    final stateUrl = avatarState?.content['url'];
+    if (stateUrl is String && stateUrl.isNotEmpty) return stateUrl;
+
+    final stateAvatarUrl = avatarState?.content['avatar_url'];
+    if (stateAvatarUrl is String && stateAvatarUrl.isNotEmpty) {
+      return stateAvatarUrl;
+    }
+
+    return null;
+  }
+
+  void _removeRoomAvatar() {
+    setState(() {
+      _removeAvatar = true;
+      _selectedAvatarBytes = null;
+      _selectedAvatarName = null;
+      _avatarUrl = null;
+    });
   }
 
   Widget _buildPermissionRow(String action, String level) {
@@ -246,34 +312,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                       borderRadius: BorderRadius.circular(40),
                       child: Stack(
                         children: [
-                          Container(
-                            width: 80,
-                            height: 80,
-                            decoration: BoxDecoration(
-                              color: kLimeGreen,
-                              shape: BoxShape.circle,
-                              image: _selectedAvatarBytes != null
-                                  ? DecorationImage(
-                                      image: MemoryImage(_selectedAvatarBytes!),
-                                      fit: BoxFit.cover,
-                                    )
-                                  : null,
-                            ),
-                            child: _selectedAvatarBytes == null
-                                ? Center(
-                                    child: Text(
-                                      _resolvedRoomName.isNotEmpty
-                                          ? _resolvedRoomName[0].toUpperCase()
-                                          : 'G',
-                                      style: GoogleFonts.inter(
-                                        color: kBlack,
-                                        fontSize: 32,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  )
-                                : null,
-                          ),
+                          _buildAvatarPreview(),
                           Positioned(
                             bottom: 0,
                             right: 0,
@@ -302,11 +341,32 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                       fontSize: 11,
                     ),
                   ),
+                  if (_selectedAvatarBytes != null ||
+                      _removeAvatar ||
+                      _avatarUrl != null) ...[
+                    const SizedBox(height: 2),
+                    TextButton.icon(
+                      onPressed: _loading ? null : _removeRoomAvatar,
+                      icon: const Icon(
+                        Icons.delete_outline,
+                        color: Colors.redAccent,
+                        size: 16,
+                      ),
+                      label: Text(
+                        'Remove photo',
+                        style: GoogleFonts.inter(
+                          color: Colors.redAccent,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
             const SizedBox(height: 20),
-            
+
             // Group Name
             Text(
               'Group Name',
@@ -324,16 +384,17 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                 hintText: 'Enter group name',
                 hintStyle: const TextStyle(color: Colors.white54, fontSize: 13),
                 filled: true,
-                fillColor: kDarkerGrey,
+                fillColor: const Color(0xFF2C2C2E),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               ),
             ),
             const SizedBox(height: 16),
-            
+
             // Description
             Text(
               'Description',
@@ -352,7 +413,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                 hintText: 'What is this group about?',
                 hintStyle: const TextStyle(color: Colors.white54, fontSize: 13),
                 filled: true,
-                fillColor: kDarkerGrey,
+                fillColor: const Color(0xFF2C2C2E),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -361,7 +422,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
               ),
             ),
             const SizedBox(height: 20),
-            
+
             // Privacy Settings
             Text(
               'Privacy Settings',
@@ -372,16 +433,17 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
               ),
             ),
             const SizedBox(height: 12),
-            
+
             // Public/Private Toggle
             Container(
               decoration: BoxDecoration(
-                color: kDarkerGrey,
+                color: Colors.transparent,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: SwitchListTile(
                 dense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 title: Text(
                   'Public Group',
                   style: GoogleFonts.inter(color: kWhite, fontSize: 13),
@@ -403,43 +465,13 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            
-            // History Visibility Toggle
-            Container(
-              decoration: BoxDecoration(
-                color: kDarkerGrey,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: SwitchListTile(
-                dense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                title: Text(
-                  'Message History',
-                  style: GoogleFonts.inter(color: kWhite, fontSize: 13),
-                ),
-                subtitle: Text(
-                  _historyVisible
-                      ? 'New members can see message history'
-                      : 'New members only see messages after joining',
-                  style: GoogleFonts.inter(
-                    color: kLightGrey,
-                    fontSize: 11,
-                  ),
-                ),
-                value: _historyVisible,
-                activeThumbColor: kLimeGreen,
-                onChanged: (value) {
-                  setState(() => _historyVisible = value);
-                },
-              ),
-            ),
             const SizedBox(height: 20),
-            
+
             // Permissions Info
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: kDarkerGrey,
+                color: Colors.transparent,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
@@ -447,7 +479,8 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.admin_panel_settings_outlined, color: kLimeGreen, size: 18),
+                      const Icon(Icons.admin_panel_settings_outlined,
+                          color: kLimeGreen, size: 18),
                       const SizedBox(width: 8),
                       Text(
                         'Permissions',
@@ -461,10 +494,12 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                   ),
                   const SizedBox(height: 10),
                   _buildPermissionRow('Send Messages', 'All members'),
-                  _buildPermissionRow('Invite Users', 'Helpers and above'),
-                  _buildPermissionRow('Pin Messages', 'Helpers and above'),
-                  _buildPermissionRow('Kick/Ban Members', 'Moderators and above'),
-                  _buildPermissionRow('Delete Messages', 'Moderators and above'),
+                  _buildPermissionRow('Invite Users', 'Moderators and above'),
+                  _buildPermissionRow('Pin Messages', 'Moderators and above'),
+                  _buildPermissionRow(
+                      'Kick/Ban Members', 'Moderators and above'),
+                  _buildPermissionRow(
+                      'Delete Messages', 'Moderators and above'),
                   _buildPermissionRow('Edit Group Info', 'Admins only'),
                   const SizedBox(height: 6),
                   Text(

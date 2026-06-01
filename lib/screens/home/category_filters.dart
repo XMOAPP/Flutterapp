@@ -6,6 +6,7 @@ import '../../theme.dart';
 import '../../providers/chat_filter_provider.dart';
 import '../../providers/matrix_provider.dart';
 import '../../providers/story_provider.dart';
+import '../../services/call_history_service.dart';
 
 /// Category filter chips for filtering chats
 class CategoryFilters extends StatelessWidget {
@@ -13,6 +14,7 @@ class CategoryFilters extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    CallHistoryService().ensureLoaded();
     return Selector3<ChatFilterProvider, MatrixProvider, StoryProvider, FilterData>(
       selector: (_, filterProvider, matrixProvider, storyProvider) {
         final activeRooms = matrixProvider.rooms.where((room) {
@@ -34,42 +36,64 @@ class CategoryFilters extends StatelessWidget {
         );
       },
       builder: (context, data, _) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                FilterChip(
-                  label: 'All',
-                  badge: data.allCount.toString(),
-                  isSelected: data.filter == ChatFilter.all,
-                  onTap: () => context.read<ChatFilterProvider>().setFilter(ChatFilter.all),
+        return ValueListenableBuilder<List<CallHistoryEntry>>(
+          valueListenable: CallHistoryService().entries,
+          builder: (context, calls, _) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    FilterChip(
+                      label: 'All',
+                      badge: data.allCount.toString(),
+                      isSelected: data.filter == ChatFilter.all,
+                      onTap: () => context
+                          .read<ChatFilterProvider>()
+                          .setFilter(ChatFilter.all),
+                    ),
+                    const SizedBox(width: 8),
+                    FilterChip(
+                      label: 'Stories',
+                      badge: data.storiesCount.toString(),
+                      isSelected: data.filter == ChatFilter.stories,
+                      onTap: () => context
+                          .read<ChatFilterProvider>()
+                          .setFilter(ChatFilter.stories),
+                    ),
+                    const SizedBox(width: 8),
+                    FilterChip(
+                      label: 'Groups',
+                      badge: data.groupCount.toString(),
+                      isSelected: data.filter == ChatFilter.groups,
+                      onTap: () => context
+                          .read<ChatFilterProvider>()
+                          .setFilter(ChatFilter.groups),
+                    ),
+                    const SizedBox(width: 8),
+                    FilterChip(
+                      label: 'Channels',
+                      badge: data.channelCount.toString(),
+                      isSelected: data.filter == ChatFilter.channels,
+                      onTap: () => context
+                          .read<ChatFilterProvider>()
+                          .setFilter(ChatFilter.channels),
+                    ),
+                    const SizedBox(width: 8),
+                    FilterChip(
+                      label: 'Calls',
+                      badge: calls.length.toString(),
+                      isSelected: data.filter == ChatFilter.calls,
+                      onTap: () => context
+                          .read<ChatFilterProvider>()
+                          .setFilter(ChatFilter.calls),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                FilterChip(
-                  label: 'Stories',
-                  badge: data.storiesCount.toString(),
-                  isSelected: data.filter == ChatFilter.stories,
-                  onTap: () => context.read<ChatFilterProvider>().setFilter(ChatFilter.stories),
-                ),
-                const SizedBox(width: 8),
-                FilterChip(
-                  label: 'Groups',
-                  badge: data.groupCount.toString(),
-                  isSelected: data.filter == ChatFilter.groups,
-                  onTap: () => context.read<ChatFilterProvider>().setFilter(ChatFilter.groups),
-                ),
-                const SizedBox(width: 8),
-                FilterChip(
-                  label: 'Channels',
-                  badge: data.channelCount.toString(),
-                  isSelected: data.filter == ChatFilter.channels,
-                  onTap: () => context.read<ChatFilterProvider>().setFilter(ChatFilter.channels),
-                ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
@@ -134,7 +158,7 @@ class FilterChip extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? kLimeGreen : kDarkGrey,
+          color: isSelected ? kLimeGreen : const Color(0xFF2C2C2E),
           borderRadius: BorderRadius.circular(18),
         ),
         child: Row(

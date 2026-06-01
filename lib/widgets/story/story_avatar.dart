@@ -13,16 +13,18 @@ class StoryAvatar extends StatelessWidget {
   final Color textColor;
   final BoxBorder? border;
   final IconData? fallbackIcon;
+  final double? fallbackIconSize;
 
   const StoryAvatar({
     super.key,
     required this.userName,
     this.avatarUrl,
     required this.size,
-    this.backgroundColor = kDarkGrey,
+    this.backgroundColor = const Color(0xFF2C2C2E),
     this.textColor = kLimeGreen,
     this.border,
     this.fallbackIcon,
+    this.fallbackIconSize,
   });
 
   @override
@@ -73,7 +75,7 @@ class StoryAvatar extends StatelessWidget {
       return Icon(
         fallbackIcon,
         color: textColor,
-        size: size * 0.46,
+        size: fallbackIconSize ?? size * 0.46,
       );
     }
 

@@ -6,6 +6,7 @@ import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/group_service.dart';
 import '../../models/group_models.dart';
+import '../../widgets/story/story_avatar.dart';
 import 'admin_log_screen.dart';
 
 /// Admin Panel Screen - Manage admins and permissions
@@ -36,9 +37,9 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     setState(() => _loading = true);
     try {
       final allMembers = await _groupService.getGroupMembers(widget.room.id);
-      final admins = allMembers.where((m) => m.powerLevel >= 25).toList();
+      final admins = allMembers.where((m) => m.powerLevel >= 50).toList();
       final regularMembers =
-          allMembers.where((m) => m.powerLevel < 25).toList();
+          allMembers.where((m) => m.powerLevel < 50).toList();
 
       if (mounted) {
         setState(() {
@@ -75,15 +76,8 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
             const SizedBox(height: 16),
             _buildRoleOption(
               ctx,
-              'Helper',
-              'Can invite members and pin messages',
-              25,
-              member,
-            ),
-            _buildRoleOption(
-              ctx,
               'Moderator',
-              'Can kick, ban, and delete messages',
+              'Can invite, pin, kick, ban, and delete messages',
               50,
               member,
             ),
@@ -341,19 +335,10 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     return ListTile(
       dense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: CircleAvatar(
-        radius: 16,
-        backgroundColor: kDarkGrey,
-        child: Text(
-          admin.displayName.isNotEmpty
-              ? admin.displayName[0].toUpperCase()
-              : '?',
-          style: GoogleFonts.inter(
-            color: kLimeGreen,
-            fontWeight: FontWeight.bold,
-            fontSize: 12,
-          ),
-        ),
+      leading: StoryAvatar(
+        userName: admin.displayName,
+        avatarUrl: admin.avatarUrl,
+        size: 32,
       ),
       title: Row(
         children: [
@@ -365,10 +350,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
           ),
           _buildRoleBadge(admin.role),
         ],
-      ),
-      subtitle: Text(
-        'Power Level: ${admin.powerLevel}',
-        style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
       ),
       trailing: !isMe && admin.role != MemberRole.owner
           ? IconButton(
@@ -393,19 +374,10 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     return ListTile(
       dense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: CircleAvatar(
-        radius: 16,
-        backgroundColor: kDarkGrey,
-        child: Text(
-          member.displayName.isNotEmpty
-              ? member.displayName[0].toUpperCase()
-              : '?',
-          style: GoogleFonts.inter(
-            color: kLimeGreen,
-            fontWeight: FontWeight.bold,
-            fontSize: 12,
-          ),
-        ),
+      leading: StoryAvatar(
+        userName: member.displayName,
+        avatarUrl: member.avatarUrl,
+        size: 32,
       ),
       title: Text(
         member.displayName,
@@ -445,10 +417,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
         label = 'Mod';
         color = const Color(0xFF3B82F6);
         break;
-      case MemberRole.helper:
-        label = 'Helper';
-        color = const Color(0xFF14B8A6);
-        break;
       case MemberRole.restricted:
         label = 'Restricted';
         color = Colors.orange;
@@ -462,7 +430,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color, width: 1),
       ),
       child: Text(
         label,

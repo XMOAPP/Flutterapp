@@ -47,7 +47,7 @@ void _registerVideoElement(String viewId, String src) {
     video.style.width = '100%';
     video.style.height = '100%';
     video.style.objectFit = 'contain';
-    video.style.backgroundColor = '#000000';
+    video.style.backgroundColor = '#0B1014';
     return video;
   });
 }

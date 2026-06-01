@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-const Color kBlack = Color(0xFF000000);
+const Color kBlack = Color(0xFF0B1014);
 const Color kDarkGrey = Color(0xFF1A1A1A);
 const Color kDarkerGrey = Color(0xFF111111);
 const Color kMediumGrey = Color(0xFF2A2A2A);
@@ -35,6 +35,9 @@ ThemeData buildXmoTheme() {
     appBarTheme: AppBarTheme(
       backgroundColor: kBlack,
       elevation: 0,
+      scrolledUnderElevation: 0,
+      surfaceTintColor: Colors.transparent,
+      shadowColor: Colors.transparent,
       iconTheme: const IconThemeData(color: kWhite),
       titleTextStyle: GoogleFonts.inter(
         color: kWhite,

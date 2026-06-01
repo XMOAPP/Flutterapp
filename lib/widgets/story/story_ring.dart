@@ -346,7 +346,7 @@ class AddStoryButton extends StatelessWidget {
                     userName: userName,
                     avatarUrl: avatarUrl,
                     size: size - 5,
-                    backgroundColor: kDarkerGrey,
+                    backgroundColor: const Color(0xFF2C2C2E),
                     textColor: kWhite,
                     fallbackIcon: Icons.person,
                   ),

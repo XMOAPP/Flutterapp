@@ -34,7 +34,7 @@ class GroupService {
     final matrixVisibility =
         type == GroupType.public ? Visibility.public : Visibility.private;
     final matrixJoinRules = _convertJoinRule(joinRule);
-    final matrixHistoryVisibility = historyVisible ? 'shared' : 'invited';
+    const matrixHistoryVisibility = 'shared';
 
     // Create room with group settings
     final roomId = await _client.createRoom(
@@ -67,7 +67,7 @@ class GroupService {
       powerLevelContentOverride: {
         'events_default': 0, // Everyone can send messages
         'users_default': 0, // Default user power level
-        'invite': 25, // Helpers can invite
+        'invite': 50, // Moderators can invite
         'kick': 50, // Moderators can kick
         'ban': 50, // Moderators can ban
         'redact': 50, // Moderators can delete messages
@@ -77,7 +77,9 @@ class GroupService {
           'm.room.topic': 75,
           'm.room.avatar': 75,
           'm.room.power_levels': 100,
-          'm.room.pinned_events': 25,
+          'm.room.pinned_events': 50,
+          EventTypes.GroupCallPrefix: 0,
+          EventTypes.GroupCallMemberPrefix: 0,
         },
       },
     );
@@ -132,10 +134,7 @@ class GroupService {
       roomId,
       EventTypes.HistoryVisibility,
       '',
-      {
-        'history_visibility':
-            settings.historyVisibleToNewMembers ? 'shared' : 'invited'
-      },
+      {'history_visibility': 'shared'},
     );
 
     await _recordAdminAction(
@@ -144,7 +143,7 @@ class GroupService {
       metadata: {
         'name': settings.name,
         'join_rule': settings.joinRule.name,
-        'history_visible': settings.historyVisibleToNewMembers,
+        'history_visible': true,
       },
     );
     debugPrint('[GroupService] Group settings updated');
@@ -156,8 +155,6 @@ class GroupService {
     if (room == null) throw Exception('Room not found: $roomId');
 
     final joinRulesState = room.getState(EventTypes.RoomJoinRules);
-    final historyState = room.getState(EventTypes.HistoryVisibility);
-
     return GroupSettings(
       name: room.name,
       description: room.topic,
@@ -166,8 +163,7 @@ class GroupService {
           ? GroupType.public
           : GroupType.private,
       joinRule: _convertToJoinRule(joinRulesState?.content['join_rule']),
-      historyVisibleToNewMembers:
-          historyState?.content['history_visibility'] == 'shared',
+      historyVisibleToNewMembers: true,
     );
   }
 
@@ -204,7 +200,7 @@ class GroupService {
   Future<void> addMember(String roomId, String userId) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
-    _ensureOwnPower(room, 25, 'invite members');
+    _ensureOwnPower(room, 50, 'invite members');
 
     debugPrint('[GroupService] Adding member $userId to $roomId');
     await room.invite(userId);
@@ -351,7 +347,7 @@ class GroupService {
   /// Gets all admins in the group
   Future<List<GroupMember>> getAdmins(String roomId) async {
     final members = await getGroupMembers(roomId);
-    return members.where((m) => m.powerLevel >= 25).toList();
+    return members.where((m) => m.powerLevel >= 50).toList();
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -362,7 +358,7 @@ class GroupService {
   Future<void> pinMessage(String roomId, String eventId) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
-    _ensureOwnPower(room, 25, 'pin messages');
+    _ensureOwnPower(room, 50, 'pin messages');
 
     debugPrint('[GroupService] Pinning message $eventId in $roomId');
 
@@ -394,7 +390,7 @@ class GroupService {
   Future<void> unpinMessage(String roomId, String eventId) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
-    _ensureOwnPower(room, 25, 'unpin messages');
+    _ensureOwnPower(room, 50, 'unpin messages');
 
     debugPrint('[GroupService] Unpinning message $eventId in $roomId');
 
@@ -657,9 +653,9 @@ class GroupService {
   // GROUP DELETION
   // ═══════════════════════════════════════════════════════════════════════════
 
-  static bool canInviteMembers(int powerLevel) => powerLevel >= 25;
+  static bool canInviteMembers(int powerLevel) => powerLevel >= 50;
 
-  static bool canPinMessages(int powerLevel) => powerLevel >= 25;
+  static bool canPinMessages(int powerLevel) => powerLevel >= 50;
 
   static bool canModerateMembers(int powerLevel) => powerLevel >= 50;
 

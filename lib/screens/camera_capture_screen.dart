@@ -372,7 +372,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
     }
 
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: kBlack,
       body: SafeArea(
         child: Stack(
           children: [
@@ -478,7 +478,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
 
   Widget _buildCapturedPreview(Uint8List bytes) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: kBlack,
       body: SafeArea(
         child: Stack(
           children: [
@@ -516,7 +516,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
 
   Widget _buildCapturedVideoPreview(VideoPlayerController controller) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: kBlack,
       body: SafeArea(
         child: Stack(
           children: [

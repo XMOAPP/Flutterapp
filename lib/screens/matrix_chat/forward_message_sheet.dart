@@ -179,7 +179,10 @@ class _ForwardMessageSheetState extends State<_ForwardMessageSheet> {
                               .toList();
                           Navigator.pop(context, selectedRooms);
                         },
-                  icon: const Icon(Icons.send, size: 19),
+                  icon: Transform.scale(
+                    scaleX: -1,
+                    child: const Icon(Icons.reply, size: 19),
+                  ),
                   label: Text(
                     _selectedRoomIds.isEmpty
                         ? 'Select chat'

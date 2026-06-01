@@ -7,11 +7,15 @@ import '../../services/matrix_service.dart';
 /// Pinned Messages Banner - Shows at top of chat when messages are pinned
 class PinnedMessagesBanner extends StatelessWidget {
   final List<Event> pinnedEvents;
+  final Event currentEvent;
+  final int currentPosition;
   final VoidCallback onTap;
 
   const PinnedMessagesBanner({
     super.key,
     required this.pinnedEvents,
+    required this.currentEvent,
+    required this.currentPosition,
     required this.onTap,
   });
 
@@ -19,16 +23,15 @@ class PinnedMessagesBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     if (pinnedEvents.isEmpty) return const SizedBox.shrink();
 
-    final firstPinned = pinnedEvents.first;
-    final senderName = MatrixService.cleanName(firstPinned.senderId);
-    final messagePreview = _getMessagePreview(firstPinned);
+    final senderName = MatrixService.cleanName(currentEvent.senderId);
+    final messagePreview = _getMessagePreview(currentEvent);
     final count = pinnedEvents.length;
 
     return InkWell(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-        decoration: const BoxDecoration(color: kDarkerGrey),
+        decoration: const BoxDecoration(color: Color(0xFF2C2C2E)),
         child: Row(
           children: [
             const Icon(
@@ -43,7 +46,9 @@ class PinnedMessagesBanner extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    count > 1 ? '$count Pinned Messages' : 'Pinned Message',
+                    count > 1
+                        ? 'Pinned Message $currentPosition of $count'
+                        : 'Pinned Message',
                     style: GoogleFonts.inter(
                       color: kLimeGreen,
                       fontSize: 10.5,

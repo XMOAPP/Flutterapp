@@ -9,6 +9,7 @@ import 'package:matrix/matrix.dart';
 import '../../services/matrix_service.dart';
 import '../../services/voip_service.dart';
 import '../../theme.dart';
+import '../../widgets/story/story_avatar.dart';
 
 class DirectCallScreen extends StatefulWidget {
   final CallSession session;
@@ -39,10 +40,13 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
   bool get _isVideoCall => _session.type == CallType.kVideo;
   bool get _isIncoming => _session.direction == CallDirection.kIncoming;
   bool get _canAnswer => _isIncoming && _session.state == CallState.kRinging;
+  bool get _shouldKeepCallInPip =>
+      !_closingWithoutPip && !_ending && _session.state != CallState.kEnded;
 
   @override
   void initState() {
     super.initState();
+    VoipService().enterFullscreenCallRoute();
     _subscriptions.add(
       _session.onCallStateChanged.stream.listen((_) => _handleCallUpdate()),
     );
@@ -55,30 +59,20 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
     _subscriptions.add(
       _session.onStreamRemoved.stream.listen((_) => _handleCallUpdate()),
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_isVideoCall) _enableSpeaker();
+      _startDurationTimerIfConnected();
+    });
   }
 
   void _handleCallUpdate() {
     if (!mounted) return;
     setState(() {});
 
-    // Start the duration timer when call connects
-    final voip = VoipService();
-    if (_session.state == CallState.kConnected && _durationTimer == null) {
-      _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (!mounted) return;
-        final connectedAt = voip.callConnectedAt;
-        if (connectedAt != null) {
-          setState(() {
-            _callDuration = DateTime.now().difference(connectedAt);
-          });
-        }
-      });
-      // Seed immediately
-      final connectedAt = voip.callConnectedAt;
-      if (connectedAt != null) {
-        _callDuration = DateTime.now().difference(connectedAt);
-      }
+    if (_session.state == CallState.kConnected && _isVideoCall) {
+      _enableSpeaker();
     }
+    _startDurationTimerIfConnected();
 
     if (_session.state == CallState.kEnded && !_ending) {
       _ending = true;
@@ -95,6 +89,10 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
     _durationTimer?.cancel();
     for (final subscription in _subscriptions) {
       subscription.cancel();
+    }
+    VoipService().exitFullscreenCallRoute();
+    if (_shouldKeepCallInPip) {
+      VoipService().minimizeCall();
     }
     super.dispose();
   }
@@ -138,12 +136,21 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
   }
 
   Future<void> _toggleSpeaker() async {
+    if (_isVideoCall) return;
     try {
       _speakerOn = !_speakerOn;
-      webrtc.Helper.setSpeakerphoneOn(_speakerOn);
+      await webrtc.Helper.setSpeakerphoneOn(_speakerOn);
       if (mounted) setState(() {});
     } catch (e) {
       debugPrint('[DirectCallScreen] Speaker toggle failed: $e');
+    }
+  }
+
+  Future<void> _enableSpeaker() async {
+    try {
+      await webrtc.Helper.setSpeakerphoneOn(true);
+    } catch (e) {
+      debugPrint('[DirectCallScreen] Speaker enable failed: $e');
     }
   }
 
@@ -163,15 +170,18 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
   }
 
   void _minimizeToPopup() {
+    if (!_shouldKeepCallInPip) return;
     VoipService().minimizeCall();
-    if (mounted && Navigator.canPop(context)) Navigator.pop(context);
+    if (mounted && Navigator.canPop(context)) {
+      Navigator.pop(context);
+      return;
+    }
   }
 
   void _handleRoutePop() {
-    if (_closingWithoutPip || _ending || _session.state == CallState.kEnded) {
-      return;
+    if (_shouldKeepCallInPip) {
+      VoipService().minimizeCall();
     }
-    VoipService().minimizeCall();
   }
 
   void _showError(String message) {
@@ -189,6 +199,29 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
     return '$minutes:$seconds';
   }
 
+  void _startDurationTimerIfConnected() {
+    if (_session.state != CallState.kConnected || _durationTimer != null) {
+      return;
+    }
+
+    void syncDuration() {
+      final connectedAt = VoipService().callConnectedAt;
+      if (connectedAt == null) return;
+      final nextDuration = DateTime.now().difference(connectedAt);
+      if (!mounted) {
+        _callDuration = nextDuration;
+        return;
+      }
+      setState(() => _callDuration = nextDuration);
+    }
+
+    syncDuration();
+    _durationTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => syncDuration(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final title = MatrixService.cleanName(
@@ -203,28 +236,28 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
       child: Scaffold(
         backgroundColor: kBlack,
         body: SafeArea(
-        child: Stack(
-          children: [
-            Positioned.fill(child: _buildCallBody(title)),
-            // ── Top bar: minimize ──────────────────────────────────────────
-            if (!_canAnswer)
-              Positioned(
-                top: 8,
-                left: 8,
-                child: _topBarButton(
-                  icon: Icons.picture_in_picture_alt,
-                  onTap: _minimizeToPopup,
+          child: Stack(
+            children: [
+              Positioned.fill(child: _buildCallBody(title)),
+              // ── Top controls ───────────────────────────────────────────────
+              if (!_canAnswer)
+                Positioned(
+                  top: 8,
+                  left: 8,
+                  child: _topBarButton(
+                    icon: Icons.picture_in_picture_alt,
+                    onTap: _minimizeToPopup,
+                  ),
                 ),
+              // ── Controls ───────────────────────────────────────────────────
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 24,
+                child: _buildControls(),
               ),
-            // ── Controls ───────────────────────────────────────────────────
-            Positioned(
-              left: 16,
-              right: 16,
-              bottom: 24,
-              child: _buildControls(),
-            ),
-          ],
-        ),
+            ],
+          ),
         ),
       ),
     );
@@ -233,17 +266,20 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
   Widget _topBarButton({
     required IconData icon,
     required VoidCallback onTap,
+    double size = 40,
+    double iconSize = 20,
+    Color? backgroundColor,
   }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 40,
-        height: 40,
+        width: size,
+        height: size,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: Colors.black.withValues(alpha: 0.55),
+          color: backgroundColor ?? Colors.black.withValues(alpha: 0.55),
         ),
-        child: Icon(icon, color: kWhite, size: 20),
+        child: Icon(icon, color: kWhite, size: iconSize),
       ),
     );
   }
@@ -283,7 +319,7 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
         Expanded(
           child: _isVideoCall
               ? _buildVideoArea(remoteRenderer, localRenderer)
-              : _buildVoiceArea(title),
+              : _buildVoiceArea(title, _session.room.avatar?.toString()),
         ),
       ],
     );
@@ -310,18 +346,17 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
               child: remoteRenderer != null
                   ? webrtc.RTCVideoView(
                       remoteRenderer,
-                      objectFit: webrtc.RTCVideoViewObjectFit
-                          .RTCVideoViewObjectFitCover,
+                      objectFit: webrtc
+                          .RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
                     )
                   : _buildVoiceArea(
-                      MatrixService()
-                          .getResolvedDisplayName(_session.room),
+                      MatrixService().getResolvedDisplayName(_session.room),
+                      _session.room.avatar?.toString(),
                     ),
             ),
 
             // ── Draggable local video ─────────────────────────────────────
-            if (localRenderer != null &&
-                !_session.isLocalVideoMuted)
+            if (localRenderer != null && !_session.isLocalVideoMuted)
               Positioned(
                 left: clampedX,
                 top: clampedY,
@@ -356,27 +391,6 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
                           ),
                         ),
                       ),
-                      // ── Camera flip button ──────────────────────────────
-                      Positioned(
-                        bottom: 6,
-                        right: 6,
-                        child: GestureDetector(
-                          onTap: _flipCamera,
-                          child: Container(
-                            width: 30,
-                            height: 30,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.black.withValues(alpha: 0.6),
-                            ),
-                            child: const Icon(
-                              Icons.cameraswitch,
-                              color: kWhite,
-                              size: 16,
-                            ),
-                          ),
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -387,30 +401,12 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
     );
   }
 
-  Widget _buildVoiceArea(String title) {
-    final initial = title.trim().isEmpty ? '?' : title.trim()[0].toUpperCase();
+  Widget _buildVoiceArea(String title, String? avatarUrl) {
     return Center(
-      child: Container(
-        width: 132,
-        height: 132,
-        decoration: const BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFFC8FF4A), kLimeGreen, Color(0xFF5F8F16)],
-          ),
-        ),
-        child: Center(
-          child: Text(
-            initial,
-            style: GoogleFonts.inter(
-              color: kBlack,
-              fontSize: 52,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ),
+      child: StoryAvatar(
+        userName: title,
+        avatarUrl: avatarUrl,
+        size: 132,
       ),
     );
   }
@@ -419,19 +415,9 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
     // ── Incoming ringing: swipe to answer + decline ──────────────────────────
     if (_canAnswer) {
       return Row(
+        textDirection: TextDirection.ltr,
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          _SwipeCallActionButton(
-            icon: _isVideoCall ? Icons.videocam : Icons.call,
-            label: 'Answer',
-            gradientColors: const [
-              Color(0xFFD1FF65),
-              kLimeGreen,
-              Color(0xFF6BA320),
-            ],
-            iconColor: kBlack,
-            onCompleted: _answer,
-          ),
           _SwipeCallActionButton(
             icon: Icons.call_end,
             label: 'Decline',
@@ -443,39 +429,60 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
             iconColor: kWhite,
             onCompleted: _reject,
           ),
+          _SwipeCallActionButton(
+            icon: _isVideoCall ? Icons.videocam : Icons.call,
+            label: 'Answer',
+            gradientColors: const [
+              Color(0xFFD1FF65),
+              kLimeGreen,
+              Color(0xFF6BA320),
+            ],
+            iconColor: kBlack,
+            onCompleted: _answer,
+          ),
         ],
       );
     }
 
     // ── Active call controls ────────────────────────────────────────────────
+    final inactiveControlColor = _isVideoCall
+        ? kBlack.withValues(alpha: 0.55)
+        : kWhite.withValues(alpha: 0.10);
+    final activeControlColor = kWhite.withValues(alpha: 0.18);
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
         _CallButton(
           icon: _session.isMicrophoneMuted ? Icons.mic_off : Icons.mic,
           label: _session.isMicrophoneMuted ? 'Muted' : 'Mute',
-          color: _session.isMicrophoneMuted
-              ? kLimeGreen.withValues(alpha: 0.15)
-              : kDarkerGrey,
-          iconColor: _session.isMicrophoneMuted ? kLimeGreen : kWhite,
+          color: inactiveControlColor,
+          iconColor: kWhite,
           onTap: _toggleMic,
         ),
-        _CallButton(
-          icon: _speakerOn ? Icons.volume_up : Icons.volume_down,
-          label: 'Speaker',
-          color: _speakerOn
-              ? kLimeGreen.withValues(alpha: 0.15)
-              : kDarkerGrey,
-          iconColor: _speakerOn ? kLimeGreen : kWhite,
-          onTap: _toggleSpeaker,
-        ),
+        if (_isVideoCall)
+          _CallButton(
+            icon: Icons.cameraswitch,
+            label: 'Rotate',
+            color: inactiveControlColor,
+            onTap: _flipCamera,
+          )
+        else
+          _CallButton(
+            icon: _speakerOn ? Icons.volume_up : Icons.volume_off,
+            label: 'Speaker',
+            color: _speakerOn ? activeControlColor : inactiveControlColor,
+            iconColor: kWhite,
+            onTap: _toggleSpeaker,
+          ),
         if (_isVideoCall)
           _CallButton(
             icon: _session.isLocalVideoMuted
                 ? Icons.videocam_off
                 : Icons.videocam,
             label: _session.isLocalVideoMuted ? 'Camera off' : 'Camera',
-            color: kDarkerGrey,
+            color: inactiveControlColor,
+            iconColor: kWhite,
             onTap: _toggleCamera,
           ),
         _CallButton(
@@ -508,6 +515,7 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
   }
 
   webrtc.RTCVideoRenderer? _rendererFor(WrappedMediaStream? stream) {
+    if (stream?.stream == null) return null;
     final renderer = stream?.renderer;
     return renderer is webrtc.RTCVideoRenderer ? renderer : null;
   }
@@ -624,8 +632,9 @@ class _SwipeCallActionButtonState extends State<_SwipeCallActionButton>
             Transform.translate(
               offset: Offset(0, -lift),
               child: AnimatedContainer(
-                duration:
-                    _completed ? const Duration(milliseconds: 220) : Duration.zero,
+                duration: _completed
+                    ? const Duration(milliseconds: 220)
+                    : Duration.zero,
                 width: _buttonSize,
                 height: _buttonSize,
                 decoration: BoxDecoration(
@@ -781,8 +790,9 @@ class _SwipeToAnswerSliderState extends State<_SwipeToAnswerSlider>
                 left: _trackPadding,
                 top: _trackPadding,
                 child: AnimatedContainer(
-                  duration:
-                      _answered ? const Duration(milliseconds: 250) : Duration.zero,
+                  duration: _answered
+                      ? const Duration(milliseconds: 250)
+                      : Duration.zero,
                   width: thumbOffset + _thumbSize,
                   height: _thumbSize,
                   decoration: BoxDecoration(
@@ -803,9 +813,9 @@ class _SwipeToAnswerSliderState extends State<_SwipeToAnswerSlider>
                   onHorizontalDragUpdate: (details) {
                     if (_answered) return;
                     setState(() {
-                      _dragProgress = (_dragProgress +
-                              details.delta.dx / maxDrag)
-                          .clamp(0.0, 1.0);
+                      _dragProgress =
+                          (_dragProgress + details.delta.dx / maxDrag)
+                              .clamp(0.0, 1.0);
                     });
                   },
                   onHorizontalDragEnd: (_) {
@@ -953,25 +963,30 @@ class _CallButton extends StatelessWidget {
                   )
                 : null,
           ),
-          child: Material(
-            color: Colors.transparent,
-            shape: const CircleBorder(),
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: onTap,
-              child: SizedBox(
-                width: 58,
-                height: 58,
-                child: Icon(icon, color: effectiveIconColor, size: 26),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Material(
+                color: Colors.transparent,
+                shape: const CircleBorder(),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: onTap,
+                  child: SizedBox(
+                    width: 58,
+                    height: 58,
+                    child: Icon(icon, color: effectiveIconColor, size: 26),
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
         ),
         const SizedBox(height: 8),
         Text(
           label,
           style: GoogleFonts.inter(
-            color: isDestructive ? Colors.red : kLightGrey,
+            color: isDestructive ? Colors.red : kWhite,
             fontSize: 11,
             fontWeight: FontWeight.w600,
           ),

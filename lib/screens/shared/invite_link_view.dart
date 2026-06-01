@@ -149,8 +149,6 @@ class InviteLinkView extends StatelessWidget {
                     onRegenerate: onRegenerate,
                     onRevoke: onRevoke,
                   ),
-                  const SizedBox(height: 24),
-                  _InfoBox(roomType: roomType),
                 ],
               ),
             ),
@@ -174,7 +172,7 @@ class _InviteHeader extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: kDarkerGrey,
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
@@ -263,7 +261,7 @@ class _InviteLinkField extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: kDarkerGrey,
+            color: const Color(0xFF2C2C2E),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: kMediumGrey),
           ),
@@ -306,7 +304,7 @@ class _ManagementActions extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: kDarkerGrey,
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -344,50 +342,6 @@ class _ManagementActions extends StatelessWidget {
               style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
             ),
             onTap: canRevoke ? onRevoke : null,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _InfoBox extends StatelessWidget {
-  final String roomType;
-
-  const _InfoBox({required this.roomType});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: kDarkerGrey,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.info_outline, color: kLightGrey, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'About Invite Links',
-                  style: GoogleFonts.inter(
-                    color: kWhite,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'XMO tracks generated invite records for this $roomType. Revoking disables the app-managed record; Matrix server join rules still control final access.',
-                  style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
-                ),
-              ],
-            ),
           ),
         ],
       ),

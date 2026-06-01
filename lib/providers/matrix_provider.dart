@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:typed_data';
 import 'package:matrix/matrix.dart';
 import '../services/matrix_service.dart';
+import '../services/privacy_service.dart';
 
 enum MatrixAuthState { uninitialized, loggedOut, loggingIn, loggedIn, error }
 
@@ -21,6 +22,9 @@ extension RoomXmoExtension on Room {
     );
     if (kind == XmoRoomKind.group) {
       svc.cacheGroupId(id);
+      return false;
+    }
+    if (kind == XmoRoomKind.saved) {
       return false;
     }
     if (kind == XmoRoomKind.channel) {
@@ -45,6 +49,9 @@ extension RoomXmoExtension on Room {
     if (kind == XmoRoomKind.group) {
       svc.cacheGroupId(id);
       return true;
+    }
+    if (kind == XmoRoomKind.saved) {
+      return false;
     }
     if (kind == XmoRoomKind.channel) {
       svc.cacheChannelId(id);
@@ -90,6 +97,8 @@ class MatrixProvider extends ChangeNotifier {
           : MatrixAuthState.loggedOut;
       if (_svc.isLoggedIn) {
         await _svc.refreshProfile();
+        await _syncPublicAccountDirectory();
+        await _ensureSavedMessagesReady();
         _listenSync();
         _svc.startSync();
       }
@@ -114,6 +123,8 @@ class MatrixProvider extends ChangeNotifier {
     try {
       await _svc.loginOrRegisterWithPhone(phone, email);
       await _svc.refreshProfile();
+      await _syncPublicAccountDirectory();
+      await _ensureSavedMessagesReady();
       _state = MatrixAuthState.loggedIn;
       _listenSync();
       _svc.startSync();
@@ -139,6 +150,8 @@ class MatrixProvider extends ChangeNotifier {
     try {
       await _svc.login(username, password);
       await _svc.refreshProfile();
+      await _syncPublicAccountDirectory();
+      await _ensureSavedMessagesReady();
       _state = MatrixAuthState.loggedIn;
       _listenSync();
       _svc.startSync();
@@ -162,6 +175,8 @@ class MatrixProvider extends ChangeNotifier {
     try {
       await _svc.register(username, password);
       await _svc.refreshProfile();
+      await _syncPublicAccountDirectory();
+      await _ensureSavedMessagesReady();
       _state = MatrixAuthState.loggedIn;
       _listenSync();
       _svc.startSync();
@@ -185,6 +200,7 @@ class MatrixProvider extends ChangeNotifier {
     required String displayName,
     Uint8List? avatarBytes,
     String? avatarFileName,
+    bool removeAvatar = false,
   }) async {
     try {
       _error = null;
@@ -192,8 +208,14 @@ class MatrixProvider extends ChangeNotifier {
         displayName: displayName,
         avatarBytes: avatarBytes,
         avatarFileName: avatarFileName ?? 'avatar.jpg',
+        removeAvatar: removeAvatar,
       );
       await _svc.refreshProfile();
+      final privacyService = PrivacyService(_svc);
+      final privacySettings = await privacyService.loadSettings();
+      if (privacySettings.accountIsPublic) {
+        await privacyService.syncPublicAccountDirectory(privacySettings);
+      }
       notifyListeners();
       return true;
     } catch (e) {
@@ -203,7 +225,24 @@ class MatrixProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> _syncPublicAccountDirectory() async {
+    final privacyService = PrivacyService(_svc);
+    final privacySettings = await privacyService.loadSettings();
+    if (privacySettings.accountIsPublic) {
+      await privacyService.syncPublicAccountDirectory(privacySettings);
+    }
+  }
+
   // ─── Rooms ────────────────────────────────────────────────────────────────
+
+  Future<void> _ensureSavedMessagesReady() async {
+    try {
+      await _svc.getOrCreateSavedMessagesRoom();
+      await _svc.deleteDuplicateSavedMessagesRooms();
+    } catch (e) {
+      debugPrint('[MatrixProvider] Saved Messages startup skipped: $e');
+    }
+  }
 
   Future<String?> createRoom(String name, {bool isDirect = false}) async {
     try {
@@ -219,6 +258,18 @@ class MatrixProvider extends ChangeNotifier {
 
   Future<void> sendMessage(String roomId, String text) async {
     await _svc.sendMessage(roomId, text);
+  }
+
+  Future<Room> getOrCreateSavedMessagesRoom() async {
+    final room = await _svc.getOrCreateSavedMessagesRoom();
+    notifyListeners();
+    return room;
+  }
+
+  Future<int> deleteDuplicateSavedMessagesRooms() async {
+    final count = await _svc.deleteDuplicateSavedMessagesRooms();
+    if (count > 0) notifyListeners();
+    return count;
   }
 
   void refreshRooms() {

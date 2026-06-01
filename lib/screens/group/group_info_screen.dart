@@ -6,16 +6,19 @@ import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/group_service.dart';
 import '../../services/matrix_service.dart';
+import '../../services/voip_service.dart';
 import '../../models/group_models.dart';
+import '../../widgets/incoming_call_fullscreen_scope.dart';
 import '../../widgets/story/story_avatar.dart';
 import '../direct_chat/shared_media_screen.dart';
+import '../direct_chat/search_in_chat_screen.dart';
 import 'member_list_screen.dart';
 import 'group_settings_screen.dart';
 import 'add_members_screen.dart';
 import 'admin_panel_screen.dart';
 import 'invite_links_screen.dart';
 
-/// Group Info Screen - Shows group details, members, admins, and settings
+/// Group Info Screen - Shows group details, members, and settings
 class GroupInfoScreen extends StatefulWidget {
   final Room room;
 
@@ -28,8 +31,6 @@ class GroupInfoScreen extends StatefulWidget {
 class _GroupInfoScreenState extends State<GroupInfoScreen> {
   late GroupService _groupService;
   List<GroupMember> _members = [];
-  List<GroupMember> _admins = [];
-  int _sharedMediaCount = 0;
   bool _loading = true;
 
   @override
@@ -44,14 +45,10 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     setState(() => _loading = true);
     try {
       final members = await _groupService.getGroupMembers(widget.room.id);
-      final admins = members.where((m) => m.powerLevel >= 25).toList();
-      final sharedMediaCount = await _loadSharedMediaCount();
 
       if (mounted) {
         setState(() {
           _members = members;
-          _admins = admins;
-          _sharedMediaCount = sharedMediaCount;
           _loading = false;
         });
       }
@@ -63,17 +60,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     }
   }
 
-  Future<int> _loadSharedMediaCount() async {
-    final timeline = await widget.room.getTimeline();
-    return timeline.events.where((event) {
-      final msgType = event.messageType;
-      return msgType == MessageTypes.Image ||
-          msgType == MessageTypes.Video ||
-          msgType == MessageTypes.Audio ||
-          msgType == MessageTypes.File;
-    }).length;
-  }
-
   bool get _canInvite =>
       GroupService.canInviteMembers(widget.room.ownPowerLevel);
 
@@ -83,6 +69,14 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   bool get _canManageAdmins =>
       GroupService.canManageAdmins(widget.room.ownPowerLevel);
 
+  bool get _isOwner => widget.room.ownPowerLevel >= 100;
+
+  bool get _isAdminRole => _canEditSettings && !_isOwner;
+
+  bool get _isModeratorRole => _canInvite && !_canEditSettings;
+
+  bool get _isMemberRole => !_canInvite && !_canEditSettings && !_isOwner;
+
   @override
   Widget build(BuildContext context) {
     final memberCount =
@@ -90,62 +84,73 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     final groupName = MatrixService().getResolvedDisplayName(widget.room);
     final description = widget.room.topic;
 
-    return Scaffold(
-      backgroundColor: kBlack,
-      appBar: AppBar(
+    return IncomingCallFullscreenScope(
+      child: Scaffold(
         backgroundColor: kBlack,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: kWhite),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(
-          'Group Info',
-          style: GoogleFonts.inter(
-            color: kWhite,
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
+        appBar: AppBar(
+          backgroundColor: kBlack,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: kWhite),
+            onPressed: () => Navigator.pop(context),
           ),
-        ),
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
-          : SingleChildScrollView(
-              child: Column(
-                children: [
-                  // Group Header
-                  _buildGroupHeader(groupName, memberCount),
-
-                  // Description
-                  if (description.isNotEmpty) _buildDescription(description),
-
-                  const SizedBox(height: 16),
-
-                  // Actions
-                  _buildActionButtons(),
-
-                  const SizedBox(height: 8),
-
-                  _buildSharedMediaSection(),
-
-                  const SizedBox(height: 8),
-
-                  // Members Section
-                  _buildMembersSection(),
-
-                  // Admins Section
-                  if (_admins.isNotEmpty) _buildAdminsSection(),
-
-                  const SizedBox(height: 80),
-                ],
-              ),
+          title: Text(
+            'Group Info',
+            style: GoogleFonts.inter(
+              color: kWhite,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
             ),
+          ),
+          actions: [
+            PopupMenuButton<String>(
+              color: const Color(0xFF262728),
+              elevation: 8,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              icon: const Icon(Icons.more_vert, color: kWhite, size: 28),
+              onSelected: _handleMenuAction,
+              itemBuilder: (context) => _buildMenuItems(),
+            ),
+          ],
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
+            : SingleChildScrollView(
+                child: Column(
+                  children: [
+                    // Group Header
+                    _buildGroupHeader(groupName, memberCount),
+
+                    // Description
+                    if (description.isNotEmpty) _buildDescription(description),
+
+                    const SizedBox(height: 16),
+
+                    // Actions
+                    _buildActionButtons(),
+
+                    const SizedBox(height: 8),
+
+                    // Members Section
+                    _buildMembersSection(),
+
+                    const SizedBox(height: 8),
+
+                    _buildSharedMediaSection(),
+
+                    const SizedBox(height: 80),
+                  ],
+                ),
+              ),
+      ),
     );
   }
 
   Widget _buildGroupHeader(String name, int memberCount) {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
       child: Column(
         children: [
           // Group Avatar
@@ -182,26 +187,221 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     );
   }
 
+  List<PopupMenuEntry<String>> _buildMenuItems() {
+    return [
+      if (_isOwner || _canEditSettings)
+        _buildMenuItem(
+          value: 'edit',
+          icon: Icons.edit,
+          label: 'Edit Group',
+        ),
+      if (_isOwner)
+        _buildMenuItem(
+          value: 'delete',
+          icon: Icons.delete,
+          label: 'Delete Group',
+          destructive: true,
+        )
+      else
+        _buildMenuItem(
+          value: 'leave',
+          icon: Icons.logout,
+          label: 'Leave Group',
+          destructive: true,
+        ),
+    ];
+  }
+
+  PopupMenuItem<String> _buildMenuItem({
+    required String value,
+    required IconData icon,
+    required String label,
+    bool destructive = false,
+  }) {
+    final color = destructive ? Colors.redAccent : kWhite;
+    return PopupMenuItem<String>(
+      value: value,
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 12),
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              color: color,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleMenuAction(String action) async {
+    switch (action) {
+      case 'delete':
+        _confirmDeleteGroup();
+        break;
+      case 'leave':
+        _confirmLeaveGroup();
+        break;
+      case 'voice':
+      case 'video':
+        await _startGroupCall(video: action == 'video');
+        break;
+      case 'search':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => MemberListScreen(
+              room: widget.room,
+              members: _members,
+            ),
+          ),
+        ).then((_) => _loadGroupData());
+        break;
+      case 'edit':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => GroupSettingsScreen(room: widget.room),
+          ),
+        ).then((_) => _loadGroupData());
+        break;
+    }
+  }
+
+  Future<void> _startGroupCall({required bool video}) async {
+    try {
+      await VoipService().startCall(widget.room, video: video);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content:
+              Text('Unable to start ${video ? 'video' : 'voice'} call: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _toggleMute() async {
+    final shouldMute = widget.room.pushRuleState != PushRuleState.dontNotify;
+
+    try {
+      await widget.room.setPushRuleState(
+        shouldMute ? PushRuleState.dontNotify : PushRuleState.notify,
+      );
+      if (!mounted) return;
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(shouldMute ? 'Group muted' : 'Group unmuted'),
+          backgroundColor: kLimeGreen,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unable to update mute: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _openSearch() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SearchInChatScreen(room: widget.room),
+      ),
+    );
+  }
+
+  Future<void> _confirmLeaveGroup() async {
+    final confirmed = await _confirmAction(
+      title: 'Leave Group?',
+      message: 'Leave this group?',
+      actionLabel: 'Leave',
+    );
+    if (confirmed != true) return;
+
+    try {
+      await widget.room.leave();
+      if (!mounted) return;
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to leave group: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _confirmDeleteGroup() async {
+    final confirmed = await _confirmAction(
+      title: 'Delete Group?',
+      message: 'Delete this group for everyone you can remove?',
+      actionLabel: 'Delete',
+    );
+    if (confirmed != true) return;
+
+    try {
+      await _groupService.deleteGroup(widget.room.id);
+      if (!mounted) return;
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to delete group: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<bool?> _confirmAction({
+    required String title,
+    required String message,
+    required String actionLabel,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF262728),
+        title: Text(title, style: GoogleFonts.inter(color: kWhite)),
+        content: Text(message, style: GoogleFonts.inter(color: kLightGrey)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.inter(color: kLightGrey)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(
+              actionLabel,
+              style: GoogleFonts.inter(color: Colors.redAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDescription(String description) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: kDarkerGrey,
-        borderRadius: BorderRadius.circular(12),
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Description',
-            style: GoogleFonts.inter(
-              color: kLightGrey,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
           Text(
             description,
             style: GoogleFonts.inter(
@@ -215,6 +415,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   }
 
   Widget _buildActionButtons() {
+    final isMuted = widget.room.pushRuleState == PushRuleState.dontNotify;
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       child: LayoutBuilder(
@@ -227,62 +429,93 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
               if (_canInvite)
                 _buildActionButton(
                   width: itemWidth,
-                icon: Icons.person_add_outlined,
-                label: 'Add Members',
-                onTap: () async {
-                  final result = await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => AddMembersScreen(room: widget.room),
-                    ),
-                  );
-                  // Reload data if members were added
-                  if (result == true) {
-                    _loadGroupData();
-                  }
-                },
-              ),
-              _buildActionButton(
-                width: itemWidth,
-              icon: Icons.link_outlined,
-              label: 'Invite Link',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => InviteLinksScreen(room: widget.room),
-                  ),
-                );
-              },
-            ),
+                  icon: Icons.person_add,
+                  label: 'Add Members',
+                  onTap: () async {
+                    final result = await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => AddMembersScreen(room: widget.room),
+                      ),
+                    );
+                    // Reload data if members were added
+                    if (result == true) {
+                      _loadGroupData();
+                    }
+                  },
+                ),
+              if (_canInvite)
+                _buildActionButton(
+                  width: itemWidth,
+                  icon: Icons.link,
+                  label: 'Invite Link',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => InviteLinksScreen(room: widget.room),
+                      ),
+                    );
+                  },
+                ),
               if (_canEditSettings)
                 _buildActionButton(
                   width: itemWidth,
-                icon: Icons.settings_outlined,
-                label: 'Settings',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => GroupSettingsScreen(room: widget.room),
-                    ),
-                  ).then((_) => _loadGroupData());
-                },
-              ),
+                  icon: Icons.settings,
+                  label: 'Settings',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => GroupSettingsScreen(room: widget.room),
+                      ),
+                    ).then((_) => _loadGroupData());
+                  },
+                ),
+              if (_isAdminRole || _isModeratorRole || _isMemberRole)
+                _buildActionButton(
+                  width: itemWidth,
+                  icon: isMuted
+                      ? Icons.notifications_active
+                      : Icons.notifications_off,
+                  label: isMuted ? 'Unmute' : 'Mute',
+                  onTap: _toggleMute,
+                ),
+              if (_isModeratorRole || _isMemberRole)
+                _buildActionButton(
+                  width: itemWidth,
+                  icon: Icons.search,
+                  label: 'Search',
+                  onTap: _openSearch,
+                ),
+              if (_isMemberRole)
+                _buildActionButton(
+                  width: itemWidth,
+                  icon: Icons.call,
+                  label: 'Voice',
+                  onTap: () => _startGroupCall(video: false),
+                ),
+              if (_isMemberRole)
+                _buildActionButton(
+                  width: itemWidth,
+                  icon: Icons.videocam,
+                  label: 'Video',
+                  onTap: () => _startGroupCall(video: true),
+                ),
               if (_canManageAdmins)
                 _buildActionButton(
                   width: itemWidth,
-                icon: Icons.admin_panel_settings_outlined,
-                label: 'Admin Panel',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => AdminPanelScreen(room: widget.room),
-                    ),
-                  ).then((_) => _loadGroupData());
-                },
-              ),
+                  icon: Icons.admin_panel_settings,
+                  label: 'Admin Panel',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => AdminPanelScreen(room: widget.room),
+                      ),
+                    ).then((_) => _loadGroupData());
+                  },
+                ),
             ],
           );
         },
@@ -300,18 +533,18 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       width: width,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
-            color: kDarkerGrey,
-            borderRadius: BorderRadius.circular(12),
+            color: const Color(0xFF2C2C2E),
+            borderRadius: BorderRadius.circular(16),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: kLimeGreen, size: 20),
-              const SizedBox(height: 6),
+              Icon(icon, color: kLimeGreen, size: 24),
+              const SizedBox(height: 4),
               Text(
                 label,
                 style: GoogleFonts.inter(
@@ -331,60 +564,23 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   }
 
   Widget _buildSharedMediaSection() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: kDarkerGrey,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: ListTile(
-        dense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: const Icon(
-          Icons.photo_library_outlined,
-          color: kLimeGreen,
-          size: 22,
-        ),
-        title: Text(
-          'Shared Media',
-          style: GoogleFonts.inter(
-            color: kWhite,
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
-        ),
-        subtitle: Text(
-          '$_sharedMediaCount item${_sharedMediaCount == 1 ? '' : 's'}',
-          style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
-        ),
-        trailing: const Icon(Icons.chevron_right, color: kLightGrey, size: 18),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => SharedMediaScreen(room: widget.room),
-            ),
-          );
-        },
-      ),
+    return SharedMediaScreen(
+      room: widget.room,
+      embedded: true,
+      showDivider: false,
     );
   }
 
   Widget _buildMembersSection() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: kDarkerGrey,
-        borderRadius: BorderRadius.circular(12),
-      ),
       child: Column(
         children: [
           ListTile(
             dense: true,
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            leading:
-                const Icon(Icons.group_outlined, color: kLimeGreen, size: 20),
+            leading: const Icon(Icons.group, color: kLimeGreen, size: 20),
             title: Text(
               'Members',
               style: GoogleFonts.inter(
@@ -400,8 +596,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   '${_members.length}',
                   style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
                 ),
-                const SizedBox(width: 8),
-                const Icon(Icons.chevron_right, color: kLightGrey, size: 18),
               ],
             ),
             onTap: () {
@@ -417,7 +611,9 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             },
           ),
           // Show first 3 members
-          ..._members.take(3).map((member) => _buildMemberTile(member)),
+          ..._members.take(3).map(
+                (member) => _buildMemberTile(member, showRole: true),
+              ),
           if (_members.length > 3)
             Padding(
               padding: const EdgeInsets.all(8),
@@ -434,57 +630,16 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     );
   }
 
-  Widget _buildAdminsSection() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: kDarkerGrey,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        children: [
-          ListTile(
-            dense: true,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            leading: const Icon(Icons.admin_panel_settings_outlined,
-                color: kLimeGreen, size: 20),
-            title: Text(
-              'Admins',
-              style: GoogleFonts.inter(
-                color: kWhite,
-                fontWeight: FontWeight.w600,
-                fontSize: 14,
-              ),
-            ),
-            trailing: Text(
-              '${_admins.length}',
-              style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
-            ),
-          ),
-          ..._admins.map((admin) => _buildMemberTile(admin, showRole: true)),
-        ],
-      ),
-    );
-  }
-
   Widget _buildMemberTile(GroupMember member, {bool showRole = false}) {
     return ListTile(
       dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: CircleAvatar(
-        radius: 16,
-        backgroundColor: kDarkGrey,
-        child: Text(
-          member.displayName.isNotEmpty
-              ? member.displayName[0].toUpperCase()
-              : '?',
-          style: GoogleFonts.inter(
-            color: kLimeGreen,
-            fontWeight: FontWeight.bold,
-            fontSize: 12,
-          ),
-        ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      minLeadingWidth: 46,
+      horizontalTitleGap: 12,
+      leading: StoryAvatar(
+        userName: member.displayName,
+        avatarUrl: member.avatarUrl,
+        size: 46,
       ),
       title: Text(
         member.displayName,
@@ -514,10 +669,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         label = 'Mod';
         color = const Color(0xFF3B82F6); // Blue
         break;
-      case MemberRole.helper:
-        label = 'Helper';
-        color = const Color(0xFF14B8A6);
-        break;
       default:
         return const SizedBox.shrink();
     }
@@ -527,7 +678,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color, width: 1),
       ),
       child: Text(
         label,

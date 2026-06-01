@@ -8,8 +8,9 @@ import 'package:provider/provider.dart';
 import '../providers/matrix_provider.dart';
 import '../models/group_models.dart';
 import '../services/group_service.dart';
-import '../services/matrix_service.dart';
+import '../services/privacy_service.dart';
 import '../theme.dart';
+import '../widgets/story/story_avatar.dart';
 import 'matrix_chat_screen.dart';
 import 'user_search/search_bar_widget.dart';
 import 'user_search/user_tile.dart';
@@ -29,6 +30,9 @@ class UserSearchScreen extends StatefulWidget {
 class _UserSearchScreenState extends State<UserSearchScreen> {
   final _searchCtrl = TextEditingController();
   List<Profile> _results = [];
+  List<PublicRoomsChunk> _publicResults = [];
+  final Map<String, bool> _publicRoomChannelFlags = {};
+  final Set<String> _joiningRoomIds = {};
   bool _searching = false;
   bool _startingChat = false;
   String? _error;
@@ -46,6 +50,8 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
     if (query.trim().isEmpty) {
       setState(() {
         _results = [];
+        _publicResults = [];
+        _publicRoomChannelFlags.clear();
         _error = null;
       });
       return;
@@ -64,50 +70,61 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
     });
 
     final provider = context.read<MatrixProvider>();
-    final results = await provider.searchUsers(query);
     final myId = provider.userId;
-    final filtered = results.where((p) => p.userId != myId).toList();
+    final publicAccounts =
+        await PrivacyService(provider.service).searchPublicAccounts(query);
+    final userResults = publicAccounts.map((account) {
+      return Profile(
+        userId: account.userId,
+        displayName: account.displayName,
+        avatarUrl:
+            account.avatarUrl == null ? null : Uri.tryParse(account.avatarUrl!),
+      );
+    }).toList();
+    final filteredUsers = userResults.where((p) => p.userId != myId).toList();
 
-    if (filtered.isNotEmpty) {
+    var publicRooms = <PublicRoomsChunk>[];
+    try {
+      publicRooms = await provider.service.searchPublicRooms(query);
+    } catch (e) {
+      debugPrint('[NewChatSearch] Public room search failed: $e');
+    }
+
+    if (filteredUsers.isNotEmpty || publicRooms.isNotEmpty) {
       if (mounted) {
         setState(() {
-          _results = filtered;
+          _results = filteredUsers;
+          _publicResults = publicRooms;
           _searching = false;
+          _error = null;
         });
+        _resolvePublicRoomTypes(publicRooms);
       }
       return;
-    }
-
-    String matrixId = query.trim();
-    if (!matrixId.startsWith('@')) {
-      matrixId = '@$matrixId';
-    }
-    if (!matrixId.contains(':')) {
-      matrixId = '$matrixId:${MatrixService.matrixServerName}';
-    }
-
-    try {
-      final profile =
-          await provider.service.client.getProfileFromUserId(matrixId);
-
-      if (mounted && profile.userId != myId) {
-        setState(() {
-          _results = [profile];
-          _searching = false;
-        });
-        return;
-      }
-    } catch (e) {
-      debugPrint('Direct Matrix ID lookup failed: $e');
     }
 
     if (mounted) {
       setState(() {
         _results = [];
+        _publicResults = [];
+        _publicRoomChannelFlags.clear();
         _searching = false;
         _error =
-            'No user found for "$query"\n\nTry entering the exact username (e.g., "kiran" or "kiranpeter")';
+            'No user, group, or channel found for "$query"';
       });
+    }
+  }
+
+  Future<void> _resolvePublicRoomTypes(List<PublicRoomsChunk> rooms) async {
+    final provider = context.read<MatrixProvider>();
+    for (final room in rooms) {
+      if (_publicRoomChannelFlags.containsKey(room.roomId)) continue;
+      final isChannel = await provider.service.isPublicRoomChannel(
+        room.roomId,
+        forceRefresh: true,
+      );
+      if (!mounted) return;
+      setState(() => _publicRoomChannelFlags[room.roomId] = isChannel);
     }
   }
 
@@ -238,6 +255,57 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
         backgroundColor: kLimeGreen,
       ),
     );
+  }
+
+  Future<void> _openOrJoinPublicRoom(PublicRoomsChunk publicRoom) async {
+    final provider = context.read<MatrixProvider>();
+    final existingRoom = provider.service.getRoomById(publicRoom.roomId);
+
+    if (existingRoom != null) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => MatrixChatScreen(
+            room: existingRoom,
+            matrixProvider: provider,
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _joiningRoomIds.add(publicRoom.roomId));
+    try {
+      await provider.service.joinRoom(publicRoom.roomId);
+      await Future.delayed(const Duration(milliseconds: 600));
+      await provider.service.client.oneShotSync();
+      provider.refreshRooms();
+
+      final joined = provider.service.getRoomById(publicRoom.roomId);
+      if (!mounted) return;
+      setState(() => _joiningRoomIds.remove(publicRoom.roomId));
+
+      if (joined != null) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => MatrixChatScreen(
+              room: joined,
+              matrixProvider: provider,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _joiningRoomIds.remove(publicRoom.roomId));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to join: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
   }
 
   void _showCreateChannelDialog() {
@@ -504,13 +572,15 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
           UserSearchBar(
             controller: _searchCtrl,
             onChanged: _onSearchChanged,
-            onClear: () {
-              _searchCtrl.clear();
-              setState(() {
-                _results = [];
-                _error = null;
-              });
-            },
+              onClear: () {
+                _searchCtrl.clear();
+                setState(() {
+                  _results = [];
+                  _publicResults = [];
+                  _publicRoomChannelFlags.clear();
+                  _error = null;
+                });
+              },
           ),
           if (_startingChat)
             const LoadingIndicator(message: 'Starting chat...'),
@@ -518,6 +588,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
           if (_error != null && !_searching && !_startingChat)
             ErrorState(error: _error!),
           if (_results.isEmpty &&
+              _publicResults.isEmpty &&
               !_searching &&
               !_startingChat &&
               _error == null &&
@@ -529,7 +600,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                 children: [
                   ListTile(
                     leading: const CircleAvatar(
-                      backgroundColor: kDarkGrey,
+                      backgroundColor: Color(0xFF2C2C2E),
                       child: Icon(Icons.campaign_outlined, color: kLimeGreen),
                     ),
                     title: Text(
@@ -543,7 +614,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                   ),
                   ListTile(
                     leading: const CircleAvatar(
-                      backgroundColor: kDarkGrey,
+                      backgroundColor: Color(0xFF2C2C2E),
                       child: Icon(Icons.group_add_outlined, color: kLimeGreen),
                     ),
                     title: Text(
@@ -556,20 +627,142 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                 ],
               ),
             ),
-          if (_results.isNotEmpty && !_startingChat)
+          if ((_results.isNotEmpty || _publicResults.isNotEmpty) &&
+              !_startingChat)
             Expanded(
-              child: ListView.builder(
+              child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
-                itemCount: _results.length,
-                itemBuilder: (_, i) => UserTile(
-                  key: ValueKey(_results[i].userId),
-                  profile: _results[i],
-                  onTap: () => _startChat(_results[i]),
-                ),
+                children: [
+                  if (_results.isNotEmpty) ...[
+                    _buildSectionHeader('Users'),
+                    ..._results.map(
+                      (profile) => UserTile(
+                        key: ValueKey(profile.userId),
+                        profile: profile,
+                        onTap: () => _startChat(profile),
+                      ),
+                    ),
+                  ],
+                  if (_publicResults.isNotEmpty) ...[
+                    _buildSectionHeader('Public Rooms'),
+                    ..._publicResults.map(_buildPublicRoomTile),
+                  ],
+                ],
               ),
             ),
         ],
       ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 14, 8, 6),
+      child: Text(
+        title.toUpperCase(),
+        style: GoogleFonts.inter(
+          color: kLightGrey,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.1,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPublicRoomTile(PublicRoomsChunk room) {
+    final provider = context.read<MatrixProvider>();
+    final joinedRoom = provider.service.getRoomById(room.roomId);
+    final isJoined = joinedRoom != null;
+    final isJoining = _joiningRoomIds.contains(room.roomId);
+    final isChannel =
+        joinedRoom?.isChannel ?? _publicRoomChannelFlags[room.roomId] ?? false;
+    final name = room.name ?? room.canonicalAlias ?? room.roomId;
+    final topic = room.topic ?? '';
+    final roomIcon = isChannel ? Icons.campaign : Icons.group;
+
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      leading: StoryAvatar(
+        userName: name,
+        avatarUrl: room.avatarUrl?.toString(),
+        size: 42,
+        fallbackIcon: roomIcon,
+      ),
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(
+              name,
+              style: GoogleFonts.inter(
+                color: kWhite,
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: kLimeGreen.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(5),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(roomIcon, color: kLimeGreen, size: 9),
+                const SizedBox(width: 2),
+                Text(
+                  isChannel ? 'Channel' : 'Group',
+                  style: GoogleFonts.inter(
+                    color: kLimeGreen,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      subtitle: Text(
+        topic.isNotEmpty
+            ? topic
+            : '${room.numJoinedMembers} member${room.numJoinedMembers == 1 ? '' : 's'}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+      ),
+      trailing: isJoining
+          ? const SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                color: kLimeGreen,
+                strokeWidth: 2,
+              ),
+            )
+          : TextButton(
+              onPressed: () => _openOrJoinPublicRoom(room),
+              style: TextButton.styleFrom(
+                backgroundColor: isJoined ? kDarkGrey : kLimeGreen,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                isJoined ? 'Open' : 'Join',
+                style: GoogleFonts.inter(
+                  color: isJoined ? kLimeGreen : kBlack,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+      onTap: isJoining ? null : () => _openOrJoinPublicRoom(room),
     );
   }
 }

@@ -12,6 +12,7 @@ enum StoryPrivacy {
   contacts, // Only direct chat contacts
   allUsers, // All users in shared rooms
   custom, // Custom list
+  contactsExcept, // Direct chat contacts except selected users
 }
 
 /// Individual Story Item

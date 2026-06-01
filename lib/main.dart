@@ -11,6 +11,7 @@ import '../services/story_service.dart';
 import '../services/voip_service.dart';
 import '../services/wallet_deep_link_handler.dart';
 import 'screens/direct_chat/call_pip_overlay.dart';
+import 'screens/direct_chat/incoming_call_banner.dart';
 import 'screens/splash_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
@@ -81,9 +82,18 @@ class XmoApp extends StatelessWidget {
                   valueListenable: VoipService().pipMode,
                   builder: (_, isPip, __) {
                     if (!isPip) return const SizedBox.shrink();
-                    return const CallPipOverlay();
+                    return ValueListenableBuilder<int>(
+                      valueListenable: VoipService().fullscreenCallRouteDepth,
+                      builder: (_, fullscreenCallRouteDepth, __) {
+                        if (fullscreenCallRouteDepth > 0) {
+                          return const SizedBox.shrink();
+                        }
+                        return const CallPipOverlay();
+                      },
+                    );
                   },
                 ),
+                const IncomingCallBanner(),
               ],
             );
           },

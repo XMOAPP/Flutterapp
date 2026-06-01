@@ -6,6 +6,7 @@ import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/channel_service.dart';
 import '../../models/channel_models.dart';
+import '../../widgets/story/story_avatar.dart';
 
 /// Subscriber List Screen - View and manage channel subscribers
 class SubscriberListScreen extends StatefulWidget {
@@ -143,7 +144,7 @@ class _SubscriberListScreenState extends State<SubscriberListScreen> {
                 hintStyle: GoogleFonts.inter(color: kLightGrey),
                 prefixIcon: const Icon(Icons.search, color: kLightGrey),
                 filled: true,
-                fillColor: kDarkerGrey,
+                fillColor: const Color(0xFF2C2C2E),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -184,19 +185,10 @@ class _SubscriberListScreenState extends State<SubscriberListScreen> {
     return ListTile(
       dense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: CircleAvatar(
-        radius: 16,
-        backgroundColor: kDarkGrey,
-        child: Text(
-          subscriber.displayName.isNotEmpty
-              ? subscriber.displayName[0].toUpperCase()
-              : '?',
-          style: GoogleFonts.inter(
-            color: kLimeGreen,
-            fontWeight: FontWeight.bold,
-            fontSize: 12,
-          ),
-        ),
+      leading: StoryAvatar(
+        userName: subscriber.displayName,
+        avatarUrl: subscriber.avatarUrl,
+        size: 32,
       ),
       title: Row(
         children: [
@@ -212,7 +204,6 @@ class _SubscriberListScreenState extends State<SubscriberListScreen> {
               decoration: BoxDecoration(
                 color: kLimeGreen.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: kLimeGreen, width: 1),
               ),
               child: Text(
                 'Admin',

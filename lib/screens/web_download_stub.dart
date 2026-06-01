@@ -12,6 +12,7 @@ Future<String> downloadFile(
   Uint8List bytes,
   String fileName, {
   String? mimeType,
+  String? storageCategory,
 }) async {
   if (bytes.isEmpty) {
     throw Exception('File is empty');
@@ -19,9 +20,12 @@ Future<String> downloadFile(
 
   final baseDir =
       Platform.isAndroid ? await getExternalStorageDirectory() : null;
-  final directory = Directory(
+  final rootDirectory = Directory(
     '${(baseDir ?? await getApplicationDocumentsDirectory()).path}/XMO Downloads',
   );
+  final folder = _safeFolderName(storageCategory);
+  final directory =
+      folder == null ? rootDirectory : Directory('${rootDirectory.path}/$folder');
   if (!await directory.exists()) {
     await directory.create(recursive: true);
   }
@@ -73,4 +77,18 @@ Future<void> _saveToAndroidGalleryIfMedia({
 String _safeFileName(String value) {
   final trimmed = value.trim().isEmpty ? 'xmo_file' : value.trim();
   return trimmed.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]'), '_');
+}
+
+String? _safeFolderName(String? value) {
+  switch (value) {
+    case 'videos':
+      return 'Videos';
+    case 'audio':
+      return 'Audio';
+    case 'photos':
+      return 'Photos';
+    case 'files':
+      return 'Files';
+  }
+  return null;
 }

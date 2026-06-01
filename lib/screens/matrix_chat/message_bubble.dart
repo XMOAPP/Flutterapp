@@ -12,7 +12,14 @@ class MessageBubble extends StatelessWidget {
   final Future<Uint8List?> Function(Event, {bool getThumbnail}) loadImageBytes;
   final Future<void> Function(Event) playVideo;
   final Future<void> Function(Event) downloadAndOpenFile;
+  final Future<void> Function(Event)? shareAttachment;
+  final Future<void> Function(Event)? openAttachmentExternally;
   final Future<MatrixFile> Function(Event)? downloadAttachment;
+  final VoidCallback? onReply;
+  final VoidCallback? onForward;
+  final VoidCallback? onPin;
+  final VoidCallback? onDelete;
+  final bool isPinned;
   final void Function(Uint8List, String, Event) openFullscreenImage;
 
   const MessageBubble({
@@ -22,7 +29,14 @@ class MessageBubble extends StatelessWidget {
     required this.loadImageBytes,
     required this.playVideo,
     required this.downloadAndOpenFile,
+    this.shareAttachment,
+    this.openAttachmentExternally,
     this.downloadAttachment,
+    this.onReply,
+    this.onForward,
+    this.onPin,
+    this.onDelete,
+    this.isPinned = false,
     required this.openFullscreenImage,
   });
 
@@ -83,6 +97,13 @@ class MessageBubble extends StatelessWidget {
                 loadImageBytes: loadImageBytes,
                 loadVideoThumbnail: (event) async => null, // Placeholder
                 playVideo: playVideo,
+                downloadAttachment: downloadAndOpenFile,
+                shareAttachment: shareAttachment,
+                onReply: onReply,
+                onForward: onForward,
+                onPin: onPin,
+                onDelete: onDelete,
+                isPinned: isPinned,
                 openFullscreenImage: openFullscreenImage,
                 buildMessageStatus: _buildMessageStatus,
               )
@@ -94,7 +115,14 @@ class MessageBubble extends StatelessWidget {
                 isAudio: isAudio,
                 isFile: isFile,
                 downloadAndOpenFile: downloadAndOpenFile,
+                shareAttachment: shareAttachment,
+                openAttachmentExternally: openAttachmentExternally,
                 downloadAttachment: downloadAttachment,
+                onReply: onReply,
+                onForward: onForward,
+                onPin: onPin,
+                onDelete: onDelete,
+                isPinned: isPinned,
                 buildMessageStatus: _buildMessageStatus,
                 loadImageBytes: loadImageBytes,
               ),

@@ -5,6 +5,7 @@ import 'package:matrix/matrix.dart';
 import 'package:provider/provider.dart';
 import '../providers/matrix_provider.dart';
 import '../theme.dart';
+import '../widgets/story/story_avatar.dart';
 import 'matrix_chat_screen.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -205,16 +206,14 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
         final name = room.name ?? room.roomId;
         final topic = room.topic ?? '';
         final memberCount = room.numJoinedMembers;
-        final initial = name.isNotEmpty ? name[0].toUpperCase() : '#';
 
         return ListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          leading: CircleAvatar(
-            backgroundColor: kDarkGrey,
-            child: Text(
-              initial,
-              style: GoogleFonts.inter(color: kLimeGreen, fontWeight: FontWeight.bold),
-            ),
+          leading: StoryAvatar(
+            userName: name,
+            avatarUrl: room.avatarUrl?.toString(),
+            size: 40,
+            fallbackIcon: isChannel ? Icons.campaign : Icons.groups,
           ),
           title: Row(
             children: [

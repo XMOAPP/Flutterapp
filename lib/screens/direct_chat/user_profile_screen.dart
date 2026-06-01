@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import 'package:provider/provider.dart';
 import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/direct_chat_service.dart';
+import '../../services/voip_service.dart';
 import '../../models/direct_chat_models.dart';
+import '../../widgets/incoming_call_fullscreen_scope.dart';
+import '../../widgets/story/story_avatar.dart';
 import 'shared_media_screen.dart';
-import 'chat_settings_screen.dart';
-import 'search_in_chat_screen.dart';
+
+const String _hiddenChatTag = 'u.xmo.hidden';
 
 /// User Profile Screen for Direct Chats
 class UserProfileScreen extends StatefulWidget {
@@ -203,27 +207,163 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     }
   }
 
+  Future<void> _startDirectCall(bool video) async {
+    try {
+      await VoipService().startCall(widget.room, video: video);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unable to start ${video ? 'video' : 'voice'} call: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _shareContact() async {
+    final displayName = _profile?.displayName.trim().isNotEmpty == true
+        ? _profile!.displayName.trim()
+        : widget.userId;
+    await Clipboard.setData(
+      ClipboardData(text: '$displayName\n${widget.userId}'),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Contact copied'),
+        backgroundColor: kLimeGreen,
+      ),
+    );
+  }
+
+  Future<void> _hideChat() async {
+    try {
+      await widget.room.addTag(_hiddenChatTag);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Chat hidden'),
+          backgroundColor: kLimeGreen,
+        ),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _handleMenuAction(String value) {
+    switch (value) {
+      case 'share':
+        _shareContact();
+        break;
+      case 'hide':
+        _hideChat();
+        break;
+      case 'block':
+        _toggleBlock();
+        break;
+      case 'clear':
+        _clearChat();
+        break;
+    }
+  }
+
+  PopupMenuItem<String> _buildMenuItem({
+    required String value,
+    required IconData icon,
+    required String label,
+    bool destructive = false,
+  }) {
+    final color = destructive ? Colors.redAccent : kWhite;
+    return PopupMenuItem<String>(
+      value: value,
+      height: 42,
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 12),
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              color: color,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<PopupMenuEntry<String>> _buildMenuItems() {
+    return [
+      _buildMenuItem(
+        value: 'share',
+        icon: Icons.share,
+        label: 'Share Contact',
+      ),
+      _buildMenuItem(
+        value: 'hide',
+        icon: Icons.visibility_off,
+        label: 'Hide Chat',
+      ),
+      _buildMenuItem(
+        value: 'block',
+        icon: _isBlocked ? Icons.check_circle : Icons.block,
+        label: _isBlocked ? 'Unblock User' : 'Block User',
+        destructive: true,
+      ),
+      _buildMenuItem(
+        value: 'clear',
+        icon: Icons.delete,
+        label: 'Clear Chat',
+        destructive: true,
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: kBlack,
-      appBar: AppBar(
+    return IncomingCallFullscreenScope(
+      child: Scaffold(
         backgroundColor: kBlack,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: kWhite),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(
-          'Contact Info',
-          style: GoogleFonts.inter(
-            color: kWhite,
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
+        appBar: AppBar(
+          backgroundColor: kBlack,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: kWhite),
+            onPressed: () => Navigator.pop(context),
           ),
+          title: Text(
+            'Contact Info',
+            style: GoogleFonts.inter(
+              color: kWhite,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          actions: [
+            PopupMenuButton<String>(
+              color: const Color(0xFF262728),
+              elevation: 8,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              icon: const Icon(Icons.more_vert, color: kWhite, size: 28),
+              onSelected: _handleMenuAction,
+              itemBuilder: (_) => _buildMenuItems(),
+            ),
+          ],
         ),
-      ),
-      body: _loading
+        body: _loading
           ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
           : _profile == null
               ? Center(
@@ -239,29 +379,18 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                       _buildProfileHeader(),
                       const SizedBox(height: 24),
 
-                      // Status
-                      _buildStatusSection(),
-                      const SizedBox(height: 8),
-
                       // Actions
                       _buildActionsSection(),
                       const SizedBox(height: 8),
 
                       // Shared Media
                       _buildSharedMediaSection(),
-                      const SizedBox(height: 8),
-
-                      // Settings
-                      _buildSettingsSection(),
-                      const SizedBox(height: 8),
-
-                      // Danger Zone
-                      _buildDangerZoneSection(),
 
                       const SizedBox(height: 80),
                     ],
                   ),
                 ),
+      ),
     );
   }
 
@@ -270,26 +399,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       padding: const EdgeInsets.all(20),
       child: Column(
         children: [
-          // Avatar
-          Container(
-            width: 80,
-            height: 80,
-            decoration: const BoxDecoration(
-              color: kLimeGreen,
-              shape: BoxShape.circle,
-            ),
-            child: Center(
-              child: Text(
-                _profile!.displayName.isNotEmpty
-                    ? _profile!.displayName[0].toUpperCase()
-                    : '?',
-                style: GoogleFonts.inter(
-                  color: kBlack,
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
+          StoryAvatar(
+            userName: _profile!.displayName,
+            avatarUrl: _profile!.avatarUrl,
+            size: 80,
           ),
           const SizedBox(height: 14),
 
@@ -308,199 +421,89 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     );
   }
 
-  Widget _buildStatusSection() {
+  Widget _buildActionsSection() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 14),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: kDarkerGrey,
-        borderRadius: BorderRadius.circular(10),
-      ),
       child: Row(
         children: [
-          Icon(
-            _profile!.isOnline ? Icons.circle : Icons.circle_outlined,
-            color: _profile!.isOnline ? kLimeGreen : kLightGrey,
-            size: 10,
-          ),
-          const SizedBox(width: 7),
-          Text(
-            _profile!.isOnline
-                ? 'Online'
-                : _profile!.lastSeen != null
-                    ? 'Last seen ${_formatLastSeen(_profile!.lastSeen!)}'
-                    : 'Offline',
-            style: GoogleFonts.inter(
-              color: kWhite,
-              fontSize: 13,
+          Expanded(
+            child: _buildActionButton(
+              icon: _isMuted
+                  ? Icons.notifications_off
+                  : Icons.notifications,
+              label: _isMuted ? 'Unmute' : 'Mute',
+              onTap: _toggleMute,
             ),
           ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _buildActionButton(
+              icon: Icons.call,
+              label: 'Call',
+              onTap: () => _startDirectCall(false),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _buildActionButton(
+              icon: Icons.videocam,
+              label: 'Video',
+              onTap: () => _startDirectCall(true),
+            ),
+          ),
+          const SizedBox(width: 8),
+            Expanded(
+              child: _buildActionButton(
+                icon: Icons.message,
+                label: 'Message',
+                onTap: () => Navigator.pop(context),
+              ),
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildActionsSection() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 14),
-      decoration: BoxDecoration(
-        color: kDarkerGrey,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        children: [
-          ListTile(
-            dense: true,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-            leading: Icon(
-              _isMuted ? Icons.notifications_off : Icons.notifications_outlined,
-              color: kLimeGreen,
-              size: 20,
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        height: 62,
+        decoration: BoxDecoration(
+          color: const Color(0xFF2C2C2E),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: kLimeGreen, size: 24),
+            const SizedBox(height: 5),
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                color: kWhite,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-            title: Text(
-              _isMuted ? 'Unmute' : 'Mute',
-              style: GoogleFonts.inter(color: kWhite, fontSize: 14),
-            ),
-            trailing: const Icon(Icons.chevron_right, color: kLightGrey, size: 18),
-            onTap: _toggleMute,
-          ),
-          const Divider(color: kMediumGrey, height: 1),
-          ListTile(
-            dense: true,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-            leading: const Icon(Icons.search, color: kLimeGreen, size: 20),
-            title: Text(
-              'Search in Chat',
-              style: GoogleFonts.inter(color: kWhite, fontSize: 14),
-            ),
-            trailing: const Icon(Icons.chevron_right, color: kLightGrey, size: 18),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => SearchInChatScreen(room: widget.room),
-                ),
-              );
-            },
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildSharedMediaSection() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 14),
-      decoration: BoxDecoration(
-        color: kDarkerGrey,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: ListTile(
-        dense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-        leading: const Icon(Icons.photo_library_outlined, color: kLimeGreen, size: 20),
-        title: Text(
-          'Shared Media',
-          style: GoogleFonts.inter(color: kWhite, fontWeight: FontWeight.w600, fontSize: 14),
-        ),
-        subtitle: Text(
-          '${_profile!.sharedMediaCount} items',
-          style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
-        ),
-        trailing: const Icon(Icons.chevron_right, color: kLightGrey, size: 18),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => SharedMediaScreen(room: widget.room),
-            ),
-          );
-        },
-      ),
+    return SharedMediaScreen(
+      room: widget.room,
+      embedded: true,
+      showDivider: false,
     );
-  }
-
-  Widget _buildSettingsSection() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 14),
-      decoration: BoxDecoration(
-        color: kDarkerGrey,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: ListTile(
-        dense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-        leading: const Icon(Icons.settings_outlined, color: kLimeGreen, size: 20),
-        title: Text(
-          'Chat Settings',
-          style: GoogleFonts.inter(color: kWhite, fontSize: 14),
-        ),
-        trailing: const Icon(Icons.chevron_right, color: kLightGrey, size: 18),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => ChatSettingsScreen(room: widget.room),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildDangerZoneSection() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 14),
-      decoration: BoxDecoration(
-        color: kDarkerGrey,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        children: [
-          ListTile(
-            dense: true,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-            leading: Icon(
-              _isBlocked ? Icons.check_circle : Icons.block,
-              color: Colors.orange,
-              size: 20,
-            ),
-            title: Text(
-              _isBlocked ? 'Unblock User' : 'Block User',
-              style: GoogleFonts.inter(color: Colors.orange, fontSize: 14),
-            ),
-            onTap: _toggleBlock,
-          ),
-          const Divider(color: kMediumGrey, height: 1),
-          ListTile(
-            dense: true,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-            leading: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
-            title: Text(
-              'Clear Chat',
-              style: GoogleFonts.inter(color: Colors.red, fontSize: 14),
-            ),
-            onTap: _clearChat,
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatLastSeen(DateTime lastSeen) {
-    final now = DateTime.now();
-    final difference = now.difference(lastSeen);
-
-    if (difference.inMinutes < 1) {
-      return 'just now';
-    } else if (difference.inHours < 1) {
-      return '${difference.inMinutes}m ago';
-    } else if (difference.inDays < 1) {
-      return '${difference.inHours}h ago';
-    } else if (difference.inDays < 7) {
-      return '${difference.inDays}d ago';
-    } else {
-      return '${lastSeen.day}/${lastSeen.month}/${lastSeen.year}';
-    }
   }
 }

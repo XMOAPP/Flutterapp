@@ -24,7 +24,7 @@ class UserSearchBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
       child: Container(
         decoration: BoxDecoration(
-          color: kDarkGrey,
+          color: const Color(0xFF2C2C2E),
           borderRadius: BorderRadius.circular(14),
         ),
         child: TextField(

@@ -29,6 +29,31 @@ Future<void> shareFile(
   });
 }
 
+Future<void> openFile(
+  Uint8List bytes,
+  String fileName, {
+  String? mimeType,
+}) async {
+  if (bytes.isEmpty) {
+    throw Exception('File is empty');
+  }
+
+  final directory = await getTemporaryDirectory();
+  final resolvedMimeType = mimeType ?? lookupMimeType(fileName, headerBytes: bytes);
+  final safeName = _safeFileName(
+    _ensureFileExtension(fileName, resolvedMimeType),
+  );
+  final file = File('${directory.path}/$safeName');
+  await file.writeAsBytes(bytes, flush: true);
+
+  const channel = MethodChannel('com.xmo.xmo/media_store');
+  await channel.invokeMethod<void>('openFile', {
+    'filePath': file.path,
+    'fileName': safeName,
+    'mimeType': resolvedMimeType ?? lookupMimeType(safeName, headerBytes: bytes) ?? '*/*',
+  });
+}
+
 String _ensureFileExtension(String fileName, String? mimeType) {
   final trimmed = fileName.trim();
   final fallbackBase = trimmed.isEmpty ? 'xmo_file' : trimmed;

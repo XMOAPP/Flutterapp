@@ -103,7 +103,7 @@ class _ChannelStatisticsScreenState extends State<ChannelStatisticsScreen> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: kDarkerGrey,
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -152,7 +152,7 @@ class _ChannelStatisticsScreenState extends State<ChannelStatisticsScreen> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: kDarkerGrey,
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -190,7 +190,7 @@ class _ChannelStatisticsScreenState extends State<ChannelStatisticsScreen> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: kDarkerGrey,
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -223,7 +223,7 @@ class _ChannelStatisticsScreenState extends State<ChannelStatisticsScreen> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: kDarkGrey,
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(

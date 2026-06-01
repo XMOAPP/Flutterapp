@@ -60,7 +60,7 @@ class AvatarWidget extends StatelessWidget {
       height: size,
       decoration: const BoxDecoration(
         shape: BoxShape.circle,
-        color: kDarkGrey,
+        color: Color(0xFF2C2C2E),
       ),
       child: Center(
         child: Text(

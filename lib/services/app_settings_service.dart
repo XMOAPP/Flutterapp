@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:hive_flutter/hive_flutter.dart';
 
 class AppSettingsService {
@@ -41,7 +43,7 @@ class AppSettingsService {
 
   Future<int> clearMediaCache() async {
     if (!Hive.isBoxOpen('xmo_media_cache')) return 0;
-    final box = Hive.box('xmo_media_cache');
+    final box = Hive.box<Uint8List>('xmo_media_cache');
     final count = box.length;
     await box.clear();
     return count;

@@ -5,6 +5,8 @@ import '../../providers/chat_filter_provider.dart';
 import '../../providers/matrix_provider.dart';
 import 'matrix_room_tile.dart';
 
+const String _hiddenChatTag = 'u.xmo.hidden';
+
 /// Main chat list body with filtering and search - Matrix only
 class ChatList extends StatelessWidget {
   const ChatList({super.key});
@@ -41,6 +43,7 @@ class ChatList extends StatelessWidget {
               lastEvent?.eventId,
               lastEvent?.type,
               lastEvent?.body,
+              lastEvent?.originServerTs.millisecondsSinceEpoch,
             ].join(':');
           }).join('|'),
         );
@@ -79,12 +82,14 @@ class ChatList extends StatelessWidget {
 
         // Filter out rooms where user has left or been kicked
         final activeRooms = matrixRooms.where((room) {
-          return room.membership == Membership.join ||
+          final isActive = room.membership == Membership.join ||
               room.membership == Membership.invite;
+          return isActive && !room.tags.containsKey(_hiddenChatTag);
         }).toList();
 
         // Filter by type based on selected filter
         final filteredRooms = activeRooms.where((room) {
+          if (matrixService.isSavedMessagesRoom(room)) return false;
           if (data.filter == ChatFilter.groups) {
             return room.isGroup;
           } else if (data.filter == ChatFilter.channels) {

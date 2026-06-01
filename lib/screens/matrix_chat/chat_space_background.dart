@@ -3,7 +3,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 
 class ChatSpaceBackground extends StatelessWidget {
   static const _assetPath = 'assets/images/space_line.svg';
-  static const _background = Color(0xFF000000);
+  static const _background = Color(0xFF0B1014);
   static const _tileWidth = 320.0;
   static const _svgWidth = 1440.0;
   static const _svgHeight = 2960.0;

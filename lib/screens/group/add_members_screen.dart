@@ -7,6 +7,7 @@ import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/group_service.dart';
 import '../../services/matrix_service.dart';
+import '../../widgets/story/story_avatar.dart';
 
 /// Add Members Screen - Search and invite users to the group
 class AddMembersScreen extends StatefulWidget {
@@ -231,7 +232,7 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
                       )
                     : null,
                 filled: true,
-                fillColor: kDarkerGrey,
+                fillColor: const Color(0xFF2C2C2E),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -299,17 +300,10 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
     return ListTile(
       dense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: CircleAvatar(
-        radius: 16,
-        backgroundColor: kDarkGrey,
-        child: Text(
-          displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
-          style: GoogleFonts.inter(
-            color: kLimeGreen,
-            fontWeight: FontWeight.bold,
-            fontSize: 12,
-          ),
-        ),
+      leading: StoryAvatar(
+        userName: displayName,
+        avatarUrl: profile.avatarUrl?.toString(),
+        size: 32,
       ),
       title: Text(
         displayName,

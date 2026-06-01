@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
+import 'package:mime/mime.dart';
 import 'package:video_player/video_player.dart';
 import '../../theme.dart';
 import '../../screens/web_download_stub.dart' if (dart.library.js_interop) '../../screens/web_download.dart' as web_download;
@@ -17,18 +20,24 @@ class FullscreenVideoPlayer extends StatefulWidget {
   final String? mimeType;
   final String title;
   final Future<MatrixFile>? videoFuture;
+  final Future<void> Function()? onReply;
+  final Future<void> Function()? onDelete;
 
   const FullscreenVideoPlayer({
     super.key,
     required this.videoBytes,
     required this.mimeType,
     required this.title,
+    this.onReply,
+    this.onDelete,
   }) : videoFuture = null;
 
   const FullscreenVideoPlayer.loading({
     super.key,
     required this.videoFuture,
     required this.title,
+    this.onReply,
+    this.onDelete,
   })  : videoBytes = null,
         mimeType = null;
 
@@ -43,6 +52,9 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
   Uint8List? _videoBytes;
   String? _mimeType;
   String? _error;
+  bool _landscape = false;
+  bool _showCenterControl = true;
+  Timer? _centerControlTimer;
 
   @override
   void initState() {
@@ -60,6 +72,8 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
 
   @override
   void dispose() {
+    _centerControlTimer?.cancel();
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     if (kIsWeb) {
       web_video.disposeVideoView(_viewId);
     }
@@ -69,7 +83,7 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
 
   Future<void> _initNativeVideo() async {
     final bytes = _videoBytes;
-    final mimeType = _mimeType;
+    final mimeType = _resolvedMimeType();
     if (bytes == null || mimeType == null) return;
     final controller = await createNativeVideoController(
       bytes: bytes,
@@ -89,7 +103,11 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
       final matrixFile = await future;
       if (!mounted) return;
       _videoBytes = matrixFile.bytes;
-      _mimeType = matrixFile.mimeType;
+      _mimeType = _effectiveVideoMimeType(
+        matrixFile.mimeType,
+        matrixFile.name,
+        matrixFile.bytes,
+      );
       await _initLoadedVideo();
     } catch (e) {
       if (mounted) setState(() => _error = 'Failed to load video: $e');
@@ -98,7 +116,7 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
 
   Future<void> _initLoadedVideo() async {
     final bytes = _videoBytes;
-    final mimeType = _mimeType;
+    final mimeType = _resolvedMimeType();
     if (bytes == null || mimeType == null) return;
     if (kIsWeb) {
       web_video.registerVideoView(_viewId, bytes, mimeType);
@@ -121,7 +139,7 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
         SnackBar(
           content: Text(
               kIsWeb ? 'Downloaded: ${video.fileName}' : 'Downloaded successfully'),
-          backgroundColor: const Color(0xFF1A2A1A),
+          backgroundColor: kLimeGreen,
           duration: const Duration(seconds: 2),
         ),
       );
@@ -156,8 +174,41 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
     }
   }
 
+  void _closeAndRun(Future<void> Function() action) {
+    Navigator.maybePop(context);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      action();
+    });
+  }
+
+  Future<void> _rotateVideo() async {
+    final nextLandscape = !_landscape;
+    await SystemChrome.setPreferredOrientations(
+      nextLandscape
+          ? [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]
+          : [DeviceOrientation.portraitUp],
+    );
+    if (mounted) {
+      setState(() => _landscape = nextLandscape);
+    }
+  }
+
+  void _scheduleCenterControlHide() {
+    _centerControlTimer?.cancel();
+    _centerControlTimer = Timer(const Duration(seconds: 1), () {
+      if (mounted) {
+        setState(() => _showCenterControl = false);
+      }
+    });
+  }
+
+  void _showCenterControlTemporarily() {
+    setState(() => _showCenterControl = true);
+    _scheduleCenterControlHide();
+  }
+
   Future<_LoadedVideo?> _readyVideo(BuildContext context) async {
-    if (_videoBytes == null || _mimeType == null) {
+    if (_videoBytes == null || _resolvedMimeType() == null) {
       try {
         await _nativeInit;
       } catch (_) {
@@ -166,7 +217,7 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
     }
 
     final bytes = _videoBytes;
-    final mimeType = _mimeType;
+    final mimeType = _resolvedMimeType();
     if (bytes == null || mimeType == null) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -184,6 +235,25 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
       mimeType: mimeType,
       fileName: _videoFileName(mimeType),
     );
+  }
+
+  String? _resolvedMimeType() {
+    final bytes = _videoBytes;
+    return _effectiveVideoMimeType(_mimeType, widget.title, bytes);
+  }
+
+  String? _effectiveVideoMimeType(
+    String? mimeType,
+    String fileName,
+    Uint8List? bytes,
+  ) {
+    final normalized = mimeType?.trim().toLowerCase();
+    if (normalized != null &&
+        normalized.isNotEmpty &&
+        normalized != 'application/octet-stream') {
+      return normalized;
+    }
+    return lookupMimeType(fileName, headerBytes: bytes) ?? normalized;
   }
 
   String _videoFileName(String mimeType) {
@@ -204,69 +274,114 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        iconTheme: const IconThemeData(color: kWhite),
-        title: Text(
-          widget.title,
-          style: GoogleFonts.inter(
-            color: kWhite,
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-          ),
-          overflow: TextOverflow.ellipsis,
+      backgroundColor: kBlack,
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Center(child: _buildVideoBody()),
+            Positioned(
+              top: 10,
+              left: 10,
+              child: IconButton(
+                icon: const Icon(Icons.close_rounded, color: kWhite, size: 28),
+                onPressed: () => Navigator.maybePop(context),
+              ),
+            ),
+            Positioned(
+              top: 10,
+              right: 10,
+              child: PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, color: kWhite, size: 28),
+                color: const Color(0xFF262728),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                onSelected: (value) {
+                  if (value == 'download') {
+                    _downloadVideo(context);
+                  } else if (value == 'share') {
+                    _shareVideo(context);
+                  } else if (value == 'reply') {
+                    final action = widget.onReply;
+                    if (action != null) _closeAndRun(action);
+                  } else if (value == 'delete') {
+                    final action = widget.onDelete;
+                    if (action != null) _closeAndRun(action);
+                  }
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'download',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.download, color: kWhite, size: 20),
+                        const SizedBox(width: 12),
+                        Text(
+                          'Download',
+                          style:
+                              GoogleFonts.inter(color: kWhite, fontSize: 14),
+                        ),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'share',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.share, color: kWhite, size: 20),
+                        const SizedBox(width: 12),
+                        Text(
+                          'Share',
+                          style:
+                              GoogleFonts.inter(color: kWhite, fontSize: 14),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (widget.onReply != null)
+                    PopupMenuItem(
+                      value: 'reply',
+                      child: Row(
+                        children: [
+                          const Icon(Icons.reply, color: kWhite, size: 20),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Reply',
+                            style:
+                                GoogleFonts.inter(color: kWhite, fontSize: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (widget.onDelete != null)
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          const Icon(Icons.delete_outline,
+                              color: Colors.red, size: 20),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Delete Message',
+                            style: GoogleFonts.inter(
+                                color: Colors.red, fontSize: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
-        actions: [
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, color: kWhite),
-            color: kDarkerGrey,
-            onSelected: (value) {
-              if (value == 'download') {
-                _downloadVideo(context);
-              } else if (value == 'share') {
-                _shareVideo(context);
-              }
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'download',
-                child: Row(
-                  children: [
-                    const Icon(Icons.download_outlined, color: kWhite, size: 20),
-                    const SizedBox(width: 12),
-                    Text(
-                      'Download',
-                      style: GoogleFonts.inter(color: kWhite, fontSize: 14),
-                    ),
-                  ],
-                ),
-              ),
-              PopupMenuItem(
-                value: 'share',
-                child: Row(
-                  children: [
-                    const Icon(Icons.share_outlined, color: kWhite, size: 20),
-                    const SizedBox(width: 12),
-                    Text(
-                      'Share',
-                      style: GoogleFonts.inter(color: kWhite, fontSize: 14),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
       ),
-      body: Center(child: _buildVideoBody()),
     );
   }
 
   Widget _buildVideoBody() {
     if (kIsWeb) {
       final bytes = _videoBytes;
-      final mimeType = _mimeType;
+      final mimeType = _resolvedMimeType();
       if (bytes == null || mimeType == null) {
         return const CircularProgressIndicator(color: kWhite);
       }
@@ -284,10 +399,28 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
         if (error != null || snapshot.hasError) {
           return Padding(
             padding: const EdgeInsets.all(24),
-            child: Text(
-              error ?? 'Failed to play video: ${snapshot.error}',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  error ?? 'Failed to play video: ${snapshot.error}',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF262728),
+                    foregroundColor: kWhite,
+                  ),
+                  onPressed: _openExternally,
+                  icon: const Icon(Icons.open_in_new, size: 18),
+                  label: Text(
+                    'Open with',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
             ),
           );
         }
@@ -297,36 +430,107 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
           return const CircularProgressIndicator(color: kWhite);
         }
 
-        return Stack(
-          alignment: Alignment.center,
-          children: [
-            AspectRatio(
-              aspectRatio: controller.value.aspectRatio,
-              child: VideoPlayer(controller),
-            ),
-            Positioned(
-              bottom: 22,
-              left: 18,
-              right: 18,
-              child: _NativeVideoControls(controller: controller),
-            ),
-          ],
+        if (_showCenterControl && controller.value.isPlaying) {
+          _scheduleCenterControlHide();
+        }
+
+        return GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: _showCenterControlTemporarily,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Center(
+                child: AspectRatio(
+                  aspectRatio: controller.value.aspectRatio,
+                  child: VideoPlayer(controller),
+                ),
+              ),
+              Center(
+                child: ValueListenableBuilder<VideoPlayerValue>(
+                  valueListenable: controller,
+                  builder: (context, value, _) {
+                    if (!_showCenterControl) return const SizedBox.shrink();
+
+                    return GestureDetector(
+                      onTap: () async {
+                        value.isPlaying
+                            ? await controller.pause()
+                            : await controller.play();
+                        _showCenterControlTemporarily();
+                      },
+                      child: Container(
+                        width: 78,
+                        height: 78,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.52),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          value.isPlaying
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
+                          color: kWhite,
+                          size: 52,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: _NativeVideoControls(
+                  controller: controller,
+                  onRotate: _rotateVideo,
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
+  }
+
+  Future<void> _openExternally() async {
+    final video = await _readyVideo(context);
+    if (video == null) return;
+    try {
+      await native_share.openFile(
+        video.bytes,
+        video.fileName,
+        mimeType: video.mimeType,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not open video: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 }
 
 class _NativeVideoControls extends StatefulWidget {
   final VideoPlayerController controller;
+  final VoidCallback onRotate;
 
-  const _NativeVideoControls({required this.controller});
+  const _NativeVideoControls({
+    required this.controller,
+    required this.onRotate,
+  });
 
   @override
   State<_NativeVideoControls> createState() => _NativeVideoControlsState();
 }
 
 class _NativeVideoControlsState extends State<_NativeVideoControls> {
+  bool _muted = false;
+
   @override
   void initState() {
     super.initState();
@@ -356,43 +560,81 @@ class _NativeVideoControlsState extends State<_NativeVideoControls> {
   Widget build(BuildContext context) {
     final value = widget.controller.value;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(28),
-      ),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            icon: Icon(
-              value.isPlaying ? Icons.pause : Icons.play_arrow,
-              color: kWhite,
-            ),
-            onPressed: () {
-              value.isPlaying
-                  ? widget.controller.pause()
-                  : widget.controller.play();
-            },
-          ),
-          Expanded(
-            child: VideoProgressIndicator(
-              widget.controller,
-              allowScrubbing: true,
-              colors: const VideoProgressColors(
-                playedColor: kLimeGreen,
-                bufferedColor: kMediumGrey,
-                backgroundColor: kDarkGrey,
+          Row(
+            children: [
+              Text(
+                '${_format(value.position)} / ${_format(value.duration)}',
+                style: GoogleFonts.inter(
+                  color: kWhite,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
-            ),
+              const Spacer(),
+              IconButton(
+                icon: Icon(
+                  _muted
+                      ? Icons.volume_off_rounded
+                      : Icons.volume_up_rounded,
+                  color: kWhite,
+                  size: 22,
+                ),
+                onPressed: _toggleMute,
+              ),
+              IconButton(
+                icon: const Icon(Icons.screen_rotation_rounded,
+                    color: kWhite, size: 24),
+                onPressed: widget.onRotate,
+              ),
+            ],
           ),
-          const SizedBox(width: 10),
-          Text(
-            '${_format(value.position)} / ${_format(value.duration)}',
-            style: GoogleFonts.inter(color: kWhite, fontSize: 11),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              activeTrackColor: kAudioBlue,
+              inactiveTrackColor: kWhite.withValues(alpha: 0.24),
+              thumbColor: kWhite,
+              overlayColor: kAudioBlue.withValues(alpha: 0.18),
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+            ),
+            child: Slider(
+              value: _progressValue(value),
+              min: 0,
+              max: 1,
+              onChanged: _seekToFraction,
+            ),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _toggleMute() async {
+    final nextMuted = !_muted;
+    await widget.controller.setVolume(nextMuted ? 0 : 1);
+    if (mounted) {
+      setState(() => _muted = nextMuted);
+    }
+  }
+
+  double _progressValue(VideoPlayerValue value) {
+    final durationMs = value.duration.inMilliseconds;
+    if (durationMs <= 0) return 0;
+    return (value.position.inMilliseconds / durationMs).clamp(0.0, 1.0);
+  }
+
+  Future<void> _seekToFraction(double fraction) async {
+    final duration = widget.controller.value.duration;
+    if (duration.inMilliseconds <= 0) return;
+    final position = Duration(
+      milliseconds: (duration.inMilliseconds * fraction).round(),
+    );
+    await widget.controller.seekTo(position);
   }
 
   String _format(Duration value) {

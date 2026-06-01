@@ -89,6 +89,23 @@ class MainActivity : FlutterActivity() {
                             result.error("SHARE_ERROR", e.message, null)
                         }
                     }
+                    "openFile" -> {
+                        val filePath = call.argument<String>("filePath")
+                        val fileName = call.argument<String>("fileName")
+                        val mimeType = call.argument<String>("mimeType") ?: "*/*"
+
+                        if (filePath.isNullOrBlank() || fileName.isNullOrBlank()) {
+                            result.error("INVALID_ARGS", "filePath and fileName are required", null)
+                            return@setMethodCallHandler
+                        }
+
+                        try {
+                            openFile(filePath, fileName, mimeType)
+                            result.success(null)
+                        } catch (e: Exception) {
+                            result.error("OPEN_ERROR", e.message, null)
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -194,6 +211,30 @@ class MainActivity : FlutterActivity() {
         }
 
         val chooser = Intent.createChooser(sendIntent, "Share $fileName").apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(chooser)
+    }
+
+    private fun openFile(filePath: String, fileName: String, mimeType: String) {
+        val file = File(filePath)
+        if (!file.exists() || file.length() == 0L) {
+            throw IllegalArgumentException("Open file is missing or empty")
+        }
+
+        val uri = FileProvider.getUriForFile(
+            this,
+            "${applicationContext.packageName}.fileprovider",
+            file,
+        )
+
+        val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mimeType)
+            clipData = ClipData.newUri(contentResolver, fileName, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        val chooser = Intent.createChooser(viewIntent, "Open $fileName with").apply {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         startActivity(chooser)

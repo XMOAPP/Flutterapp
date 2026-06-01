@@ -21,9 +21,9 @@ class DirectChatService {
     if (room == null) throw Exception('Room not found: $roomId');
 
     final user = room.getParticipants().firstWhere(
-      (u) => u.id == userId,
-      orElse: () => throw Exception('User not found'),
-    );
+          (u) => u.id == userId,
+          orElse: () => throw Exception('User not found'),
+        );
 
     // Get shared media count
     final timeline = await room.getTimeline();
@@ -37,9 +37,8 @@ class DirectChatService {
     }).length;
 
     // Get first message date
-    final firstMessage = timeline.events.isNotEmpty
-        ? timeline.events.last.originServerTs
-        : null;
+    final firstMessage =
+        timeline.events.isNotEmpty ? timeline.events.last.originServerTs : null;
 
     return DirectChatProfile(
       userId: user.id,
@@ -68,7 +67,8 @@ class DirectChatService {
     try {
       final presence = await _client.getPresence(userId);
       return presence.lastActiveAgo != null
-          ? DateTime.now().subtract(Duration(milliseconds: presence.lastActiveAgo!))
+          ? DateTime.now()
+              .subtract(Duration(milliseconds: presence.lastActiveAgo!))
           : null;
     } catch (e) {
       debugPrint('[DirectChat] Error getting last seen: $e');
@@ -98,7 +98,8 @@ class DirectChatService {
           msgType == MessageTypes.File;
     }).toList();
 
-    var mediaItems = mediaEvents.map((e) => SharedMediaItem.fromEvent(e)).toList();
+    var mediaItems =
+        mediaEvents.map((e) => SharedMediaItem.fromEvent(e)).toList();
 
     // Filter by type if specified
     if (filterType != null) {
@@ -133,14 +134,17 @@ class DirectChatService {
       isMuted: isMuted,
       notificationsEnabled: content['notifications_enabled'] as bool? ?? true,
       readReceiptsEnabled: content['read_receipts_enabled'] as bool? ?? true,
-      typingIndicatorsEnabled: content['typing_indicators_enabled'] as bool? ?? true,
+      typingIndicatorsEnabled:
+          content['typing_indicators_enabled'] as bool? ?? true,
       customWallpaper: content['custom_wallpaper'] as String?,
-      disappearingMessagesEnabled: content['disappearing_messages_enabled'] as bool? ?? false,
+      disappearingMessagesEnabled:
+          content['disappearing_messages_enabled'] as bool? ?? false,
     );
   }
 
   /// Updates chat settings
-  Future<void> updateChatSettings(String roomId, DirectChatSettings settings) async {
+  Future<void> updateChatSettings(
+      String roomId, DirectChatSettings settings) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
 
@@ -221,7 +225,7 @@ class DirectChatService {
     // Find the reaction event
     final timeline = await room.getTimeline();
     final myUserId = _client.userID;
-    
+
     for (final e in timeline.events) {
       if (e.type == EventTypes.Reaction && e.senderId == myUserId) {
         final relatesTo = e.content['m.relates_to'] as Map<String, dynamic>?;
@@ -231,14 +235,14 @@ class DirectChatService {
         }
       }
     }
-    
+
     throw Exception('Reaction not found');
   }
 
   /// Gets reactions for a message
   List<MessageReaction> getReactions(Event event) {
     final reactions = <MessageReaction>[];
-    
+
     // For now, return empty list as reactions are handled by Matrix SDK internally
     // This method can be enhanced later when we need to display reactions in UI
     return reactions;
@@ -309,7 +313,8 @@ class DirectChatService {
         .toList();
 
     final buffer = StringBuffer();
-    buffer.writeln('Chat Export: ${_matrixService.getResolvedDisplayName(room)}');
+    buffer
+        .writeln('Chat Export: ${_matrixService.getResolvedDisplayName(room)}');
     buffer.writeln('Exported: ${DateTime.now()}');
     buffer.writeln('=' * 50);
     buffer.writeln();
@@ -356,18 +361,13 @@ class DirectChatService {
   /// Checks if message has been read
   bool isMessageRead(Event event, Room room) {
     final otherUserId = room.directChatMatrixID;
-    
+
     if (otherUserId == null) return false;
 
-    // Check if the other user has read this message
-    // Matrix SDK doesn't provide direct access to per-user receipts easily
-    // We'll use a simplified check based on room read markers
     try {
-      final fullyRead = room.fullyRead;
-      if (fullyRead.isEmpty) return false;
-      
-      // Simple heuristic: if there's a fully read marker, assume recent messages are read
-      return true;
+      return event.receipts.any(
+        (receipt) => receipt.user.senderId == otherUserId,
+      );
     } catch (e) {
       debugPrint('[DirectChat] Error checking read status: $e');
       return false;

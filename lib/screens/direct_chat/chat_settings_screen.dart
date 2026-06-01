@@ -6,6 +6,7 @@ import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/direct_chat_service.dart';
 import '../../models/direct_chat_models.dart';
+import '../../widgets/incoming_call_fullscreen_scope.dart';
 
 /// Chat Settings Screen for Direct Chats
 class ChatSettingsScreen extends StatefulWidget {
@@ -78,9 +79,10 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: kBlack,
-      appBar: AppBar(
+    return IncomingCallFullscreenScope(
+      child: Scaffold(
+        backgroundColor: kBlack,
+        appBar: AppBar(
         backgroundColor: kBlack,
         elevation: 0,
         leading: IconButton(
@@ -96,7 +98,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen> {
           ),
         ),
       ),
-      body: _loading
+        body: _loading
           ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
           : _settings == null
               ? Center(
@@ -206,6 +208,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen> {
                     ],
                   ),
                 ),
+      ),
     );
   }
 

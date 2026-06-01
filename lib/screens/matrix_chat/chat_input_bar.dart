@@ -122,18 +122,20 @@ class ChatInputBar extends StatelessWidget {
               child: hasText && enabled
                   ? GestureDetector(
                       key: const ValueKey('send'),
-                      onTap: onSend,
+                      onTap: uploading || !enabled ? null : onSend,
                       child: Container(
                         width: 40,
                         height: 40,
                         margin: const EdgeInsets.only(left: 8),
-                        decoration: const BoxDecoration(
-                          color: kLimeGreen,
+                        decoration: BoxDecoration(
+                          color: uploading || !enabled
+                              ? kDarkGrey
+                              : kLimeGreen,
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(
+                        child: Icon(
                           Icons.send_rounded,
-                          color: kBlack,
+                          color: uploading || !enabled ? kMediumGrey : kBlack,
                           size: 20,
                         ),
                       ),
@@ -243,7 +245,8 @@ class _RecordingBar extends StatelessWidget {
                       child: VoiceWaveform(
                         bars: waveform,
                         color: paused ? kMediumGrey : kLimeGreen,
-                        inactiveColor: Colors.white.withValues(alpha: 0.20),
+                        inactiveColor: paused ? kMediumGrey : kLimeGreen,
+                        progress: 1,
                         height: 30,
                       ),
                     ),

@@ -9,7 +9,9 @@ import 'package:provider/provider.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import '../../theme.dart';
 import '../../models/story_models.dart';
+import '../../providers/matrix_provider.dart';
 import '../../providers/story_provider.dart';
+import '../../services/privacy_service.dart';
 import '../../widgets/story/story_video_player.dart';
 import '../camera_capture_screen.dart';
 import '../web_video_view_stub.dart' if (dart.library.js_interop) '../web_video_view.dart'
@@ -48,60 +50,22 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
     super.dispose();
   }
 
-  Future<void> _pickImage() async {
+  Future<void> _pickGalleryMedia() async {
     try {
-      final pickedFile = await _imagePicker.pickImage(
-        source: ImageSource.gallery,
+      final pickedFile = await _imagePicker.pickMedia(
         maxWidth: 1080,
         maxHeight: 1920,
         imageQuality: 85,
       );
 
       if (pickedFile != null) {
-        await _setPickedImage(pickedFile);
+        await _setPickedGalleryMedia(pickedFile);
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to pick image: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _pickVideo() async {
-    try {
-      final pickedFile = await _imagePicker.pickVideo(
-        source: ImageSource.gallery,
-        maxDuration: const Duration(seconds: 30),
-      );
-
-      if (pickedFile != null) {
-        final bytes = await pickedFile.readAsBytes();
-        final mimeType = pickedFile.mimeType ??
-            lookupMimeType(pickedFile.name) ??
-            lookupMimeType(pickedFile.path) ??
-            'video/mp4';
-        final thumbnailBytes = await _generateVideoThumbnail(
-          videoBytes: bytes,
-          mimeType: mimeType,
-        );
-        setState(() {
-          _selectedMedia = bytes;
-          _selectedVideoThumbnail = thumbnailBytes;
-          _selectedMediaMimeType = mimeType;
-          _selectedMediaFileName = pickedFile.name;
-          _mediaType = StoryMediaType.video;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to pick video: $e'),
+            content: Text('Failed to pick media: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -188,6 +152,35 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
     });
   }
 
+  Future<void> _setPickedGalleryMedia(XFile pickedFile) async {
+    final bytes = await pickedFile.readAsBytes();
+    if (bytes.isEmpty || !mounted) return;
+
+    final mimeType = pickedFile.mimeType ??
+        lookupMimeType(pickedFile.name, headerBytes: bytes) ??
+        lookupMimeType(pickedFile.path, headerBytes: bytes) ??
+        'image/jpeg';
+    final isVideo = mimeType.startsWith('video/');
+
+    final thumbnailBytes = isVideo
+        ? await _generateVideoThumbnail(
+            videoBytes: bytes,
+            mimeType: mimeType,
+          )
+        : null;
+    if (!mounted) return;
+
+    setState(() {
+      _selectedMedia = bytes;
+      _selectedVideoThumbnail = thumbnailBytes;
+      _selectedMediaMimeType = mimeType;
+      _selectedMediaFileName = pickedFile.name.isNotEmpty
+          ? pickedFile.name
+          : '${isVideo ? 'story_video' : 'story_image'}_${DateTime.now().millisecondsSinceEpoch}${isVideo ? _fileExtensionForMime(mimeType) : '.jpg'}';
+      _mediaType = isVideo ? StoryMediaType.video : StoryMediaType.image;
+    });
+  }
+
   Future<void> _showCameraPicker() async {
     final result = await Navigator.push<CameraCaptureResult>(
       context,
@@ -246,6 +239,14 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
 
     try {
       final storyProvider = context.read<StoryProvider>();
+      final privacySettings = await PrivacyService(
+        context.read<MatrixProvider>().service,
+      ).loadSettings();
+      final storyPrivacy = switch (privacySettings.storyAudience) {
+        XmoPrivacyAudience.contacts => StoryPrivacy.contacts,
+        XmoPrivacyAudience.onlySelected => StoryPrivacy.custom,
+        XmoPrivacyAudience.hideSelected => StoryPrivacy.contactsExcept,
+      };
 
       final request = CreateStoryRequest(
         mediaType: _mediaType,
@@ -261,7 +262,11 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
         textContent: _selectedMedia == null
             ? _captionController.text.trim()
             : null,
-        privacy: StoryPrivacy.contacts,
+        privacy: storyPrivacy,
+        customPrivacyList:
+            privacySettings.storyAudience == XmoPrivacyAudience.contacts
+                ? null
+                : privacySettings.storyUserIds,
       );
 
       final story = await storyProvider.createStory(request);
@@ -394,18 +399,13 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
               children: [
                 _buildMediaButton(
                   icon: Icons.photo_library,
-                  label: 'Photo',
-                  onTap: _pickImage,
+                  label: 'Gallery',
+                  onTap: _pickGalleryMedia,
                 ),
                 _buildMediaButton(
                   icon: Icons.camera_alt,
                   label: 'Camera',
                   onTap: _showCameraPicker,
-                ),
-                _buildMediaButton(
-                  icon: Icons.videocam,
-                  label: 'Video',
-                  onTap: _pickVideo,
                 ),
                 if (_selectedMedia != null)
                   _buildMediaButton(
@@ -486,7 +486,7 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
           children: [
             Icon(
               icon,
-              color: color ?? kLimeGreen,
+              color: color ?? kWhite,
               size: 26,
             ),
             const SizedBox(height: 4),

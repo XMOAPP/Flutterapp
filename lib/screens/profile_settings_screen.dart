@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/matrix_provider.dart';
+import '../services/matrix_service.dart';
 import '../theme.dart';
 import '../widgets/story/story_avatar.dart';
 
@@ -20,6 +21,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   final _displayNameCtrl = TextEditingController();
   Uint8List? _selectedAvatarBytes;
   String? _selectedAvatarName;
+  bool _removeAvatar = false;
   bool _saving = false;
 
   @override
@@ -49,6 +51,15 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     setState(() {
       _selectedAvatarBytes = bytes;
       _selectedAvatarName = file.name;
+      _removeAvatar = false;
+    });
+  }
+
+  void _removeProfileAvatar() {
+    setState(() {
+      _selectedAvatarBytes = null;
+      _selectedAvatarName = null;
+      _removeAvatar = true;
     });
   }
 
@@ -70,6 +81,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
       displayName: name,
       avatarBytes: _selectedAvatarBytes,
       avatarFileName: _selectedAvatarName,
+      removeAvatar: _removeAvatar,
     );
 
     if (!mounted) return;
@@ -140,16 +152,17 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                     children: [
                       CircleAvatar(
                         radius: 52,
-                        backgroundColor: kDarkerGrey,
+                        backgroundColor: const Color(0xFF2C2C2E),
                         backgroundImage: _selectedAvatarBytes != null
                             ? MemoryImage(_selectedAvatarBytes!)
                             : null,
                         child: _selectedAvatarBytes == null
                             ? StoryAvatar(
                                 userName: provider.displayName ?? '',
-                                avatarUrl: provider.avatarUrl,
+                                avatarUrl:
+                                    _removeAvatar ? null : provider.avatarUrl,
                                 size: 104,
-                                backgroundColor: kDarkerGrey,
+                                backgroundColor: const Color(0xFF2C2C2E),
                                 textColor: kLimeGreen,
                               )
                             : null,
@@ -175,6 +188,42 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                   ),
                 ),
               ),
+              const SizedBox(height: 12),
+              if (_selectedAvatarBytes != null ||
+                  _removeAvatar ||
+                  provider.avatarUrl != null)
+                Center(
+                  child: TextButton.icon(
+                    onPressed: _saving ? null : _removeProfileAvatar,
+                    icon: const Icon(
+                      Icons.delete_outline,
+                      color: Colors.redAccent,
+                      size: 18,
+                    ),
+                    label: Text(
+                      'Remove photo',
+                      style: GoogleFonts.inter(
+                        color: Colors.redAccent,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              Center(
+                child: Text(
+                  provider.userId == null
+                      ? ''
+                      : '@${MatrixService.cleanName(provider.userId!)}',
+                  style: GoogleFonts.inter(
+                    color: kLightGrey,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
               const SizedBox(height: 28),
               Text(
                 'Display name',
@@ -190,7 +239,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                 style: GoogleFonts.inter(color: kWhite, fontSize: 15),
                 decoration: InputDecoration(
                   filled: true,
-                  fillColor: kDarkerGrey,
+                  fillColor: const Color(0xFF2C2C2E),
                   hintText: 'Enter display name',
                   hintStyle: GoogleFonts.inter(color: kLightGrey),
                   border: OutlineInputBorder(
@@ -213,5 +262,4 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
       },
     );
   }
-
 }

@@ -90,7 +90,7 @@ class GroupSettings {
 // GROUP MEMBER
 // ═══════════════════════════════════════════════════════════════════════════
 
-enum MemberRole { owner, admin, moderator, helper, member, restricted }
+enum MemberRole { owner, admin, moderator, member, restricted }
 
 class GroupMember {
   final String userId;
@@ -118,7 +118,6 @@ class GroupMember {
     if (powerLevel >= 100) return MemberRole.owner;
     if (powerLevel >= 75) return MemberRole.admin;
     if (powerLevel >= 50) return MemberRole.moderator;
-    if (powerLevel >= 25) return MemberRole.helper;
     if (powerLevel < 0) return MemberRole.restricted;
     return MemberRole.member;
   }
@@ -193,22 +192,27 @@ class AdminPermissions {
   int toPowerLevel() {
     if (canManageAdmins) return 100;
     if (canEditGroupInfo || canChangePermissions) return 75;
-    if (canBanMembers || canDeleteMessages) return 50;
-    if (canAddMembers || canPinMessages) return 25;
+    if (canAddMembers ||
+        canBanMembers ||
+        canDeleteMessages ||
+        canPinMessages ||
+        canInviteUsers) {
+      return 50;
+    }
     return 0;
   }
 
   /// Creates permissions from power level
   factory AdminPermissions.fromPowerLevel(int powerLevel) {
     return AdminPermissions(
-      canAddMembers: powerLevel >= 25,
+      canAddMembers: powerLevel >= 50,
       canRemoveMembers: powerLevel >= 50,
       canBanMembers: powerLevel >= 50,
       canDeleteMessages: powerLevel >= 50,
-      canPinMessages: powerLevel >= 25,
+      canPinMessages: powerLevel >= 50,
       canEditGroupInfo: powerLevel >= 75,
       canManageAdmins: powerLevel >= 100,
-      canInviteUsers: powerLevel >= 25,
+      canInviteUsers: powerLevel >= 50,
       canChangePermissions: powerLevel >= 75,
     );
   }
@@ -235,15 +239,6 @@ class AdminPermissions {
       canRemoveMembers: true,
       canBanMembers: true,
       canDeleteMessages: true,
-      canPinMessages: true,
-      canInviteUsers: true,
-    );
-  }
-
-  /// Preset: Helper (power level 25)
-  factory AdminPermissions.helper() {
-    return AdminPermissions(
-      canAddMembers: true,
       canPinMessages: true,
       canInviteUsers: true,
     );

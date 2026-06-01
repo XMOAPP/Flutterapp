@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
 import 'package:flutter/foundation.dart';
@@ -7,7 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import '../config/app_config.dart';
 import '../models/invite_link_models.dart';
 
-enum XmoRoomKind { direct, group, channel }
+enum XmoRoomKind { direct, group, channel, saved }
 
 class MatrixUploadCancelledException implements Exception {
   const MatrixUploadCancelledException();
@@ -28,8 +29,10 @@ class MatrixService {
   static const String _authBoxName = 'xmo_auth';
   static const String _channelBoxName = 'xmo_channels';
   static const String _groupBoxName = 'xmo_groups';
+  static const String _savedMessagesRoomIdKey = 'saved_messages_room_id';
   static const String _inviteLinksStateType = 'xmo.invite.links';
   static const String roomTypeStateType = 'xmo.room.type';
+  static const String savedMessagesStateType = 'xmo.saved_messages';
 
   late Client _client;
   late Box _authBox;
@@ -38,9 +41,11 @@ class MatrixService {
   final Set<String> _channelIdCache = {};
   final Set<String> _groupIdCache = {};
   final Set<String> _publishedRoomIds = {};
+  String? _savedMessagesRoomId;
   bool _hasPublishedExisting = false;
   String? _profileDisplayName;
   String? _profileAvatarUrl;
+  bool _profileAvatarRemoved = false;
 
   Client get client => _client;
 
@@ -50,6 +55,7 @@ class MatrixService {
       ? _profileDisplayName
       : _client.userID?.split(':').first.replaceFirst('@', '');
   String? get avatarUrl {
+    if (_profileAvatarRemoved) return null;
     if (_profileAvatarUrl?.trim().isNotEmpty == true) {
       return _profileAvatarUrl;
     }
@@ -73,6 +79,7 @@ class MatrixService {
       final profile = await _client.getProfileFromUserId(userId);
       _profileDisplayName = profile.displayName;
       _profileAvatarUrl = profile.avatarUrl?.toString();
+      _profileAvatarRemoved = _profileAvatarUrl?.trim().isNotEmpty != true;
     } catch (e) {
       debugPrint('[MatrixService] Failed to refresh profile: $e');
     }
@@ -82,6 +89,7 @@ class MatrixService {
     required String displayName,
     Uint8List? avatarBytes,
     String avatarFileName = 'avatar.jpg',
+    bool removeAvatar = false,
   }) async {
     final userId = _client.userID;
     if (userId == null) throw Exception('User not logged in');
@@ -94,7 +102,11 @@ class MatrixService {
     await _client.setDisplayName(userId, cleanDisplayName);
     _profileDisplayName = cleanDisplayName;
 
-    if (avatarBytes != null && avatarBytes.isNotEmpty) {
+    if (removeAvatar) {
+      await _client.setAvatarUrl(userId, Uri.parse(''));
+      _profileAvatarUrl = null;
+      _profileAvatarRemoved = true;
+    } else if (avatarBytes != null && avatarBytes.isNotEmpty) {
       final avatarMxc = await _client.uploadContent(
         avatarBytes,
         filename: avatarFileName,
@@ -102,6 +114,7 @@ class MatrixService {
       );
       await _client.setAvatarUrl(userId, avatarMxc);
       _profileAvatarUrl = avatarMxc.toString();
+      _profileAvatarRemoved = false;
     }
   }
 
@@ -162,6 +175,10 @@ class MatrixService {
     if (typeContent?['is_direct'] == true || typeContent?['kind'] == 'direct') {
       return XmoRoomKind.direct;
     }
+    if (typeContent?['is_saved_messages'] == true ||
+        typeContent?['kind'] == 'saved') {
+      return XmoRoomKind.saved;
+    }
     if (typeContent?['is_channel'] == true) return XmoRoomKind.channel;
     if (typeContent?['is_group'] == true) return XmoRoomKind.group;
 
@@ -191,6 +208,7 @@ class MatrixService {
 
     // Open credential storage box
     _authBox = await Hive.openBox(_authBoxName);
+    _savedMessagesRoomId = _authBox.get(_savedMessagesRoomIdKey) as String?;
 
     // Open channel ID cache (survives restarts — instant channel detection)
     _channelBox = await Hive.openBox(_channelBoxName);
@@ -202,6 +220,7 @@ class MatrixService {
     // Open persistent media cache box for thumbnails
     await Hive.openBox<Uint8List>('xmo_media_cache');
     await Hive.openBox('xmo_app_settings');
+    await Hive.openBox('xmo_call_history');
 
     _client = Client(
       'XMO',
@@ -361,7 +380,104 @@ class MatrixService {
 
   // ─── Rooms ────────────────────────────────────────────────────────────────
 
-  List<Room> getRooms() => _client.rooms;
+  List<Room> getRooms() => _client.rooms.where((room) {
+        final type = room.getState(roomTypeStateType)?.content;
+        if (type?['kind'] == 'directory') return false;
+        if (_isDuplicateSavedMessagesRoom(room)) return false;
+        return room.canonicalAlias != '#xmo-user-directory:$matrixServerName';
+      }).toList();
+
+  bool isSavedMessagesRoom(Room room) {
+    if (_savedMessagesRoomId == room.id) return true;
+    final type = room.getState(roomTypeStateType)?.content;
+    return type?['is_saved_messages'] == true ||
+        type?['kind'] == 'saved' ||
+        room.getState(savedMessagesStateType)?.content['enabled'] == true;
+  }
+
+  Future<void> _cacheSavedMessagesRoomId(String roomId) async {
+    _savedMessagesRoomId = roomId;
+    await _authBox.put(_savedMessagesRoomIdKey, roomId);
+  }
+
+  bool _isDuplicateSavedMessagesRoom(Room room) {
+    if (isSavedMessagesRoom(room)) return false;
+    if (room.membership != Membership.join &&
+        room.membership != Membership.invite) {
+      return false;
+    }
+    return cleanName(getResolvedDisplayName(room)).trim().toLowerCase() ==
+        'saved messages';
+  }
+
+  Room? getSavedMessagesRoom() {
+    for (final room in _client.rooms) {
+      if (room.membership == Membership.join && isSavedMessagesRoom(room)) {
+        unawaited(_cacheSavedMessagesRoomId(room.id));
+        return room;
+      }
+    }
+    return null;
+  }
+
+  Future<int> deleteDuplicateSavedMessagesRooms() async {
+    final duplicates = _client.rooms
+        .where(_isDuplicateSavedMessagesRoom)
+        .toList(growable: false);
+
+    var deleted = 0;
+    for (final room in duplicates) {
+      try {
+        await room.leave();
+        deleted++;
+      } catch (e) {
+        debugPrint(
+          '[MatrixService] Failed to leave duplicate Saved Messages room '
+          '${room.id}: $e',
+        );
+      }
+    }
+
+    if (deleted > 0) {
+      await _client.oneShotSync();
+    }
+    return deleted;
+  }
+
+  Future<Room> getOrCreateSavedMessagesRoom() async {
+    final existing = getSavedMessagesRoom();
+    if (existing != null) return existing;
+
+    final roomId = await _client.createRoom(
+      name: 'Saved Messages',
+      preset: CreateRoomPreset.privateChat,
+      visibility: null,
+      initialState: [
+        StateEvent(
+          type: roomTypeStateType,
+          stateKey: '',
+          content: {
+            'kind': 'saved',
+            'is_saved_messages': true,
+          },
+        ),
+        StateEvent(
+          type: savedMessagesStateType,
+          stateKey: '',
+          content: {'enabled': true},
+        ),
+        StateEvent(
+          type: EventTypes.HistoryVisibility,
+          stateKey: '',
+          content: {'history_visibility': 'shared'},
+        ),
+      ],
+    );
+
+    await _client.oneShotSync();
+    await _cacheSavedMessagesRoomId(roomId);
+    return _client.getRoomById(roomId) ?? Room(id: roomId, client: _client);
+  }
 
   /// Get rooms where the user has been invited but hasn't joined yet
   List<Room> getInvitedRooms() {
@@ -399,6 +515,15 @@ class MatrixService {
         visibility: isDirect ? null : Visibility.public,
         roomAliasName: aliasName,
         isDirect: isDirect,
+        initialState: isDirect
+            ? null
+            : [
+                StateEvent(
+                  type: EventTypes.HistoryVisibility,
+                  stateKey: '',
+                  content: {'history_visibility': 'shared'},
+                ),
+              ],
       );
       if (!isDirect) {
         cacheGroupId(roomId);
@@ -415,6 +540,13 @@ class MatrixService {
           preset: CreateRoomPreset.publicChat,
           visibility: Visibility.public,
           isDirect: false,
+          initialState: [
+            StateEvent(
+              type: EventTypes.HistoryVisibility,
+              stateKey: '',
+              content: {'history_visibility': 'shared'},
+            ),
+          ],
         );
         cacheGroupId(roomId);
         _ensureDirectoryVisibility(roomId);
@@ -467,7 +599,12 @@ class MatrixService {
             type: roomTypeStateType,
             stateKey: '',
             content: {'is_channel': true},
-          )
+          ),
+          StateEvent(
+            type: EventTypes.HistoryVisibility,
+            stateKey: '',
+            content: {'history_visibility': 'shared'},
+          ),
         ],
       );
     } catch (e) {
@@ -488,7 +625,12 @@ class MatrixService {
               type: roomTypeStateType,
               stateKey: '',
               content: {'is_channel': true},
-            )
+            ),
+            StateEvent(
+              type: EventTypes.HistoryVisibility,
+              stateKey: '',
+              content: {'history_visibility': 'shared'},
+            ),
           ],
         );
       } else {
@@ -590,6 +732,9 @@ class MatrixService {
         cacheChannelId(room.id);
         continue;
       }
+      if (kind == XmoRoomKind.saved) {
+        continue;
+      }
       if (kind == XmoRoomKind.group) {
         cacheGroupId(room.id);
       }
@@ -607,6 +752,7 @@ class MatrixService {
     for (final room in _client.rooms) {
       if (room.isDirectChat) continue;
       if (room.membership != Membership.join) continue;
+      if (isSavedMessagesRoom(room)) continue;
       // Only publish rooms the current user has admin power in
       final ownPower = room.ownPowerLevel;
       if (ownPower < 50) continue;
@@ -742,8 +888,7 @@ class MatrixService {
             .replaceAll(RegExp(r'[^a-z0-9]'), '_')
             .replaceAll(RegExp(r'_+'), '_')
             .replaceAll(RegExp(r'^_|_$'), '');
-        final serverName =
-            _client.userID?.split(':').last ?? matrixServerName;
+        final serverName = _client.userID?.split(':').last ?? matrixServerName;
         final fullAlias = '#$aliasName:$serverName';
         debugPrint('[PublicSearch] Trying alias resolution: $fullAlias');
         final aliasResult = await _client.getRoomIdByAlias(fullAlias);
@@ -801,7 +946,9 @@ class MatrixService {
         roomId: identifier,
         worldReadable: false,
         guestCanJoin: false,
-        name: joinedRoom != null ? getResolvedDisplayName(joinedRoom) : identifier,
+        name: joinedRoom != null
+            ? getResolvedDisplayName(joinedRoom)
+            : identifier,
       );
     }
 
@@ -1236,7 +1383,8 @@ class MatrixService {
           'mimetype': 'image/jpeg',
           'size': thumbBytes.length,
           if (thumbnailWidth != null && thumbnailWidth > 0) 'w': thumbnailWidth,
-          if (thumbnailHeight != null && thumbnailHeight > 0) 'h': thumbnailHeight,
+          if (thumbnailHeight != null && thumbnailHeight > 0)
+            'h': thumbnailHeight,
         };
       } catch (e) {
         debugPrint('[sendVideo] Thumbnail upload failed (non-fatal): $e');

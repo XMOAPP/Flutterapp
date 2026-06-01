@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../theme.dart';
 import '../../models/group_models.dart';
+import '../story/story_avatar.dart';
 
 /// Mention autocomplete widget that shows @username suggestions
 class MentionAutocomplete extends StatelessWidget {
@@ -57,19 +58,10 @@ class MentionAutocomplete extends StatelessWidget {
   Widget _buildMemberTile(GroupMember member) {
     return ListTile(
       dense: true,
-      leading: CircleAvatar(
-        radius: 16,
-        backgroundColor: kDarkGrey,
-        child: Text(
-          member.displayName.isNotEmpty 
-              ? member.displayName[0].toUpperCase() 
-              : '?',
-          style: GoogleFonts.inter(
-            color: kLimeGreen,
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
+      leading: StoryAvatar(
+        userName: member.displayName,
+        avatarUrl: member.avatarUrl,
+        size: 32,
       ),
       title: Text(
         member.displayName,

@@ -10,6 +10,8 @@ import '../../widgets/direct_chat/online_status_indicator.dart';
 import '../../widgets/story/story_avatar.dart';
 import '../group/group_info_screen.dart';
 import '../channel/channel_info_screen.dart';
+import '../direct_chat/saved_messages_info_screen.dart';
+import '../direct_chat/search_in_chat_screen.dart';
 import '../direct_chat/user_profile_screen.dart';
 
 /// Builds the app bar for the Matrix chat screen
@@ -37,8 +39,19 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   bool get _isAdmin => room.ownPowerLevel >= 50;
   bool get _isChannel => room.isChannel;
   bool get _isDirect => MatrixService().isDirectRoom(room);
+  bool get _isSavedMessages => MatrixService().isSavedMessagesRoom(room);
+  bool get _supportsCalls => !_isSavedMessages && (_isDirect || !_isChannel);
 
   void _openGroupInfo(BuildContext context) {
+    if (_isSavedMessages) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SavedMessagesInfoScreen(room: room),
+        ),
+      );
+      return;
+    }
     if (_isChannel) {
       Navigator.push(
         context,
@@ -72,14 +85,15 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
     );
   }
 
-  Future<void> _startDirectCall(BuildContext context, bool video) async {
+  Future<void> _startRoomCall(BuildContext context, bool video) async {
     try {
       await VoipService().startCall(room, video: video);
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Unable to start ${video ? 'video' : 'voice'} call: $e'),
+          content:
+              Text('Unable to start ${video ? 'video' : 'voice'} call: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -90,9 +104,15 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     final matrixService = MatrixService();
     final memberCount = room.summary.mJoinedMemberCount ?? 0;
-    final audienceLabel = _isChannel ? 'subscribers' : 'members';
+    final audienceLabel = _isSavedMessages
+        ? ''
+        : _isChannel
+            ? 'subscribers'
+            : 'members';
     final name = MatrixService.cleanName(
-      matrixService.getResolvedDisplayName(room),
+      _isSavedMessages
+          ? 'Saved Messages'
+          : matrixService.getResolvedDisplayName(room),
     );
 
     return AppBar(
@@ -118,7 +138,12 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
                     userName: name,
                     avatarUrl: room.avatar?.toString(),
                     size: 36,
-                    fallbackIcon: _isChannel ? Icons.campaign : Icons.group,
+                    fallbackIcon: _isSavedMessages
+                        ? Icons.bookmark
+                        : _isChannel
+                            ? Icons.campaign
+                            : Icons.group,
+                    fallbackIconSize: _isSavedMessages ? 21 : null,
                   ),
                   const SizedBox(width: 9),
                   Expanded(
@@ -134,11 +159,12 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
-                        Text(
-                          '$memberCount $audienceLabel',
-                          style: GoogleFonts.inter(
-                              color: kLightGrey, fontSize: 11),
-                        ),
+                        if (!_isSavedMessages)
+                          Text(
+                            '$memberCount $audienceLabel',
+                            style: GoogleFonts.inter(
+                                color: kLightGrey, fontSize: 11),
+                          ),
                       ],
                     ),
                   ),
@@ -146,21 +172,45 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
               ),
             ),
       actions: [
-        if (_isDirect) ...[
-          IconButton(
-            tooltip: 'Voice call',
-            icon: const Icon(Icons.call, color: kWhite, size: 21),
-            onPressed: () => _startDirectCall(context, false),
+        if (_supportsCalls)
+          ValueListenableBuilder<int>(
+            valueListenable: VoipService().callStateVersion,
+            builder: (context, _, __) {
+              final blocked = VoipService().isCallStartBlocked(room);
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: blocked ? 'Call unavailable' : 'Voice call',
+                    icon: Icon(
+                      blocked ? Icons.phone_disabled : Icons.call,
+                      color: kWhite,
+                      size: 21,
+                    ),
+                    onPressed:
+                        blocked ? null : () => _startRoomCall(context, false),
+                  ),
+                  IconButton(
+                    tooltip: blocked ? 'Call unavailable' : 'Video call',
+                    icon: Icon(
+                      blocked ? Icons.videocam_off : Icons.videocam,
+                      color: kWhite,
+                      size: 23,
+                    ),
+                    onPressed:
+                        blocked ? null : () => _startRoomCall(context, true),
+                  ),
+                ],
+              );
+            },
           ),
-          IconButton(
-            tooltip: 'Video call',
-            icon: const Icon(Icons.videocam, color: kWhite, size: 23),
-            onPressed: () => _startDirectCall(context, true),
-          ),
-        ],
         PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert, color: kWhite, size: 22),
-          color: kDarkerGrey,
+          icon: const Icon(Icons.more_vert, color: kWhite, size: 28),
+          color: const Color(0xFF262728),
+          elevation: 8,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
           onSelected: (value) => _handleMenuAction(context, value),
           itemBuilder: (context) => _buildMenuItems(),
         ),
@@ -171,37 +221,67 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   List<PopupMenuEntry<String>> _buildMenuItems() {
     final items = <PopupMenuEntry<String>>[];
 
-    if (_isDirect) {
-      // Direct chat: Only delete chat
+    if (_isSavedMessages) {
+      items.add(_buildMenuItem(
+        'saved_info',
+        Icons.photo_library,
+        'Shared Media',
+        kWhite,
+      ));
+    } else if (_isDirect) {
+      final muted = room.pushRuleState == PushRuleState.dontNotify;
+      items.add(_buildMenuItem(
+        'search',
+        Icons.search,
+        'Search',
+        kWhite,
+      ));
+      items.add(_buildMenuItem(
+        'mute',
+        muted
+            ? Icons.notifications_active_outlined
+            : Icons.notifications_off_outlined,
+        muted ? 'Unmute' : 'Mute',
+        kWhite,
+      ));
       items.add(_buildMenuItem(
         'delete_chat',
         Icons.delete_outline,
         'Delete Chat',
-        Colors.red,
-      ));
-    } else if (_isAdmin) {
-      // Admin in group/channel: Delete chat + Delete group/channel
-      items.add(_buildMenuItem(
-        'delete_chat',
-        Icons.delete_outline,
-        'Delete Chat',
-        Colors.red,
-      ));
-      items.add(const PopupMenuDivider());
-      items.add(_buildMenuItem(
-        'delete_group',
-        Icons.delete_forever,
-        _isChannel ? 'Delete Channel' : 'Delete Group',
-        Colors.red,
+        Colors.redAccent,
       ));
     } else {
-      // Regular member: Leave group/channel
+      final muted = room.pushRuleState == PushRuleState.dontNotify;
       items.add(_buildMenuItem(
-        'leave',
-        Icons.exit_to_app,
-        _isChannel ? 'Leave Channel' : 'Leave Group',
-        Colors.orange,
+        'search',
+        Icons.search,
+        'Search',
+        kWhite,
       ));
+      items.add(_buildMenuItem(
+        'mute',
+        muted
+            ? Icons.notifications_active_outlined
+            : Icons.notifications_off_outlined,
+        muted ? 'Unmute' : 'Mute',
+        kWhite,
+      ));
+
+      if (_isAdmin) {
+        items.add(_buildMenuItem(
+          'delete_group',
+          Icons.delete_forever,
+          _isChannel ? 'Delete Channel' : 'Delete Group',
+          Colors.redAccent,
+        ));
+      } else {
+        items.add(_buildMenuItem(
+          'leave',
+          Icons.exit_to_app,
+          _isChannel ? 'Leave Channel' : 'Leave Group',
+          Colors.orange,
+        ));
+      }
     }
 
     return items;
@@ -219,7 +299,10 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
         children: [
           Icon(icon, color: color, size: 20),
           const SizedBox(width: 12),
-          Text(label, style: TextStyle(color: color)),
+          Text(
+            label,
+            style: GoogleFonts.inter(color: color, fontSize: 14),
+          ),
         ],
       ),
     );
@@ -227,6 +310,23 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   Future<void> _handleMenuAction(BuildContext context, String action) async {
     switch (action) {
+      case 'search':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => SearchInChatScreen(room: room),
+          ),
+        );
+        break;
+
+      case 'mute':
+        await _toggleRoomMute(context);
+        break;
+
+      case 'saved_info':
+        _openGroupInfo(context);
+        break;
+
       case 'delete_chat':
         await _confirmAndExecute(
           context,
@@ -265,6 +365,33 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
           );
         }
         break;
+    }
+  }
+
+  Future<void> _toggleRoomMute(BuildContext context) async {
+    final shouldMute = room.pushRuleState != PushRuleState.dontNotify;
+
+    try {
+      final directChatService = DirectChatService(
+        matrixProvider?.service ?? MatrixService(),
+      );
+      await directChatService.toggleMute(room.id, shouldMute);
+
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(shouldMute ? 'Chat muted' : 'Chat unmuted'),
+          backgroundColor: kLimeGreen,
+        ),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unable to update mute: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -342,6 +469,7 @@ class _DirectChatTitle extends StatefulWidget {
 class _DirectChatTitleState extends State<_DirectChatTitle> {
   bool _isOnline = false;
   DateTime? _lastSeen;
+  String? _avatarUrl;
 
   @override
   void initState() {
@@ -360,11 +488,16 @@ class _DirectChatTitleState extends State<_DirectChatTitle> {
           DirectChatService(widget.matrixProvider!.service);
       final isOnline = await directChatService.isUserOnline(otherUserId);
       final lastSeen = await directChatService.getLastSeen(otherUserId);
+      final peer = widget.room.getParticipants().where(
+            (user) => user.id == otherUserId,
+          );
+      final avatarUrl = peer.isEmpty ? null : peer.first.avatarUrl?.toString();
 
       if (mounted) {
         setState(() {
           _isOnline = isOnline;
           _lastSeen = lastSeen;
+          _avatarUrl = avatarUrl;
         });
       }
     } catch (e) {
@@ -380,23 +513,10 @@ class _DirectChatTitleState extends State<_DirectChatTitle> {
         children: [
           Stack(
             children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: const BoxDecoration(
-                  color: kLimeGreen,
-                  shape: BoxShape.circle,
-                ),
-                child: Center(
-                  child: Text(
-                    widget.name.isNotEmpty ? widget.name[0].toUpperCase() : '?',
-                    style: GoogleFonts.inter(
-                      color: kBlack,
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
+              StoryAvatar(
+                userName: widget.name,
+                avatarUrl: _avatarUrl,
+                size: 36,
               ),
               Positioned(
                 right: 0,

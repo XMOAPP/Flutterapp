@@ -37,7 +37,7 @@ void showChatAttachmentSheet({
               children: [
                 _AttachmentOptionSlot(
                   child: AttachOption(
-                    icon: Icons.photo_library_outlined,
+                    icon: Icons.photo_library,
                     label: 'Gallery',
                     color: Colors.white,
                     onTap: () {
@@ -48,7 +48,7 @@ void showChatAttachmentSheet({
                 ),
                 _AttachmentOptionSlot(
                   child: AttachOption(
-                    icon: Icons.camera_alt_outlined,
+                    icon: Icons.camera_alt,
                     label: 'Camera',
                     color: Colors.white,
                     onTap: () {
@@ -59,7 +59,7 @@ void showChatAttachmentSheet({
                 ),
                 _AttachmentOptionSlot(
                   child: AttachOption(
-                    icon: Icons.audiotrack_outlined,
+                    icon: Icons.audiotrack,
                     label: 'Audio',
                     color: Colors.white,
                     onTap: () {
@@ -70,7 +70,7 @@ void showChatAttachmentSheet({
                 ),
                 _AttachmentOptionSlot(
                   child: AttachOption(
-                    icon: Icons.description_outlined,
+                    icon: Icons.description,
                     label: 'Documents',
                     color: Colors.white,
                     onTap: () {
@@ -81,7 +81,7 @@ void showChatAttachmentSheet({
                 ),
                 _AttachmentOptionSlot(
                   child: AttachOption(
-                    icon: Icons.person_outline,
+                    icon: Icons.person,
                     label: 'Contacts',
                     color: Colors.white,
                     onTap: () {

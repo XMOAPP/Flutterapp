@@ -16,6 +16,13 @@ class MediaMessageBubble extends StatelessWidget {
   final Future<Uint8List?> Function(Event, {bool getThumbnail}) loadImageBytes;
   final Future<Uint8List?> Function(Event) loadVideoThumbnail;
   final Future<void> Function(Event) playVideo;
+  final Future<void> Function(Event)? downloadAttachment;
+  final Future<void> Function(Event)? shareAttachment;
+  final VoidCallback? onReply;
+  final VoidCallback? onForward;
+  final VoidCallback? onPin;
+  final VoidCallback? onDelete;
+  final bool isPinned;
   final void Function(Uint8List, String, Event) openFullscreenImage;
   final Widget Function(Event) buildMessageStatus;
   final bool isEdited;
@@ -30,6 +37,13 @@ class MediaMessageBubble extends StatelessWidget {
     required this.loadImageBytes,
     required this.loadVideoThumbnail,
     required this.playVideo,
+    this.downloadAttachment,
+    this.shareAttachment,
+    this.onReply,
+    this.onForward,
+    this.onPin,
+    this.onDelete,
+    this.isPinned = false,
     required this.openFullscreenImage,
     required this.buildMessageStatus,
     this.isEdited = false,
@@ -43,7 +57,8 @@ class MediaMessageBubble extends StatelessWidget {
     final durationMs = isImage ? null : _videoDurationMs;
 
     return Column(
-      crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      crossAxisAlignment:
+          isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: [
         if (!isMe)
           Padding(
@@ -92,6 +107,23 @@ class MediaMessageBubble extends StatelessWidget {
                   ),
                 ),
               ),
+            Positioned(
+              top: 4,
+              right: 4,
+              child: _MediaMessageMenu(
+                onDownload: downloadAttachment == null
+                    ? null
+                    : () => downloadAttachment!(event),
+                onShare: shareAttachment == null
+                    ? null
+                    : () => shareAttachment!(event),
+                onReply: onReply,
+                onForward: onForward,
+                onPin: onPin,
+                onDelete: onDelete,
+                isPinned: isPinned,
+              ),
+            ),
             // Tick and time overlay at bottom-right inside the media
             Positioned(
               bottom: 8,
@@ -175,11 +207,7 @@ class MediaMessageBubble extends StatelessWidget {
         ),
         if (isMe) ...[
           const SizedBox(width: 4),
-          Icon(
-            Icons.done_all,
-            color: color,
-            size: 14,
-          ),
+          buildMessageStatus(event),
         ],
         if (isEdited) ...[
           const SizedBox(width: 4),
@@ -193,6 +221,113 @@ class MediaMessageBubble extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _MediaMessageMenu extends StatelessWidget {
+  final VoidCallback? onDownload;
+  final VoidCallback? onShare;
+  final VoidCallback? onReply;
+  final VoidCallback? onForward;
+  final VoidCallback? onPin;
+  final VoidCallback? onDelete;
+  final bool isPinned;
+
+  const _MediaMessageMenu({
+    this.onDownload,
+    this.onShare,
+    this.onReply,
+    this.onForward,
+    this.onPin,
+    this.onDelete,
+    this.isPinned = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String>(
+      padding: EdgeInsets.zero,
+      tooltip: 'Media options',
+      color: const Color(0xFF262728),
+      elevation: 8,
+      constraints: const BoxConstraints(minWidth: 168),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: const SizedBox(
+        width: 24,
+        height: 24,
+        child: Icon(Icons.more_vert, color: kWhite, size: 21),
+      ),
+      onSelected: (value) {
+        switch (value) {
+          case 'reply':
+            onReply?.call();
+            break;
+          case 'forward':
+            onForward?.call();
+            break;
+          case 'download':
+            onDownload?.call();
+            break;
+          case 'share':
+            onShare?.call();
+            break;
+          case 'pin':
+            onPin?.call();
+            break;
+          case 'delete':
+            onDelete?.call();
+            break;
+        }
+      },
+      itemBuilder: (context) => [
+        if (onReply != null) _menuItem('reply', Icons.reply, 'Reply'),
+        if (onForward != null)
+          _menuItem('forward', Icons.reply, 'Forward', flipIcon: true),
+        if (onDownload != null)
+          _menuItem('download', Icons.download, 'Download'),
+        if (onShare != null) _menuItem('share', Icons.share, 'Share'),
+        if (onPin != null)
+          _menuItem(
+            'pin',
+            isPinned ? Icons.push_pin_outlined : Icons.push_pin,
+            isPinned ? 'Unpin' : 'Pin',
+          ),
+        if (onDelete != null)
+          _menuItem(
+            'delete',
+            Icons.delete_outline,
+            'Delete',
+            color: Colors.redAccent,
+          ),
+      ],
+    );
+  }
+
+  PopupMenuItem<String> _menuItem(
+    String value,
+    IconData icon,
+    String label, {
+    Color color = kWhite,
+    bool flipIcon = false,
+  }) {
+    return PopupMenuItem<String>(
+      value: value,
+      child: Row(
+        children: [
+          Transform.scale(
+            scaleX: flipIcon ? -1 : 1,
+            child: Icon(icon, color: color, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            label,
+            style: GoogleFonts.inter(color: color, fontSize: 14),
+          ),
+        ],
+      ),
     );
   }
 }

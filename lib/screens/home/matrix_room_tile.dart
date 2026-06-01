@@ -23,9 +23,12 @@ class MatrixRoomTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final matrixService = MatrixService();
     final isDirect = matrixService.isDirectRoom(room);
-    final cleanedName =
-        MatrixService.cleanName(matrixService.getResolvedDisplayName(room));
+    final isSavedMessages = matrixService.isSavedMessagesRoom(room);
+    final cleanedName = isSavedMessages
+        ? 'Saved Messages'
+        : MatrixService.cleanName(matrixService.getResolvedDisplayName(room));
     final unreadCount = room.notificationCount;
+    final lastEventTime = _formatLastEventTime(room.lastEvent?.originServerTs);
 
     String lastMsg = 'No messages yet';
     if (room.lastEvent != null) {
@@ -39,17 +42,25 @@ class MatrixRoomTile extends StatelessWidget {
       }
     }
 
+    final avatar = StoryAvatar(
+      userName: cleanedName,
+      avatarUrl: room.avatar?.toString(),
+      size: 50,
+      fallbackIcon: isSavedMessages
+          ? Icons.bookmark
+          : !isDirect && room.isChannel
+              ? Icons.campaign
+              : !isDirect && room.isGroup
+                  ? Icons.group
+                  : null,
+    );
+
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: StoryAvatar(
-        userName: cleanedName,
-        avatarUrl: room.avatar?.toString(),
-        size: 50,
-        fallbackIcon: !isDirect && room.isChannel
-            ? Icons.campaign
-            : !isDirect && room.isGroup
-                ? Icons.group
-                : null,
+      leading: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onLongPress: () => _showAvatarPreview(context, cleanedName),
+        child: avatar,
       ),
       title: Row(
         children: [
@@ -72,8 +83,11 @@ class MatrixRoomTile extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
         style: unreadCount > 0 ? _unreadSubtitleStyle : _subtitleStyle,
       ),
-      trailing: showUnreadBadge && unreadCount > 0
-          ? _UnreadBadge(count: unreadCount)
+      trailing: lastEventTime != null || (showUnreadBadge && unreadCount > 0)
+          ? _RoomMeta(
+              time: lastEventTime,
+              unreadCount: showUnreadBadge ? unreadCount : 0,
+            )
           : null,
       onTap: () async {
         final matrixProvider = context.read<MatrixProvider>();
@@ -89,6 +103,53 @@ class MatrixRoomTile extends StatelessWidget {
         if (context.mounted) {
           matrixProvider.refreshRooms();
         }
+      },
+    );
+  }
+
+  void _showAvatarPreview(BuildContext context, String name) {
+    showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Close',
+      barrierColor: Colors.black.withValues(alpha: 0.62),
+      transitionDuration: const Duration(milliseconds: 140),
+      pageBuilder: (dialogContext, _, __) {
+        final matrixService = MatrixService();
+        final isDirect = matrixService.isDirectRoom(room);
+        final isSavedMessages = matrixService.isSavedMessagesRoom(room);
+        final fallbackIcon = isSavedMessages
+            ? Icons.bookmark
+            : !isDirect && room.isChannel
+                ? Icons.campaign
+                : !isDirect && room.isGroup
+                    ? Icons.group
+                    : null;
+
+        return Center(
+          child: GestureDetector(
+            onTap: () => Navigator.of(dialogContext).pop(),
+            child: StoryAvatar(
+              userName: name,
+              avatarUrl: room.avatar?.toString(),
+              size: 220,
+              fallbackIcon: fallbackIcon,
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (_, animation, __, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.92, end: 1).animate(curved),
+            child: child,
+          ),
+        );
       },
     );
   }
@@ -109,6 +170,70 @@ class MatrixRoomTile extends StatelessWidget {
     fontSize: 13,
     fontWeight: FontWeight.w600,
   );
+
+  static String? _formatLastEventTime(DateTime? timestamp) {
+    if (timestamp == null) return null;
+
+    final now = DateTime.now();
+    final local = timestamp.toLocal();
+    final today = DateTime(now.year, now.month, now.day);
+    final messageDay = DateTime(local.year, local.month, local.day);
+
+    if (messageDay == today) {
+      final hour = local.hour == 0
+          ? 12
+          : local.hour > 12
+              ? local.hour - 12
+              : local.hour;
+      final minute = local.minute.toString().padLeft(2, '0');
+      return '$hour:$minute';
+    }
+
+    if (messageDay == today.subtract(const Duration(days: 1))) {
+      return 'Yesterday';
+    }
+
+    return '${local.day}/${local.month}/${local.year.toString().substring(2)}';
+  }
+}
+
+class _RoomMeta extends StatelessWidget {
+  final String? time;
+  final int unreadCount;
+
+  const _RoomMeta({
+    required this.time,
+    required this.unreadCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 52,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (time != null)
+            Text(
+              time!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: GoogleFonts.inter(
+                color: kLightGrey,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          if (unreadCount > 0) ...[
+            const SizedBox(height: 6),
+            _UnreadBadge(count: unreadCount),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 class _UnreadBadge extends StatelessWidget {

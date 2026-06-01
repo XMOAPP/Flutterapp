@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 import '../models/story_models.dart';
 import 'matrix_service.dart';
+import 'privacy_service.dart';
 
 /// Service for managing Stories feature
 class StoryService {
@@ -124,7 +125,7 @@ class StoryService {
         {'stories': storiesJson},
       );
 
-      // Broadcast to all direct chat rooms so contacts can see our stories
+      // Broadcast to all allowed direct chat rooms so contacts can see our stories
       await _broadcastStoriesToContacts(activeStories);
     } catch (e) {
       debugPrint('[StoryService] Failed to save story: $e');
@@ -142,11 +143,18 @@ class StoryService {
       // Get all direct chat rooms
       final directRooms = _client.rooms.where((r) => r.isDirectChat);
 
-      final storiesJson = stories.map((s) => s.toJson()).toList();
-
       // Send event to each direct chat room
       for (final room in directRooms) {
         try {
+          final viewerId =
+              _matrixService.getDirectPeerUserId(room) ?? room.directChatMatrixID;
+          if (viewerId == null || viewerId == myUserId) continue;
+
+          final visibleStories = stories
+              .where((story) => _canUserViewStory(story, viewerId))
+              .toList();
+          final storiesJson = visibleStories.map((s) => s.toJson()).toList();
+
           await room.sendEvent({
             'msgtype': storyUpdateEventType,
             'user_id': myUserId,
@@ -161,6 +169,18 @@ class StoryService {
       }
     } catch (e) {
       debugPrint('[StoryService] Failed to broadcast stories: $e');
+    }
+  }
+
+  bool _canUserViewStory(Story story, String userId) {
+    switch (story.privacy) {
+      case StoryPrivacy.contacts:
+      case StoryPrivacy.allUsers:
+        return true;
+      case StoryPrivacy.custom:
+        return story.customPrivacyList?.contains(userId) ?? false;
+      case StoryPrivacy.contactsExcept:
+        return !(story.customPrivacyList?.contains(userId) ?? false);
     }
   }
 
@@ -291,6 +311,37 @@ class StoryService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
+  Future<void> applyPrivacySettingsToMyStories(
+    XmoPrivacySettings settings,
+  ) async {
+    final myUserId = _client.userID;
+    if (myUserId == null) return;
+
+    final privacy = switch (settings.storyAudience) {
+      XmoPrivacyAudience.contacts => StoryPrivacy.contacts,
+      XmoPrivacyAudience.onlySelected => StoryPrivacy.custom,
+      XmoPrivacyAudience.hideSelected => StoryPrivacy.contactsExcept,
+    };
+
+    final stories = await getMyStories();
+    final updatedStories = stories.map((story) {
+      return story.copyWith(
+        privacy: privacy,
+        customPrivacyList:
+            settings.storyAudience == XmoPrivacyAudience.contacts
+                ? const []
+                : settings.storyUserIds,
+      );
+    }).toList();
+
+    await _client.setAccountData(
+      myUserId,
+      storyAccountDataType,
+      {'stories': updatedStories.map((story) => story.toJson()).toList()},
+    );
+    await _broadcastStoriesToContacts(updatedStories);
+  }
+
   // VIEW STORY
   // ═══════════════════════════════════════════════════════════════════════════
 

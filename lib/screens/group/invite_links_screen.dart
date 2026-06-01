@@ -14,6 +14,7 @@ class InviteLinksScreen extends StatefulWidget {
   State<InviteLinksScreen> createState() => _InviteLinksScreenState();
 }
 
+
 class _InviteLinksScreenState extends State<InviteLinksScreen> {
   XmoInviteLink? _inviteLink;
   bool _loading = false;

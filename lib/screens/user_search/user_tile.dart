@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import '../../services/matrix_service.dart';
 import '../../theme.dart';
+import '../../widgets/story/story_avatar.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // USER TILE - Optimized with RepaintBoundary
@@ -64,26 +65,10 @@ class _UserTileState extends State<UserTile> {
   }
 
   Widget _buildAvatar(String cleanUsername) {
-    return Container(
-      width: 46,
-      height: 46,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            kLimeGreen.withValues(alpha: 0.8),
-            kLimeGreen,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        shape: BoxShape.circle,
-      ),
-      child: Center(
-        child: Text(
-          cleanUsername.isNotEmpty ? cleanUsername[0].toUpperCase() : '?',
-          style: _avatarTextStyle,
-        ),
-      ),
+    return StoryAvatar(
+      userName: cleanUsername,
+      avatarUrl: widget.profile.avatarUrl?.toString(),
+      size: 46,
     );
   }
 
@@ -127,12 +112,6 @@ class _UserTileState extends State<UserTile> {
       ),
     );
   }
-
-  static final _avatarTextStyle = GoogleFonts.inter(
-    color: kBlack,
-    fontSize: 18,
-    fontWeight: FontWeight.bold,
-  );
 
   static final _nameTextStyle = GoogleFonts.inter(
     color: kWhite,

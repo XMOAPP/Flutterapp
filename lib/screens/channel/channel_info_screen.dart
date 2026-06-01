@@ -7,6 +7,7 @@ import '../../providers/matrix_provider.dart';
 import '../../services/channel_service.dart';
 import '../../services/matrix_service.dart';
 import '../../models/channel_models.dart';
+import '../../widgets/incoming_call_fullscreen_scope.dart';
 import '../../widgets/story/story_avatar.dart';
 import '../direct_chat/shared_media_screen.dart';
 import 'channel_settings_screen.dart';
@@ -28,9 +29,7 @@ class ChannelInfoScreen extends StatefulWidget {
 class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
   late ChannelService _channelService;
   List<ChannelSubscriber> _subscribers = [];
-  List<ChannelAdmin> _admins = [];
   int _subscriberCount = 0;
-  int _sharedMediaCount = 0;
   bool _loading = true;
 
   @override
@@ -45,16 +44,12 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
     setState(() => _loading = true);
     try {
       final subscribers = await _channelService.getSubscribers(widget.room.id);
-      final admins = await _channelService.getAdmins(widget.room.id);
       final count = await _channelService.getSubscriberCount(widget.room.id);
-      final sharedMediaCount = await _loadSharedMediaCount();
 
       if (mounted) {
         setState(() {
           _subscribers = subscribers;
-          _admins = admins;
           _subscriberCount = count;
-          _sharedMediaCount = sharedMediaCount;
           _loading = false;
         });
       }
@@ -66,17 +61,6 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
     }
   }
 
-  Future<int> _loadSharedMediaCount() async {
-    final timeline = await widget.room.getTimeline();
-    return timeline.events.where((event) {
-      final msgType = event.messageType;
-      return msgType == MessageTypes.Image ||
-          msgType == MessageTypes.Video ||
-          msgType == MessageTypes.Audio ||
-          msgType == MessageTypes.File;
-    }).length;
-  }
-
   bool get _isAdmin => widget.room.ownPowerLevel >= 50;
 
   @override
@@ -84,65 +68,73 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
     final channelName = MatrixService().getResolvedDisplayName(widget.room);
     final description = widget.room.topic;
 
-    return Scaffold(
-      backgroundColor: kBlack,
-      appBar: AppBar(
+    return IncomingCallFullscreenScope(
+      child: Scaffold(
         backgroundColor: kBlack,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: kWhite),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(
-          'Channel Info',
-          style: GoogleFonts.inter(
-            color: kWhite,
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
+        appBar: AppBar(
+          backgroundColor: kBlack,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: kWhite),
+            onPressed: () => Navigator.pop(context),
           ),
-        ),
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
-          : SingleChildScrollView(
-              child: Column(
-                children: [
-                  // Channel Header
-                  _buildChannelHeader(channelName, _subscriberCount),
-
-                  // Description
-                  if (description.isNotEmpty) _buildDescription(description),
-
-                  const SizedBox(height: 16),
-
-                  // Actions
-                  _buildActionButtons(),
-
-                  const SizedBox(height: 8),
-
-                  _buildSharedMediaSection(),
-
-                  const SizedBox(height: 8),
-
-                  // Statistics (Admin only)
-                  if (_isAdmin) _buildStatisticsSection(),
-
-                  // Admins Section
-                  if (_admins.isNotEmpty) _buildAdminsSection(),
-
-                  // Subscribers Section
-                  _buildSubscribersSection(),
-
-                  const SizedBox(height: 80),
-                ],
-              ),
+          title: Text(
+            'Channel Info',
+            style: GoogleFonts.inter(
+              color: kWhite,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
             ),
+          ),
+          actions: [
+            PopupMenuButton<String>(
+              color: const Color(0xFF262728),
+              elevation: 8,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              icon: const Icon(Icons.more_vert, color: kWhite, size: 28),
+              onSelected: _handleMenuAction,
+              itemBuilder: (context) => _buildMenuItems(),
+            ),
+          ],
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
+            : SingleChildScrollView(
+                child: Column(
+                  children: [
+                    // Channel Header
+                    _buildChannelHeader(channelName, _subscriberCount),
+
+                    // Description
+                    if (description.isNotEmpty) _buildDescription(description),
+
+                    const SizedBox(height: 16),
+
+                    // Actions
+                    _buildActionButtons(),
+
+                    const SizedBox(height: 8),
+
+                    // Subscribers Section
+                    _buildSubscribersSection(),
+
+                    const SizedBox(height: 8),
+
+                    _buildSharedMediaSection(),
+
+                    const SizedBox(height: 80),
+                  ],
+                ),
+              ),
+      ),
     );
   }
 
   Widget _buildChannelHeader(String name, int subscriberCount) {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
       child: Column(
         children: [
           // Channel Avatar
@@ -155,45 +147,14 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
           const SizedBox(height: 16),
 
           // Channel Name
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Flexible(
-                child: Text(
-                  name,
-                  style: GoogleFonts.inter(
-                    color: kWhite,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: kLimeGreen.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: kLimeGreen, width: 1),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.campaign, color: kLimeGreen, size: 12),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Channel',
-                      style: GoogleFonts.inter(
-                        color: kLimeGreen,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+          Text(
+            name,
+            style: GoogleFonts.inter(
+              color: kWhite,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+            textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
 
@@ -210,26 +171,171 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
     );
   }
 
+  List<PopupMenuEntry<String>> _buildMenuItems() {
+    if (!_isAdmin) {
+      return [
+        _buildMenuItem(
+          value: 'leave',
+          icon: Icons.logout,
+          label: 'Leave Channel',
+          destructive: true,
+        ),
+      ];
+    }
+
+    return [
+      _buildMenuItem(
+        value: 'live',
+        icon: Icons.live_tv,
+        label: 'Live Stream',
+      ),
+      _buildMenuItem(
+        value: 'edit',
+        icon: Icons.edit,
+        label: 'Edit Channel',
+      ),
+      _buildMenuItem(
+        value: 'delete',
+        icon: Icons.delete,
+        label: 'Delete Channel',
+        destructive: true,
+      ),
+    ];
+  }
+
+  PopupMenuItem<String> _buildMenuItem({
+    required String value,
+    required IconData icon,
+    required String label,
+    bool destructive = false,
+  }) {
+    final color = destructive ? Colors.redAccent : kWhite;
+    return PopupMenuItem<String>(
+      value: value,
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 12),
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              color: color,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _handleMenuAction(String action) {
+    switch (action) {
+      case 'delete':
+        _confirmDeleteChannel();
+        break;
+      case 'leave':
+        _confirmLeaveChannel();
+        break;
+      case 'live':
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Live stream is not available yet'),
+            backgroundColor: kLimeGreen,
+          ),
+        );
+        break;
+      case 'edit':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ChannelSettingsScreen(room: widget.room),
+          ),
+        ).then((_) => _loadChannelData());
+        break;
+    }
+  }
+
+  Future<void> _confirmLeaveChannel() async {
+    final confirmed = await _confirmAction(
+      title: 'Leave Channel?',
+      message: 'Leave this channel?',
+      actionLabel: 'Leave',
+    );
+    if (confirmed != true) return;
+
+    try {
+      await widget.room.leave();
+      if (!mounted) return;
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to leave channel: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _confirmDeleteChannel() async {
+    final confirmed = await _confirmAction(
+      title: 'Delete Channel?',
+      message: 'Delete this channel for subscribers you can remove?',
+      actionLabel: 'Delete',
+    );
+    if (confirmed != true) return;
+
+    try {
+      await _channelService.deleteChannel(widget.room.id);
+      if (!mounted) return;
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to delete channel: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<bool?> _confirmAction({
+    required String title,
+    required String message,
+    required String actionLabel,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF262728),
+        title: Text(title, style: GoogleFonts.inter(color: kWhite)),
+        content: Text(message, style: GoogleFonts.inter(color: kLightGrey)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.inter(color: kLightGrey)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(
+              actionLabel,
+              style: GoogleFonts.inter(color: Colors.redAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDescription(String description) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: kDarkerGrey,
-        borderRadius: BorderRadius.circular(12),
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Description',
-            style: GoogleFonts.inter(
-              color: kLightGrey,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
           Text(
             description,
             style: GoogleFonts.inter(
@@ -254,59 +360,62 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
             children: [
               _buildActionButton(
                 width: itemWidth,
-              icon: Icons.share_outlined,
-              label: 'Share Link',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ChannelInviteScreen(room: widget.room),
-                  ),
-                );
-              },
-            ),
-              if (_isAdmin)
-                _buildActionButton(
-                  width: itemWidth,
-                icon: Icons.settings_outlined,
-                label: 'Settings',
+                icon: Icons.share,
+                label: 'Share Link',
                 onTap: () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => ChannelSettingsScreen(room: widget.room),
-                    ),
-                  ).then((_) => _loadChannelData());
-                },
-              ),
-              if (_isAdmin)
-                _buildActionButton(
-                  width: itemWidth,
-                icon: Icons.admin_panel_settings_outlined,
-                label: 'Admin Panel',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => ChannelAdminPanelScreen(room: widget.room),
-                    ),
-                  ).then((_) => _loadChannelData());
-                },
-              ),
-              if (_isAdmin)
-                _buildActionButton(
-                  width: itemWidth,
-                icon: Icons.bar_chart_outlined,
-                label: 'Statistics',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => ChannelStatisticsScreen(room: widget.room),
+                      builder: (_) => ChannelInviteScreen(room: widget.room),
                     ),
                   );
                 },
               ),
+              if (_isAdmin)
+                _buildActionButton(
+                  width: itemWidth,
+                  icon: Icons.settings,
+                  label: 'Settings',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          ChannelSettingsScreen(room: widget.room),
+                    ),
+                  ).then((_) => _loadChannelData());
+                },
+              ),
+              if (_isAdmin)
+                _buildActionButton(
+                  width: itemWidth,
+                  icon: Icons.admin_panel_settings,
+                  label: 'Admin Panel',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            ChannelAdminPanelScreen(room: widget.room),
+                      ),
+                    ).then((_) => _loadChannelData());
+                  },
+                ),
+              if (_isAdmin)
+                _buildActionButton(
+                  width: itemWidth,
+                  icon: Icons.bar_chart,
+                  label: 'Statistics',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            ChannelStatisticsScreen(room: widget.room),
+                      ),
+                    );
+                  },
+                ),
             ],
           );
         },
@@ -324,18 +433,18 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
       width: width,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
-            color: kDarkerGrey,
-            borderRadius: BorderRadius.circular(12),
+            color: const Color(0xFF2C2C2E),
+            borderRadius: BorderRadius.circular(16),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: kLimeGreen, size: 20),
-              const SizedBox(height: 6),
+              Icon(icon, color: kLimeGreen, size: 24),
+              const SizedBox(height: 4),
               Text(
                 label,
                 style: GoogleFonts.inter(
@@ -355,166 +464,23 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
   }
 
   Widget _buildSharedMediaSection() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: kDarkerGrey,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: ListTile(
-        dense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: const Icon(
-          Icons.photo_library_outlined,
-          color: kLimeGreen,
-          size: 22,
-        ),
-        title: Text(
-          'Shared Media',
-          style: GoogleFonts.inter(
-            color: kWhite,
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
-        ),
-        subtitle: Text(
-          '$_sharedMediaCount item${_sharedMediaCount == 1 ? '' : 's'}',
-          style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
-        ),
-        trailing: const Icon(Icons.chevron_right, color: kLightGrey, size: 18),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => SharedMediaScreen(room: widget.room),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildStatisticsSection() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: kDarkerGrey,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.bar_chart, color: kLimeGreen, size: 18),
-              const SizedBox(width: 8),
-              Text(
-                'Quick Stats',
-                style: GoogleFonts.inter(
-                  color: kWhite,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _buildStatItem('Subscribers', '$_subscriberCount'),
-              ),
-              Expanded(
-                child: _buildStatItem('Admins', '${_admins.length}'),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatItem(String label, String value) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: GoogleFonts.inter(
-            color: kLimeGreen,
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          label,
-          style: GoogleFonts.inter(
-            color: kLightGrey,
-            fontSize: 11,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildAdminsSection() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: kDarkerGrey,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        children: [
-          ListTile(
-            dense: true,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            leading: const Icon(Icons.admin_panel_settings_outlined,
-                color: kLimeGreen, size: 20),
-            title: Text(
-              'Admins',
-              style: GoogleFonts.inter(
-                color: kWhite,
-                fontWeight: FontWeight.w600,
-                fontSize: 14,
-              ),
-            ),
-            trailing: Text(
-              '${_admins.length}',
-              style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
-            ),
-          ),
-          ..._admins.take(3).map((admin) => _buildAdminTile(admin)),
-          if (_admins.length > 3)
-            Padding(
-              padding: const EdgeInsets.all(8),
-              child: Text(
-                'and ${_admins.length - 3} more...',
-                style: GoogleFonts.inter(
-                  color: kLightGrey,
-                  fontSize: 11,
-                ),
-              ),
-            ),
-        ],
-      ),
+    return SharedMediaScreen(
+      room: widget.room,
+      embedded: true,
+      showDivider: false,
     );
   }
 
   Widget _buildSubscribersSection() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: kDarkerGrey,
-        borderRadius: BorderRadius.circular(12),
-      ),
       child: Column(
         children: [
           ListTile(
             dense: true,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            leading: const Icon(Icons.people_outline, color: kLimeGreen, size: 20),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            leading: const Icon(Icons.people, color: kLimeGreen, size: 20),
             title: Text(
               'Subscribers',
               style: GoogleFonts.inter(
@@ -530,8 +496,6 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
                   '$_subscriberCount',
                   style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
                 ),
-                const SizedBox(width: 8),
-                const Icon(Icons.chevron_right, color: kLightGrey, size: 18),
               ],
             ),
             onTap: () {
@@ -547,7 +511,9 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
             },
           ),
           // Show first 3 subscribers
-          ..._subscribers.take(3).map((subscriber) => _buildSubscriberTile(subscriber)),
+          ..._subscribers
+              .take(3)
+              .map((subscriber) => _buildSubscriberTile(subscriber)),
           if (_subscribers.length > 3)
             Padding(
               padding: const EdgeInsets.all(8),
@@ -564,66 +530,39 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
     );
   }
 
-  Widget _buildAdminTile(ChannelAdmin admin) {
-    return ListTile(
-      dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: CircleAvatar(
-        radius: 16,
-        backgroundColor: kDarkGrey,
-        child: Text(
-          admin.displayName.isNotEmpty ? admin.displayName[0].toUpperCase() : '?',
-          style: GoogleFonts.inter(
-            color: kLimeGreen,
-            fontWeight: FontWeight.bold,
-            fontSize: 12,
-          ),
-        ),
-      ),
-      title: Text(
-        admin.displayName,
-        style: GoogleFonts.inter(color: kWhite, fontSize: 13),
-      ),
-      trailing: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: kLimeGreen.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: kLimeGreen, width: 1),
-        ),
-        child: Text(
-          'Admin',
-          style: GoogleFonts.inter(
-            color: kLimeGreen,
-            fontSize: 9,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildSubscriberTile(ChannelSubscriber subscriber) {
     return ListTile(
       dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: CircleAvatar(
-        radius: 16,
-        backgroundColor: kDarkGrey,
-        child: Text(
-          subscriber.displayName.isNotEmpty
-              ? subscriber.displayName[0].toUpperCase()
-              : '?',
-          style: GoogleFonts.inter(
-            color: kLimeGreen,
-            fontWeight: FontWeight.bold,
-            fontSize: 12,
-          ),
-        ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      minLeadingWidth: 46,
+      horizontalTitleGap: 12,
+      leading: StoryAvatar(
+        userName: subscriber.displayName,
+        avatarUrl: subscriber.avatarUrl,
+        size: 46,
       ),
       title: Text(
         subscriber.displayName,
         style: GoogleFonts.inter(color: kWhite, fontSize: 13),
+      ),
+      trailing: subscriber.isAdmin ? _buildAdminBadge() : null,
+    );
+  }
+
+  Widget _buildAdminBadge() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: kLimeGreen.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        'Admin',
+        style: GoogleFonts.inter(
+          color: kLimeGreen,
+          fontSize: 9,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }

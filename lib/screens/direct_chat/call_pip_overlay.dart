@@ -8,6 +8,7 @@ import 'package:matrix/matrix.dart';
 import '../../services/matrix_service.dart';
 import '../../services/voip_service.dart';
 import '../../theme.dart';
+import '../../widgets/story/story_avatar.dart';
 
 /// Floating picture-in-picture overlay shown while the user navigates the app
 /// during an active call. Draggable, shows video or avatar, has mini controls.
@@ -34,6 +35,7 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
   void initState() {
     super.initState();
     _voip.pipMode.addListener(_onPipChanged);
+    _voip.fullscreenCallRouteDepth.addListener(_onPipChanged);
     _startIfNeeded();
   }
 
@@ -48,10 +50,32 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
 
   void _startIfNeeded() {
     final session = _voip.activeSession;
-    if (session == null) return;
+    final groupCall = _voip.activeGroupCall;
+    if (session == null && groupCall == null) return;
+    if (groupCall != null && session == null) {
+      _stateSub?.cancel();
+      _stateSub = groupCall.onGroupCallState.stream.listen((state) {
+        if (!mounted) return;
+        if (state == GroupCallState.Ended) {
+          _voip.pipMode.value = false;
+        }
+        setState(() {});
+      });
+      _durationTimer?.cancel();
+      _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        final connectedAt = _voip.groupCallConnectedAt;
+        setState(() {
+          _callDuration = connectedAt == null
+              ? Duration.zero
+              : DateTime.now().difference(connectedAt);
+        });
+      });
+      return;
+    }
 
     // Sync mute state from session
-    _muted = session.isMicrophoneMuted;
+    _muted = session!.isMicrophoneMuted;
 
     // Subscribe to call state changes
     _stateSub?.cancel();
@@ -92,6 +116,7 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
   @override
   void dispose() {
     _voip.pipMode.removeListener(_onPipChanged);
+    _voip.fullscreenCallRouteDepth.removeListener(_onPipChanged);
     _stopTimers();
     super.dispose();
   }
@@ -120,16 +145,18 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_voip.pipMode.value || _voip.activeSession == null) {
+    if (!_voip.pipMode.value ||
+        _voip.isFullscreenCallRouteVisible ||
+        (_voip.activeSession == null && _voip.activeGroupCall == null)) {
       return const SizedBox.shrink();
     }
 
-    final session = _voip.activeSession!;
+    final session = _voip.activeSession;
+    final groupCall = _voip.activeGroupCall;
     final screenSize = MediaQuery.of(context).size;
 
     // Clamp position within screen bounds
-    final clampedX =
-        _position.dx.clamp(0.0, screenSize.width - _pipWidth);
+    final clampedX = _position.dx.clamp(0.0, screenSize.width - _pipWidth);
     final clampedY =
         _position.dy.clamp(0.0, screenSize.height - _pipHeight - 40);
 
@@ -146,7 +173,135 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
         onTap: _maximize,
         child: Material(
           color: Colors.transparent,
-          child: _buildCard(session),
+          child: session != null
+              ? _buildCard(session)
+              : _buildGroupCard(groupCall!),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGroupCard(GroupCall groupCall) {
+    final isVideo = groupCall.type == GroupCallType.Video;
+    final remoteStreams = groupCall.userMediaStreams.where(
+      (stream) => !stream.isLocal(),
+    );
+    final stream = remoteStreams.isEmpty ? null : remoteStreams.first;
+    final renderer = _rendererFor(stream);
+    final title = MatrixService.cleanName(
+      MatrixService().getResolvedDisplayName(groupCall.room),
+    );
+
+    return Container(
+      width: _pipWidth,
+      height: _pipHeight,
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.6),
+            blurRadius: 16,
+            spreadRadius: 2,
+          ),
+          BoxShadow(
+            color: kLimeGreen.withValues(alpha: 0.08),
+            blurRadius: 20,
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(17),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: isVideo && renderer != null
+                  ? webrtc.RTCVideoView(
+                      renderer,
+                      objectFit: webrtc
+                          .RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                    )
+                  : Center(
+                      child: StoryAvatar(
+                        userName: title,
+                        avatarUrl: groupCall.room.avatar?.toString(),
+                        size: 54,
+                        fallbackIcon: Icons.group,
+                      ),
+                    ),
+            ),
+            Positioned(
+              top: 6,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.65),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    _formatDuration(_callDuration),
+                    style: GoogleFonts.inter(
+                      color: kWhite,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withValues(alpha: 0.85),
+                    ],
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _miniButton(
+                      icon: groupCall.isMicrophoneMuted
+                          ? Icons.mic_off
+                          : Icons.mic,
+                      color: groupCall.isMicrophoneMuted ? kLimeGreen : kWhite,
+                      onTap: () async {
+                        await groupCall.setMicrophoneMuted(
+                          !groupCall.isMicrophoneMuted,
+                        );
+                        if (mounted) setState(() {});
+                      },
+                    ),
+                    _miniButton(
+                      icon: Icons.call_end,
+                      color: Colors.red,
+                      onTap: () => VoipService().canEndGroupCall(groupCall)
+                          ? groupCall.terminate()
+                          : groupCall.leave(),
+                    ),
+                    _miniButton(
+                      icon: Icons.open_in_full,
+                      color: kWhite,
+                      onTap: _maximize,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -158,8 +313,6 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
     final title = MatrixService.cleanName(
       MatrixService().getResolvedDisplayName(session.room),
     );
-    final initial =
-        title.trim().isEmpty ? '?' : title.trim()[0].toUpperCase();
 
     return Container(
       width: _pipWidth,
@@ -188,8 +341,8 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
               child: isVideo && remoteRenderer != null
                   ? webrtc.RTCVideoView(
                       remoteRenderer,
-                      objectFit: webrtc.RTCVideoViewObjectFit
-                          .RTCVideoViewObjectFitCover,
+                      objectFit: webrtc
+                          .RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
                     )
                   : Container(
                       decoration: const BoxDecoration(
@@ -203,29 +356,10 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
                         ),
                       ),
                       child: Center(
-                        child: Container(
-                          width: 52,
-                          height: 52,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: [
-                                Color(0xFFC8FF4A),
-                                kLimeGreen,
-                                Color(0xFF5F8F16),
-                              ],
-                            ),
-                          ),
-                          child: Center(
-                            child: Text(
-                              initial,
-                              style: GoogleFonts.inter(
-                                color: kBlack,
-                                fontSize: 22,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
+                        child: StoryAvatar(
+                          userName: title,
+                          avatarUrl: session.room.avatar?.toString(),
+                          size: 52,
                         ),
                       ),
                     ),
@@ -322,6 +456,7 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
   }
 
   webrtc.RTCVideoRenderer? _rendererFor(WrappedMediaStream? stream) {
+    if (stream?.stream == null) return null;
     final renderer = stream?.renderer;
     return renderer is webrtc.RTCVideoRenderer ? renderer : null;
   }

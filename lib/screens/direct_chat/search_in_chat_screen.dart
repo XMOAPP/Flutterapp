@@ -6,6 +6,7 @@ import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/direct_chat_service.dart';
 import '../../services/matrix_service.dart';
+import '../../widgets/incoming_call_fullscreen_scope.dart';
 
 /// Search in Chat Screen - Search messages in direct chat
 class SearchInChatScreen extends StatefulWidget {
@@ -84,9 +85,10 @@ class _SearchInChatScreenState extends State<SearchInChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: kBlack,
-      appBar: AppBar(
+    return IncomingCallFullscreenScope(
+      child: Scaffold(
+        backgroundColor: kBlack,
+        appBar: AppBar(
         backgroundColor: kBlack,
         elevation: 0,
         leading: IconButton(
@@ -123,7 +125,7 @@ class _SearchInChatScreenState extends State<SearchInChatScreen> {
           ),
         ],
       ),
-      body: _searching
+        body: _searching
           ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
           : !_hasSearched
               ? Center(
@@ -188,6 +190,7 @@ class _SearchInChatScreenState extends State<SearchInChatScreen> {
                       itemCount: _results.length,
                       itemBuilder: (_, i) => _buildResultTile(_results[i]),
                     ),
+      ),
     );
   }
 

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum ChatFilter { all, groups, channels, stories }
+enum ChatFilter { all, stories, groups, channels, calls }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // OPTIMIZED CHAT FILTER PROVIDER

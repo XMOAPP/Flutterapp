@@ -6,6 +6,7 @@ import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/group_service.dart';
 import '../../models/group_models.dart';
+import '../../widgets/story/story_avatar.dart';
 
 /// Member List Screen - Shows all group members with search and actions
 class MemberListScreen extends StatefulWidget {
@@ -431,7 +432,7 @@ class _MemberListScreenState extends State<MemberListScreen> {
                 hintStyle: const TextStyle(color: Colors.white54),
                 prefixIcon: const Icon(Icons.search, color: kLightGrey),
                 filled: true,
-                fillColor: kDarkerGrey,
+                fillColor: const Color(0xFF2C2C2E),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -463,17 +464,10 @@ class _MemberListScreenState extends State<MemberListScreen> {
     final isMe = member.userId == _myUserId;
 
     return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: kDarkGrey,
-        child: Text(
-          member.displayName.isNotEmpty
-              ? member.displayName[0].toUpperCase()
-              : '?',
-          style: GoogleFonts.inter(
-            color: kLimeGreen,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
+      leading: StoryAvatar(
+        userName: member.displayName,
+        avatarUrl: member.avatarUrl,
+        size: 40,
       ),
       title: Row(
         children: [
@@ -483,7 +477,7 @@ class _MemberListScreenState extends State<MemberListScreen> {
               style: GoogleFonts.inter(color: kWhite),
             ),
           ),
-          if (member.powerLevel >= 25) _buildRoleBadge(member.role),
+          if (member.powerLevel >= 50) _buildRoleBadge(member.role),
           if (member.restriction != null) _buildRestrictedBadge(),
         ],
       ),
@@ -510,10 +504,6 @@ class _MemberListScreenState extends State<MemberListScreen> {
         label = 'Mod';
         color = const Color(0xFF3B82F6);
         break;
-      case MemberRole.helper:
-        label = 'Helper';
-        color = const Color(0xFF14B8A6);
-        break;
       default:
         return const SizedBox.shrink();
     }
@@ -523,7 +513,6 @@ class _MemberListScreenState extends State<MemberListScreen> {
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color, width: 1),
       ),
       child: Text(
         label,

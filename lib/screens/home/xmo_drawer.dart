@@ -1,9 +1,12 @@
 // ignore_for_file: deprecated_member_use, use_build_context_synchronously
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../theme.dart';
+import '../../providers/chat_filter_provider.dart';
 import '../../providers/matrix_provider.dart';
 import '../../models/group_models.dart';
 import '../../services/group_service.dart';
@@ -14,6 +17,9 @@ import '../login_screen.dart';
 import '../matrix_chat_screen.dart';
 import '../profile_settings_screen.dart';
 
+const Color _drawerBodyColor = Color(0xFF262728);
+const Color _drawerHeaderColor = Color(0xFF303133);
+
 /// Main navigation drawer for the app
 class XmoDrawer extends StatelessWidget {
   const XmoDrawer({super.key});
@@ -21,44 +27,41 @@ class XmoDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Drawer(
-      backgroundColor: const Color(0xFF0F0F0F),
-      child: SafeArea(
-        child: Selector<MatrixProvider, DrawerData>(
-          selector: (_, provider) => DrawerData(
-            displayName: provider.displayName ?? 'Unknown',
-            userId: provider.userId ?? '',
-            avatarUrl: provider.avatarUrl,
-          ),
-          builder: (context, data, _) {
-            return Column(
-              children: [
-                DrawerHeader(data: data),
-                const Divider(color: kDarkGrey, height: 1),
-                const SizedBox(height: 8),
-                const NewChannelTile(),
-                const NewGroupTile(),
-                ..._buildMenuItems(context),
-                const Spacer(),
-                const Divider(color: kDarkGrey, height: 1),
-                const LogoutTile(),
-                const SizedBox(height: 8),
-              ],
-            );
-          },
+      backgroundColor: _drawerBodyColor,
+      child: Selector<MatrixProvider, DrawerData>(
+        selector: (_, provider) => DrawerData(
+          displayName: provider.displayName ?? 'Unknown',
+          userId: provider.userId ?? '',
+          avatarUrl: provider.avatarUrl,
         ),
+        builder: (context, data, _) {
+          return Column(
+            children: [
+              DrawerHeader(data: data),
+              const Divider(color: _drawerBodyColor, height: 1),
+              const SizedBox(height: 8),
+              const NewChannelTile(),
+              const NewGroupTile(),
+              ..._buildMenuItems(context),
+              const Spacer(),
+              const Divider(color: _drawerHeaderColor, height: 1),
+              const LogoutTile(),
+              SizedBox(height: MediaQuery.paddingOf(context).bottom + 8),
+            ],
+          );
+        },
       ),
     );
   }
 
   List<Widget> _buildMenuItems(BuildContext context) {
     const items = [
-      {'icon': Icons.person_outline, 'label': 'My Profile'},
-      {'icon': Icons.contacts_outlined, 'label': 'Contacts'},
-      {'icon': Icons.phone_outlined, 'label': 'Calls'},
-      {'icon': Icons.bookmark_outline, 'label': 'Saved Messages'},
-      {'icon': Icons.download_outlined, 'label': 'Downloads'},
-      {'icon': Icons.settings_outlined, 'label': 'Settings'},
-      {'icon': Icons.volunteer_activism_outlined, 'label': 'Donation'},
+      {'icon': Icons.person, 'label': 'My Profile'},
+      {'icon': Icons.contacts, 'label': 'Contacts'},
+      {'icon': Icons.phone, 'label': 'Calls'},
+      {'icon': Icons.bookmark, 'label': 'Saved Messages'},
+      {'icon': Icons.settings, 'label': 'Settings'},
+      {'icon': Icons.volunteer_activism, 'label': 'Donation'},
     ];
 
     return items.map((item) {
@@ -116,6 +119,10 @@ class XmoDrawer extends StatelessWidget {
         leading: leadingWidget,
         title: titleWidget,
         onTap: () {
+          if (label == 'Saved Messages') {
+            _openSavedMessages(context);
+            return;
+          }
           Navigator.pop(context);
           if (label == 'My Profile') {
             Navigator.push(
@@ -131,11 +138,39 @@ class XmoDrawer extends StatelessWidget {
                 builder: (_) => const AppSettingsScreen(),
               ),
             );
+          } else if (label == 'Calls') {
+            context.read<ChatFilterProvider>().setFilter(ChatFilter.calls);
           }
         },
         contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
       );
     }).toList();
+  }
+
+  Future<void> _openSavedMessages(BuildContext context) async {
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final provider = context.read<MatrixProvider>();
+    navigator.pop();
+    try {
+      final room = await provider.getOrCreateSavedMessagesRoom();
+      unawaited(provider.deleteDuplicateSavedMessagesRooms());
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => MatrixChatScreen(
+            room: room,
+            matrixProvider: provider,
+          ),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Unable to open Saved Messages: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 }
 
@@ -160,41 +195,49 @@ class DrawerHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-      child: Row(
-        children: [
-          StoryAvatar(
-            userName: data.displayName,
-            avatarUrl: data.avatarUrl,
-            size: 44,
-            backgroundColor: kLimeGreen,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  data.displayName,
-                  style: GoogleFonts.inter(
-                    color: kWhite,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                Text(
-                  data.userId.contains(':')
-                      ? '@${MatrixService.cleanName(data.userId)}'
-                      : data.userId,
-                  style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+    return Container(
+      color: _drawerHeaderColor,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          MediaQuery.paddingOf(context).top + 20,
+          20,
+          16,
+        ),
+        child: Row(
+          children: [
+            StoryAvatar(
+              userName: data.displayName,
+              avatarUrl: data.avatarUrl,
+              size: 44,
+              backgroundColor: const Color(0xFF2C2C2E),
             ),
-          ),
-        ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    data.displayName,
+                    style: GoogleFonts.inter(
+                      color: kWhite,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    data.userId.contains(':')
+                        ? '@${MatrixService.cleanName(data.userId)}'
+                        : data.userId,
+                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -206,7 +249,7 @@ class NewChannelTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: const Icon(Icons.campaign_outlined, color: kLimeGreen, size: 22),
+      leading: const Icon(Icons.campaign, color: kLimeGreen, size: 22),
       title: Text(
         'New Channel',
         style: GoogleFonts.inter(
@@ -428,7 +471,7 @@ class NewGroupTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: const Icon(Icons.group_add_outlined, color: kLimeGreen, size: 22),
+      leading: const Icon(Icons.group_add, color: kLimeGreen, size: 22),
       title: Text(
         'New Group',
         style: GoogleFonts.inter(
@@ -503,7 +546,7 @@ class LogoutTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: Icon(Icons.logout, color: Colors.red[400], size: 22),
+      leading: Icon(Icons.exit_to_app, color: Colors.red[400], size: 22),
       title: Text(
         'Logout',
         style: GoogleFonts.inter(

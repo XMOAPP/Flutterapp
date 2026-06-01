@@ -6,6 +6,7 @@ import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/channel_service.dart';
 import '../../models/channel_models.dart';
+import '../../widgets/story/story_avatar.dart';
 
 /// Channel Admin Panel - Manage channel admins and permissions
 class ChannelAdminPanelScreen extends StatefulWidget {
@@ -284,17 +285,10 @@ class _ChannelAdminPanelScreenState extends State<ChannelAdminPanelScreen> {
     return ListTile(
       dense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: CircleAvatar(
-        radius: 16,
-        backgroundColor: kDarkGrey,
-        child: Text(
-          admin.displayName.isNotEmpty ? admin.displayName[0].toUpperCase() : '?',
-          style: GoogleFonts.inter(
-            color: kLimeGreen,
-            fontWeight: FontWeight.bold,
-            fontSize: 12,
-          ),
-        ),
+      leading: StoryAvatar(
+        userName: admin.displayName,
+        avatarUrl: admin.avatarUrl,
+        size: 32,
       ),
       title: Row(
         children: [
@@ -322,10 +316,6 @@ class _ChannelAdminPanelScreenState extends State<ChannelAdminPanelScreen> {
           ),
         ],
       ),
-      subtitle: Text(
-        'Power Level: ${admin.powerLevel}',
-        style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
-      ),
       trailing: !isMe && !isOwner
           ? IconButton(
               icon: const Icon(Icons.remove_circle_outline, color: Colors.orange, size: 20),
@@ -341,17 +331,10 @@ class _ChannelAdminPanelScreenState extends State<ChannelAdminPanelScreen> {
     return ListTile(
       dense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: CircleAvatar(
-        radius: 16,
-        backgroundColor: kDarkGrey,
-        child: Text(
-          subscriber.displayName.isNotEmpty ? subscriber.displayName[0].toUpperCase() : '?',
-          style: GoogleFonts.inter(
-            color: kLimeGreen,
-            fontWeight: FontWeight.bold,
-            fontSize: 12,
-          ),
-        ),
+      leading: StoryAvatar(
+        userName: subscriber.displayName,
+        avatarUrl: subscriber.avatarUrl,
+        size: 32,
       ),
       title: Text(
         subscriber.displayName,

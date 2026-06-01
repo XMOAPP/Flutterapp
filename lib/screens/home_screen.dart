@@ -10,6 +10,7 @@ import '../services/app_settings_service.dart';
 import '../services/matrix_service.dart';
 import 'home/new_chat_fab.dart';
 import 'home/category_filters.dart';
+import 'home/calls_view.dart';
 import 'home/chat_list.dart';
 import 'home/stories_view.dart';
 import 'home/xmo_drawer.dart';
@@ -157,6 +158,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       if (filterProvider.filter == ChatFilter.stories) {
                         return const StoriesView();
                       }
+                      if (filterProvider.filter == ChatFilter.calls) {
+                        return const CallsView();
+                      }
                       // Show regular chat list for other tabs
                       return const ChatList();
                     },
@@ -164,9 +168,17 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      floatingActionButton: const Padding(
-        padding: EdgeInsets.only(bottom: 72),
-        child: NewChatFAB(),
+      floatingActionButton: Consumer<ChatFilterProvider>(
+        builder: (context, filterProvider, _) {
+          if (filterProvider.filter == ChatFilter.stories ||
+              filterProvider.filter == ChatFilter.calls) {
+            return const SizedBox.shrink();
+          }
+          return const Padding(
+            padding: EdgeInsets.only(bottom: 72),
+            child: NewChatFAB(),
+          );
+        },
       ),
     );
   }
@@ -280,10 +292,10 @@ class _HomeScreenState extends State<HomeScreen> {
       tileColor: Colors.transparent,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
       leading: CircleAvatar(
-        backgroundColor: kLimeGreen,
+        backgroundColor: const Color(0xFF2C2C2E),
         child: Text(initial,
             style:
-                GoogleFonts.inter(color: kBlack, fontWeight: FontWeight.bold)),
+                GoogleFonts.inter(color: kLimeGreen, fontWeight: FontWeight.bold)),
       ),
       title: Row(
         children: [

@@ -8,7 +8,7 @@ void main() {
       expect(GroupMember.roleFromPowerLevel(100), MemberRole.owner);
       expect(GroupMember.roleFromPowerLevel(75), MemberRole.admin);
       expect(GroupMember.roleFromPowerLevel(50), MemberRole.moderator);
-      expect(GroupMember.roleFromPowerLevel(25), MemberRole.helper);
+      expect(GroupMember.roleFromPowerLevel(25), MemberRole.member);
       expect(GroupMember.roleFromPowerLevel(0), MemberRole.member);
       expect(GroupMember.roleFromPowerLevel(-1), MemberRole.restricted);
     });
@@ -16,10 +16,10 @@ void main() {
 
   group('group permission gates', () {
     test('matches XMO role thresholds', () {
-      expect(GroupService.canInviteMembers(24), isFalse);
-      expect(GroupService.canInviteMembers(25), isTrue);
-      expect(GroupService.canPinMessages(24), isFalse);
-      expect(GroupService.canPinMessages(25), isTrue);
+      expect(GroupService.canInviteMembers(49), isFalse);
+      expect(GroupService.canInviteMembers(50), isTrue);
+      expect(GroupService.canPinMessages(49), isFalse);
+      expect(GroupService.canPinMessages(50), isTrue);
       expect(GroupService.canModerateMembers(49), isFalse);
       expect(GroupService.canModerateMembers(50), isTrue);
       expect(GroupService.canEditSettings(74), isFalse);

@@ -7,6 +7,7 @@ import '../../theme.dart';
 import '../../services/channel_service.dart';
 import '../../services/matrix_service.dart';
 import '../../providers/matrix_provider.dart';
+import '../../widgets/story/story_avatar.dart';
 import 'package:provider/provider.dart';
 
 /// Channel Settings Screen - Edit channel name, description, avatar, and settings (Admin only)
@@ -27,6 +28,8 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
   bool _signMessages = true;
   Uint8List? _selectedAvatarBytes;
   String? _selectedAvatarName;
+  String? _avatarUrl;
+  bool _removeAvatar = false;
   late ChannelService _channelService;
 
   String get _resolvedRoomName =>
@@ -37,6 +40,7 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
     super.initState();
     final matrixProvider = context.read<MatrixProvider>();
     _channelService = ChannelService(matrixProvider.service);
+    _avatarUrl = _resolveRoomAvatarUrl();
     _loadSettings();
   }
 
@@ -50,6 +54,7 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
       if (mounted) {
         setState(() {
           _signMessages = settings.signMessages;
+          _avatarUrl = settings.avatarUrl ?? _resolveRoomAvatarUrl();
         });
       }
     } catch (e) {
@@ -76,11 +81,13 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
 
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.first;
-        debugPrint('[ChannelSettings] File selected: ${file.name}, bytes: ${file.bytes?.length}');
+        debugPrint(
+            '[ChannelSettings] File selected: ${file.name}, bytes: ${file.bytes?.length}');
         if (file.bytes != null) {
           setState(() {
             _selectedAvatarBytes = file.bytes;
             _selectedAvatarName = file.name;
+            _removeAvatar = false;
           });
           debugPrint('[ChannelSettings] Avatar bytes set successfully');
         }
@@ -113,8 +120,14 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
         await widget.room.setDescription(_descCtrl.text.trim());
       }
 
-      // Update avatar if selected
-      if (_selectedAvatarBytes != null) {
+      if (_removeAvatar) {
+        await widget.room.client.setRoomStateWithKey(
+          widget.room.id,
+          'm.room.avatar',
+          '',
+          <String, dynamic>{},
+        );
+      } else if (_selectedAvatarBytes != null) {
         final matrixFile = MatrixFile(
           bytes: _selectedAvatarBytes!,
           name: _selectedAvatarName ?? 'avatar.jpg',
@@ -132,6 +145,13 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
         {'join_rule': newJoinRule},
       );
 
+      await widget.room.client.setRoomStateWithKey(
+        widget.room.id,
+        EventTypes.HistoryVisibility,
+        '',
+        {'history_visibility': 'shared'},
+      );
+
       // Update sign messages setting
       await widget.room.client.setRoomStateWithKey(
         widget.room.id,
@@ -141,13 +161,14 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
       );
 
       if (mounted) {
+        context.read<MatrixProvider>().refreshRooms();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Settings saved successfully'),
             backgroundColor: kLimeGreen,
           ),
         );
-        Navigator.pop(context);
+        Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
@@ -169,6 +190,62 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
     if (lower.endsWith('.webp')) return 'image/webp';
     if (lower.endsWith('.gif')) return 'image/gif';
     return 'image/jpeg';
+  }
+
+  Widget _buildAvatarPreview() {
+    if (_removeAvatar) {
+      return StoryAvatar(
+        userName: _resolvedRoomName,
+        avatarUrl: null,
+        size: 80,
+        fallbackIcon: Icons.campaign,
+      );
+    }
+
+    final selectedBytes = _selectedAvatarBytes;
+    if (selectedBytes != null) {
+      return ClipOval(
+        child: Image.memory(
+          selectedBytes,
+          width: 80,
+          height: 80,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+        ),
+      );
+    }
+
+    return StoryAvatar(
+      userName: _resolvedRoomName,
+      avatarUrl: _avatarUrl ?? _resolveRoomAvatarUrl(),
+      size: 80,
+      fallbackIcon: Icons.campaign,
+    );
+  }
+
+  String? _resolveRoomAvatarUrl() {
+    final roomAvatar = widget.room.avatar?.toString();
+    if (roomAvatar != null && roomAvatar.isNotEmpty) return roomAvatar;
+
+    final avatarState = widget.room.getState('m.room.avatar');
+    final stateUrl = avatarState?.content['url'];
+    if (stateUrl is String && stateUrl.isNotEmpty) return stateUrl;
+
+    final stateAvatarUrl = avatarState?.content['avatar_url'];
+    if (stateAvatarUrl is String && stateAvatarUrl.isNotEmpty) {
+      return stateAvatarUrl;
+    }
+
+    return null;
+  }
+
+  void _removeRoomAvatar() {
+    setState(() {
+      _removeAvatar = true;
+      _selectedAvatarBytes = null;
+      _selectedAvatarName = null;
+      _avatarUrl = null;
+    });
   }
 
   @override
@@ -237,29 +314,7 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
                       borderRadius: BorderRadius.circular(40),
                       child: Stack(
                         children: [
-                          Container(
-                            width: 80,
-                            height: 80,
-                            decoration: BoxDecoration(
-                              color: kLimeGreen,
-                              shape: BoxShape.circle,
-                              image: _selectedAvatarBytes != null
-                                  ? DecorationImage(
-                                      image: MemoryImage(_selectedAvatarBytes!),
-                                      fit: BoxFit.cover,
-                                    )
-                                  : null,
-                            ),
-                            child: _selectedAvatarBytes == null
-                                ? const Center(
-                                    child: Icon(
-                                      Icons.campaign,
-                                      color: kBlack,
-                                      size: 38,
-                                    ),
-                                  )
-                                : null,
-                          ),
+                          _buildAvatarPreview(),
                           Positioned(
                             bottom: 0,
                             right: 0,
@@ -288,6 +343,27 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
                       fontSize: 11,
                     ),
                   ),
+                  if (_selectedAvatarBytes != null ||
+                      _removeAvatar ||
+                      _avatarUrl != null) ...[
+                    const SizedBox(height: 2),
+                    TextButton.icon(
+                      onPressed: _loading ? null : _removeRoomAvatar,
+                      icon: const Icon(
+                        Icons.delete_outline,
+                        color: Colors.redAccent,
+                        size: 16,
+                      ),
+                      label: Text(
+                        'Remove photo',
+                        style: GoogleFonts.inter(
+                          color: Colors.redAccent,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -310,12 +386,13 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
                 hintText: 'Enter channel name',
                 hintStyle: const TextStyle(color: Colors.white54, fontSize: 13),
                 filled: true,
-                fillColor: kDarkerGrey,
+                fillColor: const Color(0xFF2C2C2E),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               ),
             ),
             const SizedBox(height: 16),
@@ -338,7 +415,7 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
                 hintText: 'What is this channel about?',
                 hintStyle: const TextStyle(color: Colors.white54, fontSize: 13),
                 filled: true,
-                fillColor: kDarkerGrey,
+                fillColor: const Color(0xFF2C2C2E),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -362,12 +439,13 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
             // Public/Private Toggle
             Container(
               decoration: BoxDecoration(
-                color: kDarkerGrey,
+                color: Colors.transparent,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: SwitchListTile(
                 dense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 title: Text(
                   'Public Channel',
                   style: GoogleFonts.inter(color: kWhite, fontSize: 13),
@@ -393,12 +471,13 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
             // Sign Messages Toggle
             Container(
               decoration: BoxDecoration(
-                color: kDarkerGrey,
+                color: Colors.transparent,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: SwitchListTile(
                 dense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 title: Text(
                   'Sign Messages',
                   style: GoogleFonts.inter(color: kWhite, fontSize: 13),
@@ -425,7 +504,7 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: kDarkerGrey,
+                color: Colors.transparent,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(

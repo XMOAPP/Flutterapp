@@ -468,8 +468,6 @@ class GroupProvider extends ChangeNotifier {
         return 'Admin';
       case MemberRole.moderator:
         return 'Mod';
-      case MemberRole.helper:
-        return 'Helper';
       case MemberRole.member:
         return '';
       case MemberRole.restricted:
@@ -486,8 +484,6 @@ class GroupProvider extends ChangeNotifier {
         return const Color(0xFFA3E635); // Lime green
       case MemberRole.moderator:
         return const Color(0xFF3B82F6); // Blue
-      case MemberRole.helper:
-        return const Color(0xFF14B8A6); // Teal
       case MemberRole.member:
         return Colors.transparent;
       case MemberRole.restricted:

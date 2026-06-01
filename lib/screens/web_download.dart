@@ -11,6 +11,7 @@ Future<String> downloadFile(
   Uint8List bytes,
   String fileName, {
   String? mimeType,
+  String? storageCategory,
 }) async {
   final jsArray = bytes.toJS;
   final blob = web.Blob([jsArray].toJS);
