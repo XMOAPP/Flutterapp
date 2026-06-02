@@ -288,9 +288,9 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
                     _miniButton(
                       icon: Icons.call_end,
                       color: Colors.red,
-                      onTap: () => VoipService().canEndGroupCall(groupCall)
-                          ? groupCall.terminate()
-                          : groupCall.leave(),
+                      onTap: () async {
+                        await VoipService().leaveOrEndGroupCall(groupCall);
+                      },
                     ),
                     _miniButton(
                       icon: Icons.open_in_full,

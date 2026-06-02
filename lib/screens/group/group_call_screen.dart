@@ -72,6 +72,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
     VoipService().exitFullscreenCallRoute();
     if (_shouldKeepCallInPip) {
       VoipService().minimizeCall();
+      VoipService().ensurePipVisibleAfterCallRouteClosed();
     }
     super.dispose();
   }

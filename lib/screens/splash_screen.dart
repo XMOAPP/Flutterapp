@@ -16,43 +16,26 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _progressAnimation;
-
+class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 3),
-    );
-
-    _progressAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
-
-    _controller.forward().then((_) {
-      if (!mounted) return;
-      final isLoggedIn = context.read<MatrixProvider>().isLoggedIn;
-      Navigator.of(context).pushReplacement(
-        PageRouteBuilder(
-          pageBuilder: (_, __, ___) =>
-              isLoggedIn ? const HomeScreen() : const AuthChoiceScreen(),
-          transitionDuration: const Duration(milliseconds: 800),
-          transitionsBuilder: (_, animation, __, child) {
-            return FadeTransition(opacity: animation, child: child);
-          },
-        ),
-      );
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openInitialScreen());
   }
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
+  void _openInitialScreen() {
+    if (!mounted) return;
+    final isLoggedIn = context.read<MatrixProvider>().isLoggedIn;
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        pageBuilder: (_, __, ___) =>
+            isLoggedIn ? const HomeScreen() : const AuthChoiceScreen(),
+        transitionDuration: const Duration(milliseconds: 220),
+        transitionsBuilder: (_, animation, __, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+      ),
+    );
   }
 
   @override
@@ -74,21 +57,11 @@ class _SplashScreenState extends State<SplashScreen>
           // Dark overlay - const
           const _DarkOverlay(),
 
-          // Progress Bar and Text at the bottom
-          Positioned(
-            bottom: 40,
+          const Positioned(
+            bottom: 76,
             left: 50,
             right: 50,
-            child: AnimatedBuilder(
-              animation: _progressAnimation,
-              builder: (context, child) {
-                final percent = (_progressAnimation.value * 100).toInt();
-                return _ProgressContent(
-                  progress: _progressAnimation.value,
-                  percent: percent,
-                );
-              },
-            ),
+            child: _SplashLogo(),
           ),
         ],
       ),
@@ -112,17 +85,11 @@ class _DarkOverlay extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PROGRESS CONTENT - Optimized with RepaintBoundary
+// SPLASH LOGO - Optimized with RepaintBoundary
 // ═══════════════════════════════════════════════════════════════════════════
 
-class _ProgressContent extends StatelessWidget {
-  final double progress;
-  final int percent;
-
-  const _ProgressContent({
-    required this.progress,
-    required this.percent,
-  });
+class _SplashLogo extends StatelessWidget {
+  const _SplashLogo();
 
   @override
   Widget build(BuildContext context) {
@@ -132,29 +99,6 @@ class _ProgressContent extends StatelessWidget {
         children: [
           // App Logo / Name - Cache text style
           Text('XMO', style: _logoTextStyle),
-          const SizedBox(height: 12),
-          // Progress bar
-          SizedBox(
-            height: 1.5,
-            child: Stack(
-              children: [
-                // Background line
-                Container(
-                  width: double.infinity,
-                  color: Colors.white.withValues(alpha: 0.2),
-                ),
-                // Foreground line (progress)
-                FractionallySizedBox(
-                  widthFactor: progress,
-                  alignment: Alignment.centerLeft,
-                  child: Container(color: Colors.white),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          // Percentage text
-          Text('$percent%', style: _percentTextStyle),
         ],
       ),
     );
@@ -167,12 +111,5 @@ class _ProgressContent extends StatelessWidget {
     fontStyle: FontStyle.italic,
     fontWeight: FontWeight.w500,
     letterSpacing: 3.0,
-  );
-
-  static final _percentTextStyle = GoogleFonts.inter(
-    color: Colors.white,
-    fontSize: 13,
-    fontWeight: FontWeight.w400,
-    letterSpacing: 2.0,
   );
 }

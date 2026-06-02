@@ -93,6 +93,7 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
     VoipService().exitFullscreenCallRoute();
     if (_shouldKeepCallInPip) {
       VoipService().minimizeCall();
+      VoipService().ensurePipVisibleAfterCallRouteClosed();
     }
     super.dispose();
   }
@@ -433,11 +434,11 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
             icon: _isVideoCall ? Icons.videocam : Icons.call,
             label: 'Answer',
             gradientColors: const [
-              Color(0xFFD1FF65),
-              kLimeGreen,
-              Color(0xFF6BA320),
+              Color(0xFF34D875),
+              Color(0xFF22C55E),
+              Color(0xFF15803D),
             ],
-            iconColor: kBlack,
+            iconColor: kWhite,
             onCompleted: _answer,
           ),
         ],
@@ -742,7 +743,7 @@ class _SwipeToAnswerSliderState extends State<_SwipeToAnswerSlider>
               end: Alignment.centerRight,
             ),
             border: Border.all(
-              color: kLimeGreen.withValues(alpha: 0.12),
+              color: const Color(0xFF22C55E).withValues(alpha: 0.12),
               width: 1,
             ),
           ),
@@ -798,8 +799,8 @@ class _SwipeToAnswerSliderState extends State<_SwipeToAnswerSlider>
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(_thumbSize / 2),
                     gradient: LinearGradient(colors: [
-                      kLimeGreen.withValues(alpha: 0.20),
-                      kLimeGreen.withValues(alpha: 0.05),
+                      const Color(0xFF22C55E).withValues(alpha: 0.20),
+                      const Color(0xFF22C55E).withValues(alpha: 0.05),
                     ]),
                   ),
                 ),
@@ -842,14 +843,15 @@ class _SwipeToAnswerSliderState extends State<_SwipeToAnswerSlider>
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                         colors: [
-                          Color(0xFFD1FF65),
-                          kLimeGreen,
-                          Color(0xFF6BA320),
+                          Color(0xFF34D875),
+                          Color(0xFF22C55E),
+                          Color(0xFF15803D),
                         ],
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: kLimeGreen.withValues(alpha: 0.35),
+                          color: const Color(0xFF22C55E)
+                              .withValues(alpha: 0.35),
                           blurRadius: 14,
                           spreadRadius: 1,
                         ),
@@ -899,7 +901,7 @@ class _ArrowHintPainter extends CustomPainter {
       if (alpha <= 0) continue;
 
       final paint = Paint()
-        ..color = kLimeGreen.withValues(alpha: alpha)
+        ..color = const Color(0xFF22C55E).withValues(alpha: alpha)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.0
         ..strokeCap = StrokeCap.round;

@@ -1,13 +1,18 @@
+// ignore_for_file: experimental_member_use
+
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as webrtc;
+import 'package:just_audio/just_audio.dart';
 import 'package:matrix/matrix.dart';
 import 'package:webrtc_interface/webrtc_interface.dart' as rtc;
 
 import '../screens/direct_chat/direct_call_screen.dart';
 import '../screens/group/group_call_screen.dart';
+import '../screens/group/incoming_group_call_screen.dart';
 import 'call_history_service.dart';
 import 'matrix_service.dart';
 
@@ -20,6 +25,9 @@ class VoipService {
   GlobalKey<NavigatorState>? _navigatorKey;
   bool _openingCallScreen = false;
   int _fullscreenIncomingCallScopeDepth = 0;
+  final Map<String, int> _fullscreenIncomingGroupRoomScopes = <String, int>{};
+  AudioPlayer? _ringtonePlayer;
+  bool _ringtoneStarting = false;
 
   // ── Active call tracking ─────────────────────────────────────────────────
   CallSession? _activeSession;
@@ -31,6 +39,7 @@ class VoipService {
   StreamSubscription? _activeGroupCallStateSub;
   final Set<String> _ownedGroupCallIds = <String>{};
   final Set<String> _rejectedGroupCallIds = <String>{};
+  final Set<String> _locallyClosedGroupCallIds = <String>{};
 
   /// Whether the call is currently in picture-in-picture mode.
   final ValueNotifier<bool> pipMode = ValueNotifier(false);
@@ -59,13 +68,32 @@ class VoipService {
     fullscreenCallRouteDepth.value--;
   }
 
-  void enterFullscreenIncomingCallScope() {
+  void enterFullscreenIncomingCallScope({String? roomId}) {
     _fullscreenIncomingCallScopeDepth++;
+    if (roomId != null && roomId.isNotEmpty) {
+      _fullscreenIncomingGroupRoomScopes.update(
+        roomId,
+        (count) => count + 1,
+        ifAbsent: () => 1,
+      );
+    }
   }
 
-  void exitFullscreenIncomingCallScope() {
+  void exitFullscreenIncomingCallScope({String? roomId}) {
     if (_fullscreenIncomingCallScopeDepth == 0) return;
     _fullscreenIncomingCallScopeDepth--;
+    if (roomId != null && roomId.isNotEmpty) {
+      final count = _fullscreenIncomingGroupRoomScopes[roomId];
+      if (count == null || count <= 1) {
+        _fullscreenIncomingGroupRoomScopes.remove(roomId);
+      } else {
+        _fullscreenIncomingGroupRoomScopes[roomId] = count - 1;
+      }
+    }
+  }
+
+  bool _shouldOpenIncomingGroupCallFullscreen(Room room) {
+    return (_fullscreenIncomingGroupRoomScopes[room.id] ?? 0) > 0;
   }
 
   void _notifyCallStateChanged() {
@@ -76,19 +104,59 @@ class VoipService {
     return _ownedGroupCallIds.contains(groupCall.groupCallId);
   }
 
+  bool _isActiveGroupCall(GroupCall groupCall) {
+    return _activeGroupCall?.groupCallId == groupCall.groupCallId;
+  }
+
   bool isGroupCallRejected(GroupCall groupCall) {
     return _rejectedGroupCallIds.contains(groupCall.groupCallId);
   }
 
+  Future<void> _startRingtone() async {
+    if (_ringtoneStarting || _ringtonePlayer?.playing == true) return;
+    _ringtoneStarting = true;
+    try {
+      final player = _ringtonePlayer ??= AudioPlayer();
+      await player.setLoopMode(LoopMode.one);
+      await player.setVolume(1.0);
+      try {
+        await player.setAsset('assets/images/Tin Cup Banjo.mp3');
+      } catch (e) {
+        debugPrint('[VoipService] Failed to load ringtone asset: $e');
+        await player.setAudioSource(_RingtoneAudioSource(_buildRingtoneWav()));
+      }
+      unawaited(
+        player.play().catchError((Object e) {
+          debugPrint('[VoipService] Failed while playing ringtone: $e');
+        }),
+      );
+    } catch (e) {
+      debugPrint('[VoipService] Failed to start ringtone: $e');
+    } finally {
+      _ringtoneStarting = false;
+    }
+  }
+
+  Future<void> _stopRingtone() async {
+    final player = _ringtonePlayer;
+    if (player == null) return;
+    try {
+      await player.stop();
+    } catch (e) {
+      debugPrint('[VoipService] Failed to stop ringtone: $e');
+    }
+  }
+
   Future<void> leaveOrEndGroupCall(GroupCall groupCall) async {
     final shouldEnd = canEndGroupCall(groupCall);
+    _locallyClosedGroupCallIds.add(groupCall.groupCallId);
     if (shouldEnd) {
       await groupCall.terminate();
       _ownedGroupCallIds.remove(groupCall.groupCallId);
     } else {
       await groupCall.leave();
     }
-    if (_activeGroupCall == groupCall) {
+    if (_isActiveGroupCall(groupCall)) {
       _cleanupGroupCall();
     } else {
       pipMode.value = false;
@@ -191,6 +259,7 @@ class VoipService {
     if (createdGroupCall) {
       _ownedGroupCallIds.add(groupCall.groupCallId);
     }
+    _locallyClosedGroupCallIds.remove(groupCall.groupCallId);
 
     _trackGroupCall(groupCall, direction: CallHistoryDirection.outgoing);
     unawaited(
@@ -225,29 +294,41 @@ class VoipService {
 
   // ── Session lifecycle ────────────────────────────────────────────────────
 
-  void _trackSession(CallSession session, {bool showIncomingBanner = true}) {
+  void _trackSession(
+    CallSession session, {
+    bool showIncomingBanner = true,
+    bool playRingtone = true,
+  }) {
     if (session.isGroupCall) return;
     _activeSession = session;
     _callConnectedAt = null;
-    if (session.direction == CallDirection.kIncoming && showIncomingBanner) {
-      incomingCall.value = session;
+    if (session.direction == CallDirection.kIncoming) {
+      if (playRingtone && session.state == CallState.kRinging) {
+        unawaited(_startRingtone());
+      }
+      if (showIncomingBanner) {
+        incomingCall.value = session;
+      }
     }
     _notifyCallStateChanged();
     _activeSessionStateSub?.cancel();
     _activeSessionStateSub = session.onCallStateChanged.stream.listen((state) {
       if (state == CallState.kConnected && _callConnectedAt == null) {
         _callConnectedAt = DateTime.now();
+        unawaited(_stopRingtone());
         if (incomingCall.value == session) {
           incomingCall.value = null;
         }
       }
       if (state == CallState.kEnded) {
+        unawaited(_stopRingtone());
         _cleanupSession();
       }
     });
   }
 
   void _cleanupSession() {
+    unawaited(_stopRingtone());
     _activeSessionStateSub?.cancel();
     _activeSessionStateSub = null;
     _activeSession = null;
@@ -276,13 +357,13 @@ class VoipService {
         _groupCallConnectedAt = DateTime.now();
       }
       if (state == GroupCallState.Ended) {
-        if (_activeGroupCall == groupCall) {
+        if (_isActiveGroupCall(groupCall)) {
           _cleanupGroupCall();
         }
       }
     });
     groupCall.onStreamAdd.stream.listen((_) {
-      if (_activeGroupCall == groupCall &&
+      if (_isActiveGroupCall(groupCall) &&
           _groupCallConnectedAt == null &&
           _hasConnectedGroupPeer(groupCall)) {
         _groupCallConnectedAt = DateTime.now();
@@ -297,6 +378,7 @@ class VoipService {
   }
 
   void _cleanupGroupCall() {
+    unawaited(_stopRingtone());
     _activeGroupCallStateSub?.cancel();
     _activeGroupCallStateSub = null;
     _activeGroupCall = null;
@@ -314,6 +396,18 @@ class VoipService {
   void minimizeCall() {
     if (_activeSession == null && _activeGroupCall == null) return;
     pipMode.value = true;
+  }
+
+  void ensurePipVisibleAfterCallRouteClosed() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!pipMode.value ||
+          (_activeSession == null && _activeGroupCall == null)) {
+        return;
+      }
+      if (fullscreenCallRouteDepth.value > 0) {
+        fullscreenCallRouteDepth.value = 0;
+      }
+    });
   }
 
   /// Restores the PiP overlay back to full-screen call.
@@ -347,23 +441,35 @@ class VoipService {
   }
 
   Future<void> _openGroupCallScreen(GroupCall groupCall) async {
+    if (_locallyClosedGroupCallIds.contains(groupCall.groupCallId)) {
+      return;
+    }
     if (!_supportsRoomCall(groupCall.room)) {
       await groupCall.terminate();
       return;
     }
     if (groupCall.state != GroupCallState.Entered) {
+      unawaited(_startRingtone());
+      if (_shouldOpenIncomingGroupCallFullscreen(groupCall.room)) {
+        incomingGroupCall.value = null;
+        _notifyCallStateChanged();
+        await _pushIncomingGroupCallScreen(groupCall);
+        return;
+      }
       incomingGroupCall.value = groupCall;
       _notifyCallStateChanged();
       return;
     }
     _trackGroupCall(groupCall);
+    unawaited(_stopRingtone());
     incomingGroupCall.value = null;
     await _pushGroupCallScreen(groupCall);
   }
 
   Future<void> answerIncomingCall(CallSession session) async {
+    unawaited(_stopRingtone());
     if (_activeSession != session) {
-      _trackSession(session);
+      _trackSession(session, showIncomingBanner: false, playRingtone: false);
     }
     incomingCall.value = null;
     await session.answer();
@@ -378,6 +484,7 @@ class VoipService {
   }
 
   Future<void> rejectIncomingCall(CallSession session) async {
+    unawaited(_stopRingtone());
     incomingCall.value = null;
     unawaited(
       CallHistoryService().recordDirectCall(
@@ -392,13 +499,20 @@ class VoipService {
     }
   }
 
-  Future<void> answerIncomingGroupCall(GroupCall groupCall) async {
-    if (_activeGroupCall == groupCall) {
+  Future<void> answerIncomingGroupCall(
+    GroupCall groupCall, {
+    bool openCallScreen = true,
+  }) async {
+    unawaited(_stopRingtone());
+    if (_isActiveGroupCall(groupCall)) {
       incomingGroupCall.value = null;
+      _locallyClosedGroupCallIds.remove(groupCall.groupCallId);
       if (_needsGroupCallEnter(groupCall)) {
         await _enterGroupCall(groupCall);
       }
-      await _pushGroupCallScreen(groupCall);
+      if (openCallScreen) {
+        await _pushGroupCallScreen(groupCall);
+      }
       return;
     }
     if (isInCall) {
@@ -406,6 +520,7 @@ class VoipService {
     }
     incomingGroupCall.value = null;
     _rejectedGroupCallIds.remove(groupCall.groupCallId);
+    _locallyClosedGroupCallIds.remove(groupCall.groupCallId);
     _trackGroupCall(groupCall, direction: CallHistoryDirection.incoming);
     unawaited(
       CallHistoryService().recordGroupCall(
@@ -417,7 +532,9 @@ class VoipService {
     if (_needsGroupCallEnter(groupCall)) {
       await _enterGroupCall(groupCall);
     }
-    await _pushGroupCallScreen(groupCall);
+    if (openCallScreen) {
+      await _pushGroupCallScreen(groupCall);
+    }
   }
 
   bool _needsGroupCallEnter(GroupCall groupCall) {
@@ -486,6 +603,7 @@ class VoipService {
   }
 
   void rejectGroupCall(GroupCall groupCall) {
+    unawaited(_stopRingtone());
     _rejectedGroupCallIds.add(groupCall.groupCallId);
     if (incomingGroupCall.value == groupCall) {
       incomingGroupCall.value = null;
@@ -534,6 +652,103 @@ class VoipService {
     } finally {
       _openingCallScreen = false;
     }
+  }
+
+  Future<void> _pushIncomingGroupCallScreen(GroupCall groupCall) async {
+    final navigator = _navigatorKey?.currentState;
+    if (navigator == null) {
+      incomingGroupCall.value = groupCall;
+      _notifyCallStateChanged();
+      return;
+    }
+    if (_openingCallScreen) {
+      incomingGroupCall.value = groupCall;
+      _notifyCallStateChanged();
+      return;
+    }
+
+    _openingCallScreen = true;
+    try {
+      await navigator.push(
+        MaterialPageRoute(
+          builder: (_) => IncomingGroupCallScreen(groupCall: groupCall),
+          fullscreenDialog: true,
+        ),
+      );
+    } finally {
+      _openingCallScreen = false;
+    }
+  }
+}
+
+Uint8List _buildRingtoneWav() {
+  const sampleRate = 22050;
+  const channels = 1;
+  const bitsPerSample = 16;
+  const bytesPerSample = bitsPerSample ~/ 8;
+  const durationMs = 1400;
+  const sampleCount = sampleRate * durationMs ~/ 1000;
+  const dataLength = sampleCount * channels * bytesPerSample;
+  final bytes = Uint8List(44 + dataLength);
+  final data = ByteData.sublistView(bytes);
+
+  void writeAscii(int offset, String value) {
+    for (var i = 0; i < value.length; i++) {
+      bytes[offset + i] = value.codeUnitAt(i);
+    }
+  }
+
+  writeAscii(0, 'RIFF');
+  data.setUint32(4, 36 + dataLength, Endian.little);
+  writeAscii(8, 'WAVE');
+  writeAscii(12, 'fmt ');
+  data.setUint32(16, 16, Endian.little);
+  data.setUint16(20, 1, Endian.little);
+  data.setUint16(22, channels, Endian.little);
+  data.setUint32(24, sampleRate, Endian.little);
+  data.setUint32(28, sampleRate * channels * bytesPerSample, Endian.little);
+  data.setUint16(32, channels * bytesPerSample, Endian.little);
+  data.setUint16(34, bitsPerSample, Endian.little);
+  writeAscii(36, 'data');
+  data.setUint32(40, dataLength, Endian.little);
+
+  for (var i = 0; i < sampleCount; i++) {
+    final ms = i * 1000 / sampleRate;
+    final active = ms < 520 || (ms >= 720 && ms < 1120);
+    final time = i / sampleRate;
+    final envelope = active ? _ringtoneEnvelope(ms) : 0.0;
+    final wave = math.sin(2 * math.pi * 520 * time) * 0.72 +
+        math.sin(2 * math.pi * 780 * time) * 0.28;
+    final sample = (wave * envelope * 32767).clamp(-32768, 32767).round();
+    data.setInt16(44 + i * 2, sample, Endian.little);
+  }
+
+  return bytes;
+}
+
+double _ringtoneEnvelope(double ms) {
+  final localMs = ms >= 720 ? ms - 720 : ms;
+  final attack = (localMs / 55).clamp(0.0, 1.0);
+  final release = ((520 - localMs) / 90).clamp(0.0, 1.0);
+  return math.min(attack, release) * 0.48;
+}
+
+class _RingtoneAudioSource extends StreamAudioSource {
+  final Uint8List bytes;
+
+  _RingtoneAudioSource(this.bytes);
+
+  @override
+  Future<StreamAudioResponse> request([int? start, int? end]) async {
+    start ??= 0;
+    end ??= bytes.length;
+    return StreamAudioResponse(
+      sourceLength: bytes.length,
+      contentLength: end - start,
+      offset: start,
+      stream: Stream.value(bytes.sublist(start, end)),
+      contentType: 'audio/wav',
+    );
   }
 }
 
@@ -611,19 +826,24 @@ class _XmoWebRTCDelegate implements WebRTCDelegate {
   bool get canHandleNewCall => true;
 
   @override
-  Future<void> playRingtone() async {}
+  Future<void> playRingtone() async {
+    unawaited(VoipService()._startRingtone());
+  }
 
   @override
-  Future<void> stopRingtone() async {}
+  Future<void> stopRingtone() => VoipService()._stopRingtone();
 
   @override
   Future<void> handleNewCall(CallSession session) => onNewCall(session);
 
   @override
-  Future<void> handleCallEnded(CallSession session) async {}
+  Future<void> handleCallEnded(CallSession session) async {
+    await VoipService()._stopRingtone();
+  }
 
   @override
   Future<void> handleMissedCall(CallSession session) {
+    unawaited(VoipService()._stopRingtone());
     return CallHistoryService().recordDirectCall(
       session,
       direction: CallHistoryDirection.incoming,
@@ -639,9 +859,11 @@ class _XmoWebRTCDelegate implements WebRTCDelegate {
 
   @override
   Future<void> handleGroupCallEnded(GroupCall groupCall) async {
+    await VoipService()._stopRingtone();
     VoipService()._ownedGroupCallIds.remove(groupCall.groupCallId);
     VoipService()._rejectedGroupCallIds.remove(groupCall.groupCallId);
-    if (VoipService().activeGroupCall == groupCall) {
+    VoipService()._locallyClosedGroupCallIds.add(groupCall.groupCallId);
+    if (VoipService()._isActiveGroupCall(groupCall)) {
       VoipService()._cleanupGroupCall();
     } else {
       VoipService()._notifyCallStateChanged();

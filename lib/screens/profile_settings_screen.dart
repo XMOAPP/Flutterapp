@@ -9,6 +9,9 @@ import '../providers/matrix_provider.dart';
 import '../services/matrix_service.dart';
 import '../theme.dart';
 import '../widgets/story/story_avatar.dart';
+import 'camera_capture_screen.dart';
+
+enum _AvatarMenuAction { gallery, capture, remove }
 
 class ProfileSettingsScreen extends StatefulWidget {
   const ProfileSettingsScreen({super.key});
@@ -37,7 +40,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     super.dispose();
   }
 
-  Future<void> _pickAvatar() async {
+  Future<void> _pickAvatarFromGallery() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.image,
       withData: true,
@@ -53,6 +56,49 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
       _selectedAvatarName = file.name;
       _removeAvatar = false;
     });
+  }
+
+  Future<void> _captureAvatar() async {
+    final result = await Navigator.push<CameraCaptureResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const CameraCaptureScreen(
+          allowVideo: false,
+          showCaption: false,
+        ),
+      ),
+    );
+    if (!mounted || result == null || result.bytes.isEmpty) return;
+
+    if (result.type != CameraCaptureMediaType.image) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please capture a photo for your profile'),
+          backgroundColor: kDarkGrey,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _selectedAvatarBytes = result.bytes;
+      _selectedAvatarName = result.fileName;
+      _removeAvatar = false;
+    });
+  }
+
+  void _handleAvatarMenuAction(_AvatarMenuAction action) {
+    switch (action) {
+      case _AvatarMenuAction.gallery:
+        _pickAvatarFromGallery();
+        break;
+      case _AvatarMenuAction.capture:
+        _captureAvatar();
+        break;
+      case _AvatarMenuAction.remove:
+        _removeProfileAvatar();
+        break;
+    }
   }
 
   void _removeProfileAvatar() {
@@ -146,30 +192,59 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
             padding: const EdgeInsets.all(20),
             children: [
               Center(
-                child: GestureDetector(
-                  onTap: _pickAvatar,
-                  child: Stack(
-                    children: [
-                      CircleAvatar(
-                        radius: 52,
-                        backgroundColor: const Color(0xFF2C2C2E),
-                        backgroundImage: _selectedAvatarBytes != null
-                            ? MemoryImage(_selectedAvatarBytes!)
-                            : null,
-                        child: _selectedAvatarBytes == null
-                            ? StoryAvatar(
-                                userName: provider.displayName ?? '',
-                                avatarUrl:
-                                    _removeAvatar ? null : provider.avatarUrl,
-                                size: 104,
-                                backgroundColor: const Color(0xFF2C2C2E),
-                                textColor: kLimeGreen,
-                              )
-                            : null,
-                      ),
-                      Positioned(
-                        right: 0,
-                        bottom: 0,
+                child: Stack(
+                  children: [
+                    CircleAvatar(
+                      radius: 52,
+                      backgroundColor: const Color(0xFF2C2C2E),
+                      backgroundImage: _selectedAvatarBytes != null
+                          ? MemoryImage(_selectedAvatarBytes!)
+                          : null,
+                      child: _selectedAvatarBytes == null
+                          ? StoryAvatar(
+                              userName: provider.displayName ?? '',
+                              avatarUrl:
+                                  _removeAvatar ? null : provider.avatarUrl,
+                              size: 104,
+                              backgroundColor: const Color(0xFF2C2C2E),
+                              textColor: kLimeGreen,
+                            )
+                          : null,
+                    ),
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: PopupMenuButton<_AvatarMenuAction>(
+                        onSelected: _saving ? null : _handleAvatarMenuAction,
+                        color: const Color(0xFF2C2C2E),
+                        elevation: 8,
+                        offset: const Offset(0, 38),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        itemBuilder: (context) {
+                          final hasAvatar = _selectedAvatarBytes != null ||
+                              (!_removeAvatar && provider.avatarUrl != null);
+                          return [
+                            _avatarMenuItem(
+                              _AvatarMenuAction.gallery,
+                              Icons.photo_library,
+                              'Gallery',
+                            ),
+                            _avatarMenuItem(
+                              _AvatarMenuAction.capture,
+                              Icons.camera_alt,
+                              'Capture',
+                            ),
+                            if (hasAvatar)
+                              _avatarMenuItem(
+                                _AvatarMenuAction.remove,
+                                Icons.delete,
+                                'Remove photo',
+                                destructive: true,
+                              ),
+                          ];
+                        },
                         child: Container(
                           width: 34,
                           height: 34,
@@ -184,32 +259,11 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                           ),
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 12),
-              if (_selectedAvatarBytes != null ||
-                  _removeAvatar ||
-                  provider.avatarUrl != null)
-                Center(
-                  child: TextButton.icon(
-                    onPressed: _saving ? null : _removeProfileAvatar,
-                    icon: const Icon(
-                      Icons.delete_outline,
-                      color: Colors.redAccent,
-                      size: 18,
-                    ),
-                    label: Text(
-                      'Remove photo',
-                      style: GoogleFonts.inter(
-                        color: Colors.redAccent,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
               Center(
                 child: Text(
                   provider.userId == null
@@ -260,6 +314,33 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
           ),
         );
       },
+    );
+  }
+
+  PopupMenuItem<_AvatarMenuAction> _avatarMenuItem(
+    _AvatarMenuAction value,
+    IconData icon,
+    String label, {
+    bool destructive = false,
+  }) {
+    final color = destructive ? Colors.redAccent : kWhite;
+    return PopupMenuItem(
+      value: value,
+      height: 42,
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 12),
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              color: color,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -82,15 +82,7 @@ class XmoApp extends StatelessWidget {
                   valueListenable: VoipService().pipMode,
                   builder: (_, isPip, __) {
                     if (!isPip) return const SizedBox.shrink();
-                    return ValueListenableBuilder<int>(
-                      valueListenable: VoipService().fullscreenCallRouteDepth,
-                      builder: (_, fullscreenCallRouteDepth, __) {
-                        if (fullscreenCallRouteDepth > 0) {
-                          return const SizedBox.shrink();
-                        }
-                        return const CallPipOverlay();
-                      },
-                    );
+                    return const CallPipOverlay();
                   },
                 ),
                 const IncomingCallBanner(),

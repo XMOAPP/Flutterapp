@@ -28,7 +28,14 @@ class CameraCaptureResult {
 }
 
 class CameraCaptureScreen extends StatefulWidget {
-  const CameraCaptureScreen({super.key});
+  final bool allowVideo;
+  final bool showCaption;
+
+  const CameraCaptureScreen({
+    super.key,
+    this.allowVideo = true,
+    this.showCaption = true,
+  });
 
   @override
   State<CameraCaptureScreen> createState() => _CameraCaptureScreenState();
@@ -182,7 +189,8 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       if (!mounted) return;
       setState(() {
         _capturedBytes = bytes;
-        _capturedFileName = 'camera_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        _capturedFileName =
+            'camera_${DateTime.now().millisecondsSinceEpoch}.jpg';
         _capturing = false;
         _flashOn = false;
       });
@@ -204,6 +212,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
   }
 
   Future<void> _toggleVideoRecording() async {
+    if (!widget.allowVideo) return;
     if (_recording) {
       await _stopVideoRecording();
     } else {
@@ -280,7 +289,8 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       setState(() {
         _videoPreviewController = previewController;
         _capturedVideoPath = video.path;
-        _capturedFileName = 'camera_${DateTime.now().millisecondsSinceEpoch}.mp4';
+        _capturedFileName =
+            'camera_${DateTime.now().millisecondsSinceEpoch}.mp4';
         _capturing = false;
         _recording = false;
         _flashOn = false;
@@ -333,7 +343,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
         bytes: bytes,
         fileName: fileName,
         mimeType: 'image/jpeg',
-        caption: _captionController.text.trim(),
+        caption: widget.showCaption ? _captionController.text.trim() : '',
       ),
     );
   }
@@ -353,7 +363,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
         bytes: bytes,
         fileName: fileName,
         mimeType: 'video/mp4',
-        caption: _captionController.text.trim(),
+        caption: widget.showCaption ? _captionController.text.trim() : '',
       ),
     );
   }
@@ -453,14 +463,15 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
                 ),
               ),
             ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 120,
-              child: Center(
-                child: _buildModeSwitch(),
+            if (widget.allowVideo)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 120,
+                child: Center(
+                  child: _buildModeSwitch(),
+                ),
               ),
-            ),
             if (_recording)
               Positioned(
                 top: 18,
@@ -506,7 +517,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
               left: 0,
               right: 0,
               bottom: 0,
-              child: _buildCaptionBar(onSend: _sendCapturedPhoto),
+              child: _buildSendBar(onSend: _sendCapturedPhoto),
             ),
           ],
         ),
@@ -568,7 +579,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
               left: 0,
               right: 0,
               bottom: 0,
-              child: _buildCaptionBar(onSend: () => _sendCapturedVideo()),
+              child: _buildSendBar(onSend: () => _sendCapturedVideo()),
             ),
           ],
         ),
@@ -576,7 +587,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
     );
   }
 
-  Widget _buildCaptionBar({required VoidCallback onSend}) {
+  Widget _buildSendBar({required VoidCallback onSend}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: const BoxDecoration(
@@ -587,32 +598,35 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
         top: false,
         child: Row(
           children: [
-            Expanded(
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  color: kDarkGrey,
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: TextField(
-                  controller: _captionController,
-                  style: GoogleFonts.inter(color: kWhite, fontSize: 14),
-                  minLines: 1,
-                  maxLines: 4,
-                  decoration: InputDecoration(
-                    hintText: 'Add a caption',
-                    hintStyle: GoogleFonts.inter(
-                      color: kLightGrey,
-                      fontSize: 14,
+            if (widget.showCaption)
+              Expanded(
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: kDarkGrey,
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: TextField(
+                    controller: _captionController,
+                    style: GoogleFonts.inter(color: kWhite, fontSize: 14),
+                    minLines: 1,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      hintText: 'Add a caption',
+                      hintStyle: GoogleFonts.inter(
+                        color: kLightGrey,
+                        fontSize: 14,
+                      ),
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: EdgeInsets.zero,
                     ),
-                    border: InputBorder.none,
-                    isDense: true,
-                    contentPadding: EdgeInsets.zero,
                   ),
                 ),
-              ),
-            ),
+              )
+            else
+              const Spacer(),
             GestureDetector(
               onTap: onSend,
               child: Container(

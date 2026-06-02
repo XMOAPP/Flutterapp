@@ -9,6 +9,9 @@ import '../../services/matrix_service.dart';
 import '../../providers/matrix_provider.dart';
 import '../../widgets/story/story_avatar.dart';
 import 'package:provider/provider.dart';
+import '../camera_capture_screen.dart';
+
+enum _RoomAvatarMenuAction { gallery, capture, remove }
 
 /// Channel Settings Screen - Edit channel name, description, avatar, and settings (Admin only)
 class ChannelSettingsScreen extends StatefulWidget {
@@ -104,6 +107,49 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
           ),
         );
       }
+    }
+  }
+
+  Future<void> _captureAvatar() async {
+    final result = await Navigator.push<CameraCaptureResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const CameraCaptureScreen(
+          allowVideo: false,
+          showCaption: false,
+        ),
+      ),
+    );
+    if (!mounted || result == null || result.bytes.isEmpty) return;
+
+    if (result.type != CameraCaptureMediaType.image) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please capture a photo for the channel avatar'),
+          backgroundColor: kDarkGrey,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _selectedAvatarBytes = result.bytes;
+      _selectedAvatarName = result.fileName;
+      _removeAvatar = false;
+    });
+  }
+
+  void _handleAvatarMenuAction(_RoomAvatarMenuAction action) {
+    switch (action) {
+      case _RoomAvatarMenuAction.gallery:
+        _pickAvatar();
+        break;
+      case _RoomAvatarMenuAction.capture:
+        _captureAvatar();
+        break;
+      case _RoomAvatarMenuAction.remove:
+        _removeRoomAvatar();
+        break;
     }
   }
 
@@ -248,6 +294,36 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
     });
   }
 
+  bool get _hasAvatar =>
+      _selectedAvatarBytes != null || (!_removeAvatar && _avatarUrl != null);
+
+  PopupMenuItem<_RoomAvatarMenuAction> _avatarMenuItem(
+    _RoomAvatarMenuAction value,
+    IconData icon,
+    String label, {
+    bool destructive = false,
+  }) {
+    final color = destructive ? Colors.redAccent : kWhite;
+    return PopupMenuItem(
+      value: value,
+      height: 42,
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 12),
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              color: color,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -304,36 +380,54 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
             Center(
               child: Column(
                 children: [
-                  Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: () {
-                        debugPrint('[ChannelSettings] Avatar tapped!');
-                        _pickAvatar();
-                      },
-                      borderRadius: BorderRadius.circular(40),
-                      child: Stack(
-                        children: [
-                          _buildAvatarPreview(),
-                          Positioned(
-                            bottom: 0,
-                            right: 0,
-                            child: Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: const BoxDecoration(
-                                color: kLimeGreen,
-                                shape: BoxShape.circle,
+                  Stack(
+                    children: [
+                      _buildAvatarPreview(),
+                      Positioned(
+                        bottom: 0,
+                        right: 0,
+                        child: PopupMenuButton<_RoomAvatarMenuAction>(
+                          onSelected: _loading ? null : _handleAvatarMenuAction,
+                          color: const Color(0xFF2C2C2E),
+                          elevation: 8,
+                          offset: const Offset(0, 34),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          itemBuilder: (context) => [
+                            _avatarMenuItem(
+                              _RoomAvatarMenuAction.gallery,
+                              Icons.photo_library,
+                              'Gallery',
+                            ),
+                            _avatarMenuItem(
+                              _RoomAvatarMenuAction.capture,
+                              Icons.camera_alt,
+                              'Capture',
+                            ),
+                            if (_hasAvatar)
+                              _avatarMenuItem(
+                                _RoomAvatarMenuAction.remove,
+                                Icons.delete,
+                                'Remove photo',
+                                destructive: true,
                               ),
-                              child: const Icon(
-                                Icons.camera_alt,
-                                color: kBlack,
-                                size: 14,
-                              ),
+                          ],
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: const BoxDecoration(
+                              color: kLimeGreen,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.camera_alt,
+                              color: kBlack,
+                              size: 14,
                             ),
                           ),
-                        ],
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                   const SizedBox(height: 6),
                   Text(
@@ -343,27 +437,6 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
                       fontSize: 11,
                     ),
                   ),
-                  if (_selectedAvatarBytes != null ||
-                      _removeAvatar ||
-                      _avatarUrl != null) ...[
-                    const SizedBox(height: 2),
-                    TextButton.icon(
-                      onPressed: _loading ? null : _removeRoomAvatar,
-                      icon: const Icon(
-                        Icons.delete_outline,
-                        color: Colors.redAccent,
-                        size: 16,
-                      ),
-                      label: Text(
-                        'Remove photo',
-                        style: GoogleFonts.inter(
-                          color: Colors.redAccent,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),

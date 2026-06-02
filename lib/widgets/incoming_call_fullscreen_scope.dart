@@ -4,10 +4,12 @@ import '../services/voip_service.dart';
 
 class IncomingCallFullscreenScope extends StatefulWidget {
   final Widget child;
+  final String? roomId;
 
   const IncomingCallFullscreenScope({
     super.key,
     required this.child,
+    this.roomId,
   });
 
   @override
@@ -20,12 +22,12 @@ class _IncomingCallFullscreenScopeState
   @override
   void initState() {
     super.initState();
-    VoipService().enterFullscreenIncomingCallScope();
+    VoipService().enterFullscreenIncomingCallScope(roomId: widget.roomId);
   }
 
   @override
   void dispose() {
-    VoipService().exitFullscreenIncomingCallScope();
+    VoipService().exitFullscreenIncomingCallScope(roomId: widget.roomId);
     super.dispose();
   }
 

@@ -1301,6 +1301,7 @@ class MatrixService {
     required String mimeType,
     String caption = '',
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
+    bool Function()? isCancelled,
   }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
@@ -1310,7 +1311,9 @@ class MatrixService {
       filename: fileName,
       contentType: mimeType,
       onProgress: onUploadProgress,
+      isCancelled: isCancelled,
     );
+    _throwIfCancelled(isCancelled);
     final cleanCaption = caption.trim();
 
     await room.sendEvent({
@@ -1344,6 +1347,7 @@ class MatrixService {
     int? thumbnailHeight,
     String caption = '',
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
+    bool Function()? isCancelled,
   }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
@@ -1355,7 +1359,9 @@ class MatrixService {
       filename: videoFileName,
       contentType: videoMimeType,
       onProgress: onUploadProgress,
+      isCancelled: isCancelled,
     );
+    _throwIfCancelled(isCancelled);
     debugPrint('[sendVideo] Video uploaded: $videoMxc');
 
     // Step 2: Build info map
@@ -1370,6 +1376,7 @@ class MatrixService {
     // Step 3: Upload thumbnail if we have one and embed it in info
     if (thumbBytes != null && thumbBytes.isNotEmpty) {
       try {
+        _throwIfCancelled(isCancelled);
         debugPrint(
             '[sendVideo] Uploading thumbnail (${thumbBytes.length} bytes)...');
         final thumbMxc = await _client.uploadContent(
@@ -1387,11 +1394,13 @@ class MatrixService {
             'h': thumbnailHeight,
         };
       } catch (e) {
+        if (e is MatrixUploadCancelledException) rethrow;
         debugPrint('[sendVideo] Thumbnail upload failed (non-fatal): $e');
       }
     }
 
     final cleanCaption = caption.trim();
+    _throwIfCancelled(isCancelled);
 
     // Step 4: Send the m.video event with both URLs
     await room.sendEvent({
