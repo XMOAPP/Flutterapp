@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'dart:typed_data';
 import 'package:matrix/matrix.dart';
+import '../services/call_history_service.dart';
 import '../services/matrix_service.dart';
 import '../services/privacy_service.dart';
+import '../services/push_notification_service.dart';
 
 enum MatrixAuthState { uninitialized, loggedOut, loggingIn, loggedIn, error }
 
@@ -95,12 +97,14 @@ class MatrixProvider extends ChangeNotifier {
       _state = _svc.isLoggedIn
           ? MatrixAuthState.loggedIn
           : MatrixAuthState.loggedOut;
+      await CallHistoryService().setCurrentUser(_svc.userId);
       if (_svc.isLoggedIn) {
         await _svc.refreshProfile();
         await _syncPublicAccountDirectory();
         await _ensureSavedMessagesReady();
         _listenSync();
         _svc.startSync();
+        await PushNotificationService().registerCurrentUser();
       }
     } catch (e) {
       _state = MatrixAuthState.error;
@@ -122,12 +126,14 @@ class MatrixProvider extends ChangeNotifier {
 
     try {
       await _svc.loginOrRegisterWithPhone(phone, email);
+      await CallHistoryService().setCurrentUser(_svc.userId);
       await _svc.refreshProfile();
       await _syncPublicAccountDirectory();
       await _ensureSavedMessagesReady();
       _state = MatrixAuthState.loggedIn;
       _listenSync();
       _svc.startSync();
+      await PushNotificationService().registerCurrentUser();
       notifyListeners();
       return true;
     } catch (e) {
@@ -149,12 +155,14 @@ class MatrixProvider extends ChangeNotifier {
 
     try {
       await _svc.login(username, password);
+      await CallHistoryService().setCurrentUser(_svc.userId);
       await _svc.refreshProfile();
       await _syncPublicAccountDirectory();
       await _ensureSavedMessagesReady();
       _state = MatrixAuthState.loggedIn;
       _listenSync();
       _svc.startSync();
+      await PushNotificationService().registerCurrentUser();
       notifyListeners();
       return true;
     } catch (e) {
@@ -174,12 +182,14 @@ class MatrixProvider extends ChangeNotifier {
 
     try {
       await _svc.register(username, password);
+      await CallHistoryService().setCurrentUser(_svc.userId);
       await _svc.refreshProfile();
       await _syncPublicAccountDirectory();
       await _ensureSavedMessagesReady();
       _state = MatrixAuthState.loggedIn;
       _listenSync();
       _svc.startSync();
+      await PushNotificationService().registerCurrentUser();
       notifyListeners();
       return true;
     } catch (e) {
@@ -191,7 +201,9 @@ class MatrixProvider extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    await PushNotificationService().unregisterCurrentUser();
     await _svc.logout();
+    await CallHistoryService().setCurrentUser(null);
     _state = MatrixAuthState.loggedOut;
     notifyListeners();
   }
@@ -384,10 +396,10 @@ class MatrixProvider extends ChangeNotifier {
 
   String _friendlyError(String raw) {
     if (raw.contains('M_FORBIDDEN') || raw.contains('forbidden')) {
-      return 'Incorrect credentials. Please try again.';
+      return 'Invalid username/password. Please try again.';
     }
     if (raw.contains('M_USER_IN_USE')) {
-      return 'This number is already registered.';
+      return 'Username already taken.';
     }
     if (raw.contains('SocketException') ||
         raw.contains('Connection refused') ||

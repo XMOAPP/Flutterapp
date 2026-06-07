@@ -12,12 +12,22 @@ class UsernameStep extends StatelessWidget {
   final GlobalKey<FormState> formKey;
   final TextEditingController controller;
   final VoidCallback onContinue;
+  final bool isBusy;
+  final String buttonLabel;
+  final String footerText;
+  final String footerActionLabel;
+  final VoidCallback onFooterAction;
 
   const UsernameStep({
     super.key,
     required this.formKey,
     required this.controller,
     required this.onContinue,
+    this.isBusy = false,
+    this.buttonLabel = 'Continue',
+    required this.footerText,
+    required this.footerActionLabel,
+    required this.onFooterAction,
   });
 
   @override
@@ -49,7 +59,7 @@ class UsernameStep extends StatelessWidget {
               hintText: 'e.g. alice',
               hintStyle: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
               filled: true,
-              fillColor: kDarkGrey,
+              fillColor: const Color(0xFF2C2C2E),
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(25),
                   borderSide: BorderSide.none),
@@ -65,8 +75,8 @@ class UsernameStep extends StatelessWidget {
                       BorderSide(color: Colors.red.withValues(alpha: 0.6))),
               focusedErrorBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(25),
-                  borderSide:
-                      BorderSide(color: Colors.red.withValues(alpha: 0.6), width: 2)),
+                  borderSide: BorderSide(
+                      color: Colors.red.withValues(alpha: 0.6), width: 2)),
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
             ),
@@ -88,17 +98,56 @@ class UsernameStep extends StatelessWidget {
               width: double.infinity,
               height: 40,
               child: ElevatedButton(
-                onPressed: onContinue,
+                onPressed: isBusy ? null : onContinue,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: kWhite,
                   foregroundColor: kBlack,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                  disabledBackgroundColor: kWhite.withValues(alpha: 0.5),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30)),
                   elevation: 0,
                 ),
-                child: Text(
-                  'Continue',
-                  style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600),
-                ),
+                child: isBusy
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: kBlack,
+                        ),
+                      )
+                    : Text(
+                        buttonLabel,
+                        style: GoogleFonts.inter(
+                            fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextButton(
+            onPressed: isBusy ? null : onFooterAction,
+            style: TextButton.styleFrom(
+              foregroundColor: kWhite,
+              disabledForegroundColor: kLightGrey,
+              padding: EdgeInsets.zero,
+              minimumSize: const Size(0, 32),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: RichText(
+              text: TextSpan(
+                style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+                children: [
+                  TextSpan(text: '$footerText '),
+                  TextSpan(
+                    text: footerActionLabel,
+                    style: GoogleFonts.inter(
+                      color: kWhite,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -143,14 +192,13 @@ class ConnectWalletStep extends StatelessWidget {
               child: CircularProgressIndicator(color: kWhite),
             ),
           )
+        else if (wallets.isEmpty)
+          const _WalletUnavailableMessage()
         else
-          if (wallets.isEmpty)
-            const _WalletUnavailableMessage()
-          else
-            ...wallets.map((name) => WalletTile(
-                  name: name,
-                  onTap: () => onConnect(name),
-                )),
+          ...wallets.map((name) => WalletTile(
+                name: name,
+                onTap: () => onConnect(name),
+              )),
       ],
     );
   }
@@ -191,6 +239,7 @@ class SignMessageStep extends StatelessWidget {
   final bool isBusy;
   final VoidCallback onSign;
   final String Function(String) shortAddress;
+  final String buttonLabel;
 
   const SignMessageStep({
     super.key,
@@ -199,6 +248,7 @@ class SignMessageStep extends StatelessWidget {
     required this.isBusy,
     required this.onSign,
     required this.shortAddress,
+    this.buttonLabel = 'Sign & Continue',
   });
 
   @override
@@ -210,16 +260,14 @@ class SignMessageStep extends StatelessWidget {
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: kDarkGrey,
+            color: const Color(0xFF2C2C2E),
             borderRadius: BorderRadius.circular(25),
           ),
           child: Center(
             child: Text(
               shortAddress(connectedAddress),
               style: GoogleFonts.inter(
-                  color: kWhite,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600),
+                  color: kWhite, fontSize: 14, fontWeight: FontWeight.w600),
             ),
           ),
         ),
@@ -228,16 +276,14 @@ class SignMessageStep extends StatelessWidget {
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: kDarkGrey,
+            color: const Color(0xFF2C2C2E),
             borderRadius: BorderRadius.circular(25),
           ),
           child: Center(
             child: Text(
               username,
               style: GoogleFonts.inter(
-                  color: kWhite,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600),
+                  color: kWhite, fontSize: 14, fontWeight: FontWeight.w600),
             ),
           ),
         ),
@@ -245,8 +291,8 @@ class SignMessageStep extends StatelessWidget {
         Text(
           'Your wallet will ask you to sign a message.\nNo transaction or gas fees required.',
           textAlign: TextAlign.center,
-          style: GoogleFonts.inter(
-              color: kLightGrey, fontSize: 12, height: 1.6),
+          style:
+              GoogleFonts.inter(color: kLightGrey, fontSize: 12, height: 1.6),
         ),
         const SizedBox(height: 24),
         Padding(
@@ -260,14 +306,20 @@ class SignMessageStep extends StatelessWidget {
                 backgroundColor: kWhite,
                 foregroundColor: kBlack,
                 disabledBackgroundColor: kWhite.withValues(alpha: 0.5),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30)),
                 elevation: 0,
               ),
               child: isBusy
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.5, color: kBlack))
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: kBlack))
                   : Text(
-                      'Sign & Continue',
-                      style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600),
+                      buttonLabel,
+                      style: GoogleFonts.inter(
+                          fontSize: 14, fontWeight: FontWeight.w600),
                     ),
             ),
           ),
@@ -295,7 +347,7 @@ class WalletTile extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
         decoration: BoxDecoration(
-          color: kDarkGrey,
+          color: const Color(0xFF2C2C2E),
           borderRadius: BorderRadius.circular(25),
         ),
         child: Center(

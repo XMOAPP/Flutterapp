@@ -13,6 +13,8 @@ import 'home_screen.dart';
 import 'wallet_auth/error_display.dart';
 import 'wallet_auth/wallet_steps.dart';
 
+enum _WalletAuthMode { login, create }
+
 class WalletAuthScreen extends StatefulWidget {
   const WalletAuthScreen({super.key});
 
@@ -29,6 +31,7 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
   bool _isBusy = false;
   String? _error;
   String _step = 'username';
+  _WalletAuthMode _mode = _WalletAuthMode.login;
 
   @override
   void initState() {
@@ -115,10 +118,55 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
     }
   }
 
-  void _onContinue() {
+  Future<void> _onContinue() async {
     if (!_formKey.currentState!.validate()) return;
+
+    if (_mode == _WalletAuthMode.create) {
+      setState(() {
+        _isBusy = true;
+        _error = null;
+      });
+
+      try {
+        final available = await context
+            .read<MatrixProvider>()
+            .service
+            .isUsernameAvailable(_usernameCtrl.text.trim());
+        if (!mounted) return;
+        if (!available) {
+          setState(() {
+            _error = 'Username already taken. Choose another username.';
+          });
+          return;
+        }
+      } catch (e) {
+        if (!mounted) return;
+        if (_isUsernameTakenError(e)) {
+          setState(() {
+            _error = 'Username already taken. Choose another username.';
+          });
+          return;
+        }
+        setState(() {
+          _error = e.toString().replaceAll('Exception: ', '');
+        });
+        return;
+      } finally {
+        if (mounted) setState(() => _isBusy = false);
+      }
+    }
+
     setState(() {
-      _step = 'connect';
+      _step = (_appKitModal?.isConnected ?? false) ? 'sign' : 'connect';
+      _error = null;
+    });
+  }
+
+  void _switchMode(_WalletAuthMode mode) {
+    if (_mode == mode) return;
+    setState(() {
+      _mode = mode;
+      _step = 'username';
       _error = null;
     });
   }
@@ -129,7 +177,7 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
     appKitModal.openModalView();
   }
 
-  Future<void> _signAndRegister() async {
+  Future<void> _signAndContinue() async {
     final appKitModal = _appKitModal;
     final session = appKitModal?.session;
     final username = _usernameCtrl.text.trim();
@@ -156,10 +204,9 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
       final provider = context.read<MatrixProvider>();
       final password = 'xmo_wallet_${address.toLowerCase()}';
 
-      var ok = await provider.login(username, password);
-      if (!ok) {
-        ok = await provider.register(username, password);
-      }
+      final ok = _mode == _WalletAuthMode.login
+          ? await provider.login(username, password)
+          : await provider.register(username, password);
 
       if (!mounted) return;
       if (ok) {
@@ -173,14 +220,37 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
           (route) => false,
         );
       } else {
-        setState(() => _error = provider.error ?? 'Authentication failed.');
+        setState(() => _error = _walletAuthError(provider.error));
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString().replaceAll('Exception: ', ''));
+      final raw = e.toString().replaceAll('Exception: ', '');
+      setState(() {
+        _error = _isUsernameTakenError(raw)
+            ? 'Username already taken. Choose another username.'
+            : raw;
+      });
     } finally {
       if (mounted) setState(() => _isBusy = false);
     }
+  }
+
+  bool _isUsernameTakenError(Object? error) {
+    final raw = error?.toString().toLowerCase();
+    if (raw == null) return false;
+    return raw.contains('m_user_in_use') ||
+        raw.contains('username already taken') ||
+        raw.contains('user id already taken');
+  }
+
+  String _walletAuthError(String? error) {
+    if (_mode == _WalletAuthMode.create && _isUsernameTakenError(error)) {
+      return 'Username already taken. Choose another username.';
+    }
+    if (_mode == _WalletAuthMode.login) {
+      return 'No account found with this username, or this wallet is not linked to this account.';
+    }
+    return error ?? 'Authentication failed.';
   }
 
   Future<dynamic> _personalSign(
@@ -222,6 +292,15 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
     return '${address.substring(0, 6)}...${address.substring(address.length - 4)}';
   }
 
+  String get _title =>
+      _mode == _WalletAuthMode.login ? 'Connect Wallet' : 'Create with Wallet';
+
+  String get _usernameButtonLabel =>
+      _mode == _WalletAuthMode.login ? 'Continue' : 'Create Account';
+
+  String get _signButtonLabel =>
+      _mode == _WalletAuthMode.login ? 'Sign & Login' : 'Create Account';
+
   @override
   Widget build(BuildContext context) {
     final address = _appKitModal?.session?.getAddress('eip155');
@@ -239,48 +318,65 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const SizedBox(height: 20),
-              Text(
-                'Connect Wallet',
-                style: GoogleFonts.inter(
-                  color: kWhite,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
+          child: SizedBox(
+            width: double.infinity,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const SizedBox(height: 20),
+                Text(
+                  _title,
+                  style: GoogleFonts.inter(
+                    color: kWhite,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 32),
-              if (_isInitializing)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 32),
-                  child: CircularProgressIndicator(color: kWhite),
-                )
-              else if (_step == 'username')
-                UsernameStep(
-                  formKey: _formKey,
-                  controller: _usernameCtrl,
-                  onContinue: _onContinue,
-                )
-              else if (_step == 'connect')
-                _NativeConnectStep(
-                  isBusy: _isBusy,
-                  onConnect: _openWallets,
-                )
-              else if (_step == 'sign')
-                SignMessageStep(
-                  connectedAddress: address ?? '',
-                  username: _usernameCtrl.text.trim(),
-                  isBusy: _isBusy,
-                  onSign: _signAndRegister,
-                  shortAddress: _shortAddress,
-                ),
-              if (_error != null) ...[
-                const SizedBox(height: 16),
-                WalletErrorDisplay(error: _error),
+                const SizedBox(height: 32),
+                if (_isInitializing)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 32),
+                    child: CircularProgressIndicator(color: kWhite),
+                  )
+                else if (_step == 'username')
+                  UsernameStep(
+                    formKey: _formKey,
+                    controller: _usernameCtrl,
+                    isBusy: _isBusy,
+                    buttonLabel: _usernameButtonLabel,
+                    onContinue: _onContinue,
+                    footerText: _mode == _WalletAuthMode.login
+                        ? "Don't have an account?"
+                        : 'Already have an account?',
+                    footerActionLabel: _mode == _WalletAuthMode.login
+                        ? 'Create with wallet'
+                        : 'Login with wallet',
+                    onFooterAction: () => _switchMode(
+                      _mode == _WalletAuthMode.login
+                          ? _WalletAuthMode.create
+                          : _WalletAuthMode.login,
+                    ),
+                  )
+                else if (_step == 'connect')
+                  _NativeConnectStep(
+                    isBusy: _isBusy,
+                    onConnect: _openWallets,
+                  )
+                else if (_step == 'sign')
+                  SignMessageStep(
+                    connectedAddress: address ?? '',
+                    username: _usernameCtrl.text.trim(),
+                    isBusy: _isBusy,
+                    onSign: _signAndContinue,
+                    shortAddress: _shortAddress,
+                    buttonLabel: _signButtonLabel,
+                  ),
+                if (_error != null) ...[
+                  const SizedBox(height: 16),
+                  WalletErrorDisplay(error: _error),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),

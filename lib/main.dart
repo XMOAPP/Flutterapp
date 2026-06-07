@@ -7,6 +7,7 @@ import '../providers/chat_filter_provider.dart';
 import '../providers/matrix_provider.dart';
 import '../providers/group_provider.dart';
 import '../providers/story_provider.dart';
+import '../services/push_notification_service.dart';
 import '../services/story_service.dart';
 import '../services/voip_service.dart';
 import '../services/wallet_deep_link_handler.dart';
@@ -43,6 +44,9 @@ Future<void> main() async {
   VoipService().init(
     matrixService: matrixProvider.service,
     navigatorKey: xmoNavigatorKey,
+  );
+  await PushNotificationService().init(
+    matrixService: matrixProvider.service,
   );
 
   runApp(XmoApp(matrixProvider: matrixProvider));

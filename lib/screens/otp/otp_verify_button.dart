@@ -30,16 +30,15 @@ class OtpVerifyButton extends StatelessWidget {
       width: double.infinity,
       height: 54,
       child: ElevatedButton(
-        onPressed: (isVerifying || enteredCode.length < otpLength)
-            ? null
-            : onVerify,
+        onPressed:
+            (isVerifying || enteredCode.length < otpLength) ? null : onVerify,
         style: ElevatedButton.styleFrom(
-          backgroundColor: kLimeGreen,
+          backgroundColor: kWhite,
           foregroundColor: kBlack,
-          disabledBackgroundColor: kDarkGrey,
+          disabledBackgroundColor: const Color(0xFF2C2C2E),
           disabledForegroundColor: kLightGrey,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(25),
           ),
           elevation: 0,
         ),
@@ -47,8 +46,8 @@ class OtpVerifyButton extends StatelessWidget {
             ? const SizedBox(
                 width: 22,
                 height: 22,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2.5, color: kBlack),
+                child:
+                    CircularProgressIndicator(strokeWidth: 2.5, color: kBlack),
               )
             : provider.isLoading
                 ? Row(

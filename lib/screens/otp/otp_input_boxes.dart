@@ -45,17 +45,15 @@ class OtpInputBoxes extends StatelessWidget {
               width: 46,
               height: 56,
               decoration: BoxDecoration(
-                color: filled
-                    ? kLimeGreen.withValues(alpha: 0.12)
-                    : kDarkGrey,
+                color: const Color(0xFF2C2C2E),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: error != null
                       ? Colors.red.withValues(alpha: 0.7)
                       : isActive
-                          ? kLimeGreen
+                          ? kWhite
                           : filled
-                              ? kLimeGreen.withValues(alpha: 0.5)
+                              ? kWhite.withValues(alpha: 0.35)
                               : Colors.white.withValues(alpha: 0.06),
                   width: isActive ? 2 : 1.5,
                 ),

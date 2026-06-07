@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -153,7 +154,7 @@ class _IncomingGroupCallScreenState extends State<IncomingGroupCallScreen> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
-                          _IncomingGroupCallAction(
+                          _SwipeGroupCallActionButton(
                             icon: Icons.call_end,
                             label: 'Decline',
                             gradientColors: const [
@@ -161,11 +162,11 @@ class _IncomingGroupCallScreenState extends State<IncomingGroupCallScreen> {
                               Color(0xFFFF3B30),
                               Color(0xFFC21D1D),
                             ],
-                            labelColor: const Color(0xFFFF5B55),
+                            iconColor: kWhite,
                             disabled: _busy,
-                            onTap: _decline,
+                            onCompleted: _decline,
                           ),
-                          _IncomingGroupCallAction(
+                          _SwipeGroupCallActionButton(
                             icon: _isVideoCall ? Icons.videocam : Icons.call,
                             label: 'Answer',
                             gradientColors: const [
@@ -173,9 +174,9 @@ class _IncomingGroupCallScreenState extends State<IncomingGroupCallScreen> {
                               Color(0xFF22C55E),
                               Color(0xFF15803D),
                             ],
-                            labelColor: kWhite,
+                            iconColor: kWhite,
                             disabled: _busy,
-                            onTap: _answer,
+                            onCompleted: _answer,
                           ),
                         ],
                       ),
@@ -191,62 +192,157 @@ class _IncomingGroupCallScreenState extends State<IncomingGroupCallScreen> {
   }
 }
 
-class _IncomingGroupCallAction extends StatelessWidget {
+class _SwipeGroupCallActionButton extends StatefulWidget {
   final IconData icon;
   final String label;
   final List<Color> gradientColors;
-  final Color labelColor;
+  final Color iconColor;
   final bool disabled;
-  final VoidCallback onTap;
+  final Future<void> Function() onCompleted;
 
-  const _IncomingGroupCallAction({
+  const _SwipeGroupCallActionButton({
     required this.icon,
     required this.label,
     required this.gradientColors,
-    required this.labelColor,
+    required this.iconColor,
     required this.disabled,
-    required this.onTap,
+    required this.onCompleted,
   });
+
+  @override
+  State<_SwipeGroupCallActionButton> createState() =>
+      _SwipeGroupCallActionButtonState();
+}
+
+class _SwipeGroupCallActionButtonState
+    extends State<_SwipeGroupCallActionButton>
+    with SingleTickerProviderStateMixin {
+  static const double _buttonSize = 68.0;
+  static const double _maxLift = 34.0;
+  static const double _completeThreshold = 0.62;
+
+  double _dragProgress = 0.0;
+  bool _completed = false;
+
+  late final AnimationController _hintController;
+  late final Animation<double> _hintAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _hintController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+    _hintAnimation = CurvedAnimation(
+      parent: _hintController,
+      curve: Curves.easeInOut,
+    );
+  }
+
+  @override
+  void dispose() {
+    _hintController.dispose();
+    super.dispose();
+  }
+
+  void _finish() {
+    if (_completed || widget.disabled) return;
+    setState(() {
+      _completed = true;
+      _dragProgress = 1.0;
+    });
+    widget.onCompleted();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Opacity(
-      opacity: disabled ? 0.55 : 1,
+      opacity: widget.disabled ? 0.55 : 1,
       child: GestureDetector(
-        onTap: disabled ? null : onTap,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 74,
-              height: 74,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: gradientColors,
+        onVerticalDragUpdate: (details) {
+          if (_completed || widget.disabled) return;
+          setState(() {
+            _dragProgress =
+                (_dragProgress - details.delta.dy / _maxLift).clamp(0.0, 1.0);
+          });
+        },
+        onVerticalDragEnd: (_) {
+          if (_completed || widget.disabled) return;
+          if (_dragProgress >= _completeThreshold) {
+            _finish();
+          } else {
+            setState(() => _dragProgress = 0.0);
+          }
+        },
+        child: SizedBox(
+          width: 116,
+          height: 134,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              SizedBox(
+                height: 28,
+                child: AnimatedBuilder(
+                  animation: _hintAnimation,
+                  builder: (context, _) {
+                    final opacity = _dragProgress > 0.05
+                        ? 0.0
+                        : sin(_hintAnimation.value * pi);
+                    return Opacity(
+                      opacity: (opacity * 0.5).clamp(0.0, 0.5),
+                      child: const Icon(
+                        Icons.keyboard_arrow_up,
+                        color: kWhite,
+                        size: 26,
+                      ),
+                    );
+                  },
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: gradientColors[1].withValues(alpha: 0.36),
-                    blurRadius: 18,
-                    spreadRadius: 1,
+              ),
+              Transform.translate(
+                offset: Offset(0, -_dragProgress * _maxLift),
+                child: AnimatedContainer(
+                  duration: _completed
+                      ? const Duration(milliseconds: 220)
+                      : Duration.zero,
+                  width: _buttonSize,
+                  height: _buttonSize,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: widget.gradientColors,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: widget.gradientColors[1].withValues(alpha: 0.38),
+                        blurRadius: 18,
+                        spreadRadius: 1,
+                      ),
+                    ],
                   ),
-                ],
+                  child: Icon(
+                    _completed ? Icons.check : widget.icon,
+                    color: widget.iconColor,
+                    size: 28,
+                  ),
+                ),
               ),
-              child: Icon(icon, color: kWhite, size: 31),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              label,
-              style: GoogleFonts.inter(
-                color: labelColor,
-                fontSize: 14,
-                fontWeight: FontWeight.w800,
+              const SizedBox(height: 10),
+              Text(
+                widget.label,
+                style: GoogleFonts.inter(
+                  color: widget.label == 'Decline'
+                      ? const Color(0xFFFF5B55)
+                      : kWhite,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

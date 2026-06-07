@@ -13,7 +13,8 @@ import '../../services/group_service.dart';
 import '../../services/matrix_service.dart';
 import '../../widgets/story/story_avatar.dart';
 import '../app_settings_screen.dart';
-import '../login_screen.dart';
+import '../auth_choice_screen.dart';
+import '../donation_screen.dart';
 import '../matrix_chat_screen.dart';
 import '../profile_settings_screen.dart';
 
@@ -136,6 +137,13 @@ class XmoDrawer extends StatelessWidget {
               context,
               MaterialPageRoute(
                 builder: (_) => const AppSettingsScreen(),
+              ),
+            );
+          } else if (label == 'Donation') {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const DonationScreen(),
               ),
             );
           } else if (label == 'Calls') {
@@ -558,14 +566,13 @@ class LogoutTile extends StatelessWidget {
       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
       onTap: () async {
         final provider = context.read<MatrixProvider>();
+        final navigator = Navigator.of(context, rootNavigator: true);
         Navigator.pop(context);
         await provider.logout();
-        if (context.mounted) {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (_) => const LoginScreen()),
-            (route) => false,
-          );
-        }
+        navigator.pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const AuthChoiceScreen()),
+          (route) => false,
+        );
       },
     );
   }

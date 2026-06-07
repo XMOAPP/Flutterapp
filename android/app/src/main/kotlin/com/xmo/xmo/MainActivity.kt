@@ -21,14 +21,32 @@ class MainActivity : FlutterActivity() {
     private val walletEventsChannel = "com.xmo.xmo/wallet_events"
     private val walletMethodsChannel = "com.xmo.xmo/wallet_methods"
     private val mediaStoreChannel = "com.xmo.xmo/media_store"
+    private val callNotificationMethodsChannel = "com.xmo.xmo/call_notifications"
+    private val callNotificationEventsChannel = "com.xmo.xmo/call_notification_events"
 
     private var initialLink: String? = null
     private var linksReceiver: BroadcastReceiver? = null
+    private var initialCallAction: Map<String, String>? = null
+    private var callNotificationEvents: EventChannel.EventSink? = null
+
+    override fun onResume() {
+        super.onResume()
+        XmoAppVisibility.isForeground = true
+    }
+
+    override fun onPause() {
+        XmoAppVisibility.isForeground = false
+        super.onPause()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         initialLink = intent?.data?.toString()
+        initialCallAction = XmoCallNotificationHelper.extrasFromIntent(intent)
+        initialCallAction?.let {
+            XmoCallNotificationHelper.cancelCallNotification(applicationContext, it)
+        }
 
         EventChannel(flutterEngine?.dartExecutor?.binaryMessenger, walletEventsChannel)
             .setStreamHandler(
@@ -52,6 +70,33 @@ class MainActivity : FlutterActivity() {
                     result.notImplemented()
                 }
             }
+
+        MethodChannel(flutterEngine!!.dartExecutor.binaryMessenger, callNotificationMethodsChannel)
+            .setMethodCallHandler { call, result ->
+                if (call.method == "initialCallAction") {
+                    result.success(initialCallAction)
+                    initialCallAction = null
+                } else {
+                    result.notImplemented()
+                }
+            }
+
+        EventChannel(flutterEngine?.dartExecutor?.binaryMessenger, callNotificationEventsChannel)
+            .setStreamHandler(
+                object : EventChannel.StreamHandler {
+                    override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+                        callNotificationEvents = events
+                        initialCallAction?.let {
+                            events.success(it)
+                            initialCallAction = null
+                        }
+                    }
+
+                    override fun onCancel(arguments: Any?) {
+                        callNotificationEvents = null
+                    }
+                },
+            )
 
         MethodChannel(flutterEngine!!.dartExecutor.binaryMessenger, mediaStoreChannel)
             .setMethodCallHandler { call, result ->
@@ -114,6 +159,14 @@ class MainActivity : FlutterActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        XmoCallNotificationHelper.extrasFromIntent(intent)?.let {
+            XmoCallNotificationHelper.cancelCallNotification(applicationContext, it)
+            if (callNotificationEvents == null) {
+                initialCallAction = it
+            } else {
+                callNotificationEvents?.success(it)
+            }
+        }
         if (intent.action == Intent.ACTION_VIEW) {
             linksReceiver?.onReceive(applicationContext, intent)
         }

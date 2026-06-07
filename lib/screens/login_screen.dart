@@ -32,6 +32,7 @@ class _LoginScreenState extends State<LoginScreen>
   final _formKey = GlobalKey<FormState>();
 
   bool _isRegisterMode = false;
+  String? _usernameError;
   late AnimationController _fadeCtrl;
   late Animation<double> _fadeAnim;
 
@@ -58,6 +59,7 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _submit() async {
+    setState(() => _usernameError = null);
     if (!_formKey.currentState!.validate()) return;
 
     final provider = context.read<MatrixProvider>();
@@ -77,6 +79,34 @@ class _LoginScreenState extends State<LoginScreen>
         ),
       );
 
+      bool usernameAvailable;
+      try {
+        usernameAvailable =
+            await provider.service.isUsernameAvailable(username);
+      } catch (e) {
+        if (!mounted) return;
+        if (_isUsernameTakenError(e)) {
+          _showUsernameTakenError(closeDialog: true);
+          return;
+        }
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.toString()),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      if (!mounted) return;
+      if (!usernameAvailable) {
+        Navigator.pop(context);
+        setState(() => _usernameError = 'Username already taken.');
+        _formKey.currentState?.validate();
+        return;
+      }
+
       if (!AppConfig.requireEmailOtp) {
         final ok = await provider.register(username, password);
         if (!mounted) return;
@@ -86,16 +116,18 @@ class _LoginScreenState extends State<LoginScreen>
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(builder: (_) => const HomeScreen()),
           );
+        } else if (_isUsernameTakenError(provider.error)) {
+          _showUsernameTakenError();
         }
         return;
       }
 
       await OtpService().sendEmailOtp(
         email: email,
-        onCodeSent: () {
+        onCodeSent: () async {
           if (!mounted) return;
           Navigator.pop(context);
-          Navigator.push(
+          final result = await Navigator.push<Map<String, String>>(
             context,
             MaterialPageRoute(
               builder: (_) => OtpScreen(
@@ -107,6 +139,10 @@ class _LoginScreenState extends State<LoginScreen>
               ),
             ),
           );
+          if (!mounted) return;
+          if (result?['usernameError'] != null) {
+            _showUsernameTakenError();
+          }
         },
         onError: (err) {
           if (!mounted) return;
@@ -127,6 +163,22 @@ class _LoginScreenState extends State<LoginScreen>
         );
       }
     }
+  }
+
+  bool _isUsernameTakenError(Object? error) {
+    final raw = error?.toString();
+    if (raw == null) return false;
+    return raw.contains('M_USER_IN_USE') ||
+        raw.toLowerCase().contains('username already taken') ||
+        raw.toLowerCase().contains('user id already taken');
+  }
+
+  void _showUsernameTakenError({bool closeDialog = false}) {
+    if (closeDialog) {
+      Navigator.pop(context);
+    }
+    setState(() => _usernameError = 'Username already taken.');
+    _formKey.currentState?.validate();
   }
 
   @override
@@ -158,7 +210,15 @@ class _LoginScreenState extends State<LoginScreen>
                     SizedBox(height: _isRegisterMode ? 12 : 80),
                     _buildTitle(),
                     const SizedBox(height: 20),
-                    UsernameField(controller: _usernameCtrl),
+                    UsernameField(
+                      controller: _usernameCtrl,
+                      externalError: _usernameError,
+                      onChanged: () {
+                        if (_usernameError != null) {
+                          setState(() => _usernameError = null);
+                        }
+                      },
+                    ),
                     const SizedBox(height: 12),
                     if (_isRegisterMode) ...[
                       EmailField(controller: _emailCtrl),
@@ -184,8 +244,10 @@ class _LoginScreenState extends State<LoginScreen>
                     const SizedBox(height: 12),
                     ToggleAuthModeButton(
                       isRegisterMode: _isRegisterMode,
-                      onToggle: () =>
-                          setState(() => _isRegisterMode = !_isRegisterMode),
+                      onToggle: () => setState(() {
+                        _isRegisterMode = !_isRegisterMode;
+                        _usernameError = null;
+                      }),
                     ),
                     const SizedBox(height: 12),
                   ],
@@ -201,7 +263,7 @@ class _LoginScreenState extends State<LoginScreen>
   Widget _buildTitle() {
     return Center(
       child: Text(
-        _isRegisterMode ? 'Create your account' : 'Sign in to continue',
+        _isRegisterMode ? 'Create your account' : 'Login to continue',
         style: GoogleFonts.inter(
           color: kWhite,
           fontSize: 18,

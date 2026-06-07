@@ -42,7 +42,11 @@ class ChatList extends StatelessWidget {
               room.highlightCount,
               lastEvent?.eventId,
               lastEvent?.type,
+              lastEvent?.messageType,
               lastEvent?.body,
+              lastEvent?.content['filename'],
+              lastEvent?.content['msgtype'],
+              lastEvent?.redacted,
               lastEvent?.originServerTs.millisecondsSinceEpoch,
             ].join(':');
           }).join('|'),

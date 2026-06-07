@@ -65,6 +65,7 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
   List<_SharedLinkItem> _links = [];
   List<Room> _chatRooms = [];
   Map<String, int> _savedCountsByRoomId = {};
+  Timeline? _sharedTimeline;
   bool _loading = true;
 
   @override
@@ -84,9 +85,13 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
   Future<void> _loadMedia() async {
     setState(() => _loading = true);
     try {
-      final media = await _directChatService.getSharedMedia(widget.room.id);
-      final links = await _loadLinks();
-      final chatRooms = await _loadChatRooms();
+      final timeline = await _loadSharedMediaTimeline();
+      final media = await _directChatService.getSharedMedia(
+        widget.room.id,
+        timeline: timeline,
+      );
+      final links = _loadLinks(timeline);
+      final chatRooms = _loadChatRooms(timeline);
 
       if (mounted) {
         setState(() {
@@ -106,6 +111,20 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
         setState(() => _loading = false);
       }
     }
+  }
+
+  Future<Timeline> _loadSharedMediaTimeline() async {
+    final timeline = await widget.room.getTimeline();
+    _sharedTimeline = timeline;
+
+    while (timeline.canRequestHistory) {
+      final beforeEventCount = timeline.events.length;
+      await timeline.requestHistory(historyCount: 100);
+      if (timeline.events.length <= beforeEventCount) break;
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    return timeline;
   }
 
   @override
@@ -662,8 +681,7 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
     }
   }
 
-  Future<List<_SharedLinkItem>> _loadLinks() async {
-    final timeline = await widget.room.getTimeline();
+  List<_SharedLinkItem> _loadLinks(Timeline timeline) {
     final links = <_SharedLinkItem>[];
     final seen = <String>{};
 
@@ -709,7 +727,7 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
     return text;
   }
 
-  Future<List<Room>> _loadChatRooms() async {
+  List<Room> _loadChatRooms(Timeline timeline) {
     final matrixProvider = context.read<MatrixProvider>();
     final matrixService = matrixProvider.service;
 
@@ -717,7 +735,6 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
       return [widget.room];
     }
 
-    final timeline = await widget.room.getTimeline();
     final roomIds = <String>{};
     final counts = <String, int>{};
     for (final event in timeline.events) {
@@ -775,7 +792,7 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
   }
 
   Future<Event?> _findEvent(String eventId) async {
-    final timeline = await widget.room.getTimeline();
+    final timeline = _sharedTimeline ?? await widget.room.getTimeline();
     for (final event in timeline.events) {
       if (event.eventId == eventId) return event;
     }

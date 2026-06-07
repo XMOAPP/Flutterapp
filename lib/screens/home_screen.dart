@@ -15,6 +15,7 @@ import 'home/chat_list.dart';
 import 'home/stories_view.dart';
 import 'home/xmo_drawer.dart';
 import 'home/matrix_room_tile.dart';
+import 'auth_choice_screen.dart';
 import 'matrix_chat_screen.dart';
 
 /// Main home screen with chat list and navigation
@@ -141,6 +142,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isLoggedIn = context.select<MatrixProvider, bool>(
+      (provider) => provider.isLoggedIn,
+    );
+    if (!isLoggedIn) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const AuthChoiceScreen()),
+          (route) => false,
+        );
+      });
+      return const Scaffold(backgroundColor: kBlack);
+    }
+
     return Scaffold(
       backgroundColor: kBlack,
       drawer: const XmoDrawer(),
@@ -294,8 +309,8 @@ class _HomeScreenState extends State<HomeScreen> {
       leading: CircleAvatar(
         backgroundColor: const Color(0xFF2C2C2E),
         child: Text(initial,
-            style:
-                GoogleFonts.inter(color: kLimeGreen, fontWeight: FontWeight.bold)),
+            style: GoogleFonts.inter(
+                color: kLimeGreen, fontWeight: FontWeight.bold)),
       ),
       title: Row(
         children: [

@@ -42,8 +42,7 @@ class _OtpScreenState extends State<OtpScreen>
 
   final List<TextEditingController> _ctrs =
       List.generate(_otpLength, (_) => TextEditingController());
-  final List<FocusNode> _foci =
-      List.generate(_otpLength, (_) => FocusNode());
+  final List<FocusNode> _foci = List.generate(_otpLength, (_) => FocusNode());
 
   int _remaining = _countdownSecs;
   Timer? _timer;
@@ -98,29 +97,29 @@ class _OtpScreenState extends State<OtpScreen>
     }
     _foci.first.requestFocus();
     setState(() => _error = null);
-    
+
     OtpService().sendEmailOtp(
-      email: widget.email,
-      onCodeSent: () {
-        _startTimer();
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'OTP resent to ${widget.email}',
-              style: GoogleFonts.inter(color: kBlack),
+        email: widget.email,
+        onCodeSent: () {
+          _startTimer();
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'OTP resent to ${widget.email}',
+                style: GoogleFonts.inter(color: kBlack),
+              ),
+              backgroundColor: kWhite,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
             ),
-            backgroundColor: kLimeGreen,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
-      },
-      onError: (err) {
-        if (!mounted) return;
-        setState(() => _error = err);
-      }
-    );
+          );
+        },
+        onError: (err) {
+          if (!mounted) return;
+          setState(() => _error = err);
+        });
   }
 
   void _onDigitChanged(int index, String value) {
@@ -129,7 +128,8 @@ class _OtpScreenState extends State<OtpScreen>
       for (int i = 0; i < _otpLength && i < digits.length; i++) {
         _ctrs[i].text = digits[i];
       }
-      final nextEmpty = digits.length < _otpLength ? digits.length : _otpLength - 1;
+      final nextEmpty =
+          digits.length < _otpLength ? digits.length : _otpLength - 1;
       _foci[nextEmpty].requestFocus();
       _tryAutoSubmit();
       return;
@@ -208,11 +208,22 @@ class _OtpScreenState extends State<OtpScreen>
         (route) => false,
       );
     } else {
+      final error = provider.error ?? 'Authentication failed.';
+      if (widget.isRegister && _isUsernameTakenError(error)) {
+        Navigator.pop(context, {'usernameError': 'Username already taken.'});
+        return;
+      }
       setState(() => _error = provider.error ?? 'Authentication failed.');
     }
   }
 
   String get _enteredCode => _ctrs.map((c) => c.text).join();
+
+  bool _isUsernameTakenError(String error) {
+    return error.contains('M_USER_IN_USE') ||
+        error.toLowerCase().contains('username already taken') ||
+        error.toLowerCase().contains('user id already taken');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -237,8 +248,8 @@ class _OtpScreenState extends State<OtpScreen>
                 'Verify your email',
                 style: GoogleFonts.inter(
                   color: kWhite,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               const SizedBox(height: 10),
@@ -250,10 +261,9 @@ class _OtpScreenState extends State<OtpScreen>
               Text(
                 widget.email,
                 style: GoogleFonts.inter(
-                  color: kLimeGreen,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.5,
+                  color: kWhite,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               const SizedBox(height: 40),

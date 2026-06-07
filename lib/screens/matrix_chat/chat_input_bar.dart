@@ -6,7 +6,6 @@ import 'widgets/voice_waveform.dart';
 /// Bottom input bar for sending messages and attachments.
 class ChatInputBar extends StatelessWidget {
   final TextEditingController textController;
-  final bool hasText;
   final bool uploading;
   final bool enabled;
   final bool recording;
@@ -24,7 +23,6 @@ class ChatInputBar extends StatelessWidget {
   const ChatInputBar({
     super.key,
     required this.textController,
-    required this.hasText,
     required this.uploading,
     this.enabled = true,
     this.recording = false,
@@ -115,52 +113,61 @@ class ChatInputBar extends StatelessWidget {
                 ),
               ),
             ),
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
-              transitionBuilder: (child, anim) =>
-                  ScaleTransition(scale: anim, child: child),
-              child: hasText && enabled
-                  ? GestureDetector(
-                      key: const ValueKey('send'),
-                      onTap: uploading || !enabled ? null : onSend,
-                      child: Container(
-                        width: 40,
-                        height: 40,
-                        margin: const EdgeInsets.only(left: 8),
-                        decoration: BoxDecoration(
-                          color: uploading || !enabled
-                              ? kDarkGrey
-                              : kLimeGreen,
-                          shape: BoxShape.circle,
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: textController,
+              builder: (context, value, _) {
+                final hasText = value.text.trim().isNotEmpty;
+                return AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  transitionBuilder: (child, anim) =>
+                      ScaleTransition(scale: anim, child: child),
+                  child: hasText && enabled
+                      ? GestureDetector(
+                          key: const ValueKey('send'),
+                          onTap: uploading || !enabled ? null : onSend,
+                          child: Container(
+                            width: 40,
+                            height: 40,
+                            margin: const EdgeInsets.only(left: 8),
+                            decoration: BoxDecoration(
+                              color: uploading || !enabled
+                                  ? kDarkGrey
+                                  : kLimeGreen,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.send_rounded,
+                              color:
+                                  uploading || !enabled ? kMediumGrey : kBlack,
+                              size: 20,
+                            ),
+                          ),
+                        )
+                      : GestureDetector(
+                          key: const ValueKey('record'),
+                          onTap:
+                              uploading || !enabled ? null : onStartRecording,
+                          child: Container(
+                            width: 40,
+                            height: 40,
+                            margin: const EdgeInsets.only(left: 8),
+                            decoration: BoxDecoration(
+                              color: uploading || !enabled
+                                  ? kDarkGrey
+                                  : const Color(0xFF2C2C2E),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.mic_rounded,
+                              color: uploading || !enabled
+                                  ? kMediumGrey
+                                  : kLimeGreen,
+                              size: 21,
+                            ),
+                          ),
                         ),
-                        child: Icon(
-                          Icons.send_rounded,
-                          color: uploading || !enabled ? kMediumGrey : kBlack,
-                          size: 20,
-                        ),
-                      ),
-                    )
-                  : GestureDetector(
-                      key: const ValueKey('record'),
-                      onTap: uploading || !enabled ? null : onStartRecording,
-                      child: Container(
-                        width: 40,
-                        height: 40,
-                        margin: const EdgeInsets.only(left: 8),
-                        decoration: BoxDecoration(
-                          color: uploading || !enabled
-                              ? kDarkGrey
-                              : const Color(0xFF2C2C2E),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.mic_rounded,
-                          color:
-                              uploading || !enabled ? kMediumGrey : kLimeGreen,
-                          size: 21,
-                        ),
-                      ),
-                    ),
+                );
+              },
             ),
           ],
         ),
@@ -226,7 +233,9 @@ class _RecordingBar extends StatelessWidget {
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: (paused ? kLimeGreen : const Color(0xFF3B82F6))
+                              color: (paused
+                                      ? kLimeGreen
+                                      : const Color(0xFF3B82F6))
                                   .withValues(alpha: 0.25),
                               blurRadius: 10,
                               offset: const Offset(0, 3),

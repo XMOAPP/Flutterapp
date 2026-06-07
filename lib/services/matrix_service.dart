@@ -325,6 +325,11 @@ class MatrixService {
     );
   }
 
+  Future<bool> isUsernameAvailable(String username) async {
+    await _client.checkHomeserver(Uri.parse(homeserverUrl));
+    return await _client.checkUsernameAvailability(username) == true;
+  }
+
   Future<void> register(String username, String password) async {
     await _client.checkHomeserver(Uri.parse(homeserverUrl));
 
@@ -339,13 +344,7 @@ class MatrixService {
         session = e.raw['session'] as String?;
         if (session == null) rethrow;
       } else if (e.errcode == 'M_USER_IN_USE') {
-        // Already exists — just log in instead
-        await _client.login(
-          LoginType.mLoginPassword,
-          identifier: AuthenticationUserIdentifier(user: username),
-          password: password,
-        );
-        return;
+        rethrow;
       } else {
         rethrow;
       }
@@ -363,11 +362,7 @@ class MatrixService {
       );
     } on MatrixException catch (e) {
       if (e.errcode == 'M_USER_IN_USE') {
-        await _client.login(
-          LoginType.mLoginPassword,
-          identifier: AuthenticationUserIdentifier(user: username),
-          password: password,
-        );
+        rethrow;
       } else {
         rethrow;
       }
@@ -376,6 +371,72 @@ class MatrixService {
 
   Future<void> logout() async {
     await _client.logout();
+  }
+
+  Future<void> setHttpPusher({
+    required String pushKey,
+    required String appId,
+    required String appDisplayName,
+    required String deviceDisplayName,
+    required String profileTag,
+    required String pushGatewayUrl,
+    String lang = 'en',
+  }) async {
+    await _setPusher({
+      'pushkey': pushKey,
+      'kind': 'http',
+      'app_id': appId,
+      'app_display_name': appDisplayName,
+      'device_display_name': deviceDisplayName,
+      'profile_tag': profileTag,
+      'lang': lang,
+      'data': {
+        'url': pushGatewayUrl,
+      },
+    });
+  }
+
+  Future<void> removeHttpPusher({
+    required String pushKey,
+    required String appId,
+  }) async {
+    await _setPusher({
+      'pushkey': pushKey,
+      'kind': null,
+      'app_id': appId,
+      'app_display_name': 'XMO',
+      'device_display_name': 'XMO mobile',
+      'lang': 'en',
+      'data': <String, dynamic>{},
+    });
+  }
+
+  Future<void> _setPusher(Map<String, dynamic> body) async {
+    final token = accessToken;
+    if (token == null || token.isEmpty) {
+      throw StateError('Cannot configure push before login');
+    }
+
+    final uri = Uri.parse('$homeserverUrl/_matrix/client/v3/pushers/set');
+    final httpClient = io.HttpClient();
+    try {
+      final request = await httpClient.postUrl(uri);
+      request.headers.contentType = io.ContentType.json;
+      request.headers.set('Authorization', 'Bearer $token');
+      request.write(jsonEncode(body));
+
+      final response = await request.close();
+      final responseBody =
+          utf8.decode(await consolidateHttpClientResponseBytes(response));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception(
+          'Failed to configure Matrix pusher (${response.statusCode}): '
+          '$responseBody',
+        );
+      }
+    } finally {
+      httpClient.close(force: true);
+    }
   }
 
   // ─── Rooms ────────────────────────────────────────────────────────────────

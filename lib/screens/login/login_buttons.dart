@@ -41,9 +41,7 @@ class SubmitButton extends StatelessWidget {
                       ),
                     )
                   : Text(
-                      isRegisterMode
-                          ? 'Verify Email & Register'
-                          : 'Sign In',
+                      isRegisterMode ? 'Verify Email & Register' : 'Login',
                       style: _buttonTextStyle,
                     ),
             ),
@@ -92,7 +90,7 @@ class ToggleAuthModeButton extends StatelessWidget {
                     : "Don't have an account? ",
               ),
               TextSpan(
-                text: isRegisterMode ? 'Sign In' : 'Register',
+                text: isRegisterMode ? 'Login' : 'Register',
                 style: _toggleHighlightStyle,
               ),
             ],

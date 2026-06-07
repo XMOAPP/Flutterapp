@@ -16,6 +16,7 @@ import '../services/matrix_service.dart';
 import '../services/group_service.dart';
 import '../services/app_settings_service.dart';
 import '../services/voip_service.dart';
+import '../widgets/matrix_chat/album_media_viewer.dart';
 import '../widgets/matrix_chat/fullscreen_image_viewer.dart';
 import '../widgets/matrix_chat/fullscreen_video_player.dart';
 import '../widgets/matrix_chat/reply_preview.dart';
@@ -70,7 +71,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   final _scrollCtrl = ScrollController();
   Timeline? _timeline;
   bool _loading = true;
-  bool _hasText = false;
+  bool _loadingHistory = false;
+  bool _historyExhausted = false;
   bool _uploading = false;
   bool _recording = false;
   bool _recordingPaused = false;
@@ -87,8 +89,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   bool _isJumpingToPinnedMessage = false;
   List<GroupMember> _groupMembers = []; // Track group members for mentions
   MemberRestriction? _ownRestriction;
-  String _mentionQuery = ''; // Current mention query
-  bool _showMentionAutocomplete = false; // Show mention autocomplete
+  final _mentionAutocomplete = ValueNotifier<_MentionAutocompleteState>(
+      _MentionAutocompleteState.hidden);
   List<String> _typingUsers = []; // Track typing users
   late DirectChatService _directChatService;
   Timer? _typingTimer; // Timer for sending typing indicators
@@ -147,10 +149,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     );
     _directChatService = DirectChatService(widget.matrixProvider.service);
     _initializeChat();
-    _scrollCtrl.addListener(_handlePinnedBannerScroll);
+    _scrollCtrl.addListener(_handleChatScroll);
     _textCtrl.addListener(() {
       final has = _textCtrl.text.trim().isNotEmpty;
-      if (has != _hasText) setState(() => _hasText = has);
 
       // Check for mention trigger (@)
       _checkForMention();
@@ -237,12 +238,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
     if (lastAtIndex == -1) {
       // No @ found, hide autocomplete
-      if (_showMentionAutocomplete) {
-        setState(() {
-          _showMentionAutocomplete = false;
-          _mentionQuery = '';
-        });
-      }
+      _setMentionAutocomplete(_MentionAutocompleteState.hidden);
       return;
     }
 
@@ -250,22 +246,18 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final afterAt = beforeCursor.substring(lastAtIndex + 1);
     if (afterAt.contains(' ')) {
       // Space found, hide autocomplete
-      if (_showMentionAutocomplete) {
-        setState(() {
-          _showMentionAutocomplete = false;
-          _mentionQuery = '';
-        });
-      }
+      _setMentionAutocomplete(_MentionAutocompleteState.hidden);
       return;
     }
 
     // Show autocomplete with query only when the visible state changes.
-    if (!_showMentionAutocomplete || _mentionQuery != afterAt) {
-      setState(() {
-        _showMentionAutocomplete = true;
-        _mentionQuery = afterAt;
-      });
-    }
+    _setMentionAutocomplete(_MentionAutocompleteState.visible(afterAt));
+  }
+
+  void _setMentionAutocomplete(_MentionAutocompleteState next) {
+    final current = _mentionAutocomplete.value;
+    if (current.visible == next.visible && current.query == next.query) return;
+    _mentionAutocomplete.value = next;
   }
 
   void _handleTyping(bool isTyping) {
@@ -337,10 +329,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       selection: TextSelection.collapsed(offset: newCursorPos),
     );
 
-    setState(() {
-      _showMentionAutocomplete = false;
-      _mentionQuery = '';
-    });
+    _setMentionAutocomplete(_MentionAutocompleteState.hidden);
   }
 
   Future<void> _loadTimeline() async {
@@ -353,15 +342,21 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       setState(() {
         _timeline = timeline;
         _loading = false;
+        _historyExhausted = timeline == null;
       });
+      await _loadOlderMessages(
+        historyCount: 100,
+        preserveScroll: false,
+        autoScrollAfterLoad: true,
+      );
       _scrollToBottom();
       _markRoomAsRead();
       _loadPinnedMessages();
       _eventSub = widget.matrixProvider.service.onEvent.listen((update) {
         if (update.roomID == _room!.id && mounted) {
           setState(() {});
-          _scrollToBottom();
           if (update.type == EventUpdateType.timeline) {
+            _scrollToBottom();
             _markRoomAsRead();
           }
           // Reload pinned messages if state changed
@@ -377,6 +372,75 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       if (timeline != null && _appSettings.autoDownloadMedia) {
         _preloadVideoThumbnails(timeline);
       }
+    }
+  }
+
+  void _handleChatScroll() {
+    _handlePinnedBannerScroll();
+    _maybeLoadOlderMessages();
+  }
+
+  void _maybeLoadOlderMessages() {
+    if (!_scrollCtrl.hasClients ||
+        _loadingHistory ||
+        _historyExhausted ||
+        _timeline == null) {
+      return;
+    }
+    if (_scrollCtrl.offset <= 120) {
+      unawaited(_loadOlderMessages());
+    }
+  }
+
+  Future<void> _loadOlderMessages({
+    int historyCount = 50,
+    bool preserveScroll = true,
+    bool autoScrollAfterLoad = false,
+  }) async {
+    final timeline = _timeline;
+    if (timeline == null ||
+        _loadingHistory ||
+        _historyExhausted ||
+        !timeline.canRequestHistory) {
+      return;
+    }
+
+    final beforeEventCount = timeline.events.length;
+    final hadScrollPosition = _scrollCtrl.hasClients;
+    final beforeOffset = hadScrollPosition ? _scrollCtrl.offset : 0.0;
+    final beforeMax =
+        hadScrollPosition ? _scrollCtrl.position.maxScrollExtent : 0.0;
+
+    if (mounted) setState(() => _loadingHistory = true);
+    try {
+      await timeline.requestHistory(historyCount: historyCount);
+      final loadedAny = timeline.events.length > beforeEventCount;
+      if (!mounted) return;
+      setState(() {
+        _historyExhausted = !loadedAny || !timeline.canRequestHistory;
+      });
+
+      if (autoScrollAfterLoad) {
+        _scrollToBottom();
+      } else if (preserveScroll && hadScrollPosition) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!_scrollCtrl.hasClients) return;
+          final afterMax = _scrollCtrl.position.maxScrollExtent;
+          final target = (beforeOffset + afterMax - beforeMax).clamp(
+            _scrollCtrl.position.minScrollExtent,
+            _scrollCtrl.position.maxScrollExtent,
+          );
+          _scrollCtrl.jumpTo(target);
+        });
+      }
+
+      if (_appSettings.autoDownloadMedia) {
+        _preloadVideoThumbnails(timeline);
+      }
+    } catch (e) {
+      debugPrint('[Timeline] Failed to load older room history: $e');
+    } finally {
+      if (mounted) setState(() => _loadingHistory = false);
     }
   }
 
@@ -580,7 +644,6 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       return;
     }
     _textCtrl.clear();
-    setState(() => _hasText = false);
 
     // Send reply if replying to a message
     if (_replyToEvent != null) {
@@ -1262,21 +1325,6 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     });
   }
 
-  void _cancelPendingAlbumUpload(String albumId) {
-    final index =
-        _pendingAlbumUploads.indexWhere((pending) => pending.id == albumId);
-    if (index == -1) return;
-    final album = _pendingAlbumUploads[index];
-    setState(() {
-      album.cancelled = true;
-      for (final upload in album.uploads) {
-        upload.cancelled = true;
-      }
-      _pendingAlbumUploads.removeAt(index);
-      _uploading = false;
-    });
-  }
-
   Future<void> _sendAudioWithPending(
     String roomId, {
     required Uint8List bytes,
@@ -1320,42 +1368,112 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     _scrollToBottom();
   }
 
-  Future<void> _sendFileWithPending(
-    String roomId, {
+  _PendingUpload _createPendingAudioUpload({
     required Uint8List bytes,
     required String fileName,
     required String mimeType,
-  }) async {
-    final pendingId = _addPendingUpload(
-      _PendingUpload(
-        id: 'file_${DateTime.now().microsecondsSinceEpoch}',
-        bytes: bytes,
-        fileName: fileName,
-        mimeType: mimeType,
-        isVideo: false,
-        isFile: true,
-        totalBytes: bytes.length,
-        createdAt: DateTime.now(),
-      ),
+    required int durationMs,
+  }) {
+    return _PendingUpload(
+      id: 'audio_${DateTime.now().microsecondsSinceEpoch}_${bytes.length}',
+      bytes: bytes,
+      fileName: fileName,
+      mimeType: mimeType,
+      isVideo: false,
+      isAudio: true,
+      totalBytes: bytes.length,
+      createdAt: DateTime.now(),
+      durationMs: durationMs,
     );
+  }
 
+  _PendingUpload _createPendingFileUpload({
+    required Uint8List bytes,
+    required String fileName,
+    required String mimeType,
+  }) {
+    return _PendingUpload(
+      id: 'file_${DateTime.now().microsecondsSinceEpoch}_${bytes.length}',
+      bytes: bytes,
+      fileName: fileName,
+      mimeType: mimeType,
+      isVideo: false,
+      isFile: true,
+      totalBytes: bytes.length,
+      createdAt: DateTime.now(),
+    );
+  }
+
+  void _startPendingQueuedUploads(String roomId, List<_PendingUpload> uploads) {
+    if (uploads.isEmpty) return;
+    if (mounted) {
+      setState(() => _pendingUploads.addAll(uploads));
+      _scrollToBottom();
+    }
+    unawaited(_runPendingQueuedUploads(roomId, uploads));
+  }
+
+  Future<void> _runPendingQueuedUploads(
+    String roomId,
+    List<_PendingUpload> uploads,
+  ) async {
     _setUploading(true);
     try {
-      await widget.matrixProvider.service.sendFileWithProgress(
-        roomId: roomId,
-        bytes: bytes,
-        fileName: fileName,
-        mimeType: mimeType,
-        onUploadProgress: (uploadedBytes, totalBytes) =>
-            _updatePendingUploadProgress(pendingId, uploadedBytes, totalBytes),
-        isCancelled: () => _isPendingUploadCancelled(pendingId),
-      );
+      for (final upload in uploads) {
+        if (_isPendingUploadCancelled(upload.id) || upload.cancelled) continue;
+        if (mounted) setState(() => upload.started = true);
+
+        try {
+          if (upload.isAudio) {
+            await widget.matrixProvider.service.sendAudio(
+              roomId: roomId,
+              audioBytes: upload.bytes,
+              fileName: upload.fileName,
+              mimeType: upload.mimeType,
+              durationMs: upload.durationMs ?? 0,
+              isVoiceMessage: false,
+              onUploadProgress: (uploadedBytes, totalBytes) =>
+                  _updatePendingUploadProgress(
+                upload.id,
+                uploadedBytes,
+                totalBytes,
+              ),
+              isCancelled: () =>
+                  _isPendingUploadCancelled(upload.id) || upload.cancelled,
+            );
+          } else {
+            await widget.matrixProvider.service.sendFileWithProgress(
+              roomId: roomId,
+              bytes: upload.bytes,
+              fileName: upload.fileName,
+              mimeType: upload.mimeType,
+              onUploadProgress: (uploadedBytes, totalBytes) =>
+                  _updatePendingUploadProgress(
+                upload.id,
+                uploadedBytes,
+                totalBytes,
+              ),
+              isCancelled: () =>
+                  _isPendingUploadCancelled(upload.id) || upload.cancelled,
+            );
+          }
+        } catch (e) {
+          if (e is! MatrixUploadCancelledException &&
+              !_isPendingUploadCancelled(upload.id) &&
+              !upload.cancelled) {
+            _showSnackBar(
+              'Failed to send ${upload.isAudio ? 'audio' : 'file'}: $e',
+            );
+          }
+        } finally {
+          _removePendingUpload(upload.id);
+          _cancelledPendingUploadIds.remove(upload.id);
+        }
+      }
     } finally {
-      _removePendingUpload(pendingId);
-      _cancelledPendingUploadIds.remove(pendingId);
       _setUploading(false);
+      _scrollToBottom();
     }
-    _scrollToBottom();
   }
 
   Future<void> _pickAndSendAudioWithPending() async {
@@ -1368,32 +1486,30 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.audio,
       withData: true,
-      allowMultiple: false,
+      allowMultiple: true,
     );
     if (result == null || result.files.isEmpty) return;
-    final picked = result.files.first;
-    final bytes = picked.bytes;
-    if (bytes == null || bytes.isEmpty) return;
-    final durationMs = await _readAudioDurationMs(picked.path);
+    final uploads = <_PendingUpload>[];
+    for (final picked in result.files) {
+      final bytes = picked.bytes;
+      if (bytes == null || bytes.isEmpty) continue;
+      final durationMs = await _readAudioDurationMs(picked.path);
+      uploads.add(
+        _createPendingAudioUpload(
+          bytes: bytes,
+          fileName: picked.name,
+          mimeType: lookupMimeType(picked.name) ?? 'audio/mpeg',
+          durationMs: durationMs,
+        ),
+      );
+    }
+    if (uploads.isEmpty) return;
     if (_isUploadBusy) {
       _showSnackBar('Please wait for the current upload to finish.');
       return;
     }
 
-    try {
-      await _sendAudioWithPending(
-        room.id,
-        bytes: bytes,
-        fileName: picked.name,
-        mimeType: lookupMimeType(picked.name) ?? 'audio/mpeg',
-        durationMs: durationMs,
-        isVoiceMessage: false,
-      );
-    } catch (e) {
-      if (e is! MatrixUploadCancelledException) {
-        _showSnackBar('Failed to send audio: $e');
-      }
-    }
+    _startPendingQueuedUploads(room.id, uploads);
   }
 
   Future<int> _readAudioDurationMs(String? path) async {
@@ -1420,29 +1536,28 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.any,
       withData: true,
-      allowMultiple: false,
+      allowMultiple: true,
     );
     if (result == null || result.files.isEmpty) return;
-    final picked = result.files.first;
-    final bytes = picked.bytes;
-    if (bytes == null || bytes.isEmpty) return;
+    final uploads = <_PendingUpload>[];
+    for (final picked in result.files) {
+      final bytes = picked.bytes;
+      if (bytes == null || bytes.isEmpty) continue;
+      uploads.add(
+        _createPendingFileUpload(
+          bytes: bytes,
+          fileName: picked.name,
+          mimeType: lookupMimeType(picked.name) ?? 'application/octet-stream',
+        ),
+      );
+    }
+    if (uploads.isEmpty) return;
     if (_isUploadBusy) {
       _showSnackBar('Please wait for the current upload to finish.');
       return;
     }
 
-    try {
-      await _sendFileWithPending(
-        room.id,
-        bytes: bytes,
-        fileName: picked.name,
-        mimeType: lookupMimeType(picked.name) ?? 'application/octet-stream',
-      );
-    } catch (e) {
-      if (e is! MatrixUploadCancelledException) {
-        _showSnackBar('Failed to send file: $e');
-      }
-    }
+    _startPendingQueuedUploads(room.id, uploads);
   }
 
   void _showAttachmentSheet() {
@@ -2017,6 +2132,16 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     return items;
   }
 
+  Key _messageListItemKey(_MessageListItem item) {
+    final albumEvents = item.albumEvents;
+    if (albumEvents != null) {
+      return ValueKey(
+        'album_${albumEvents.map((event) => event.eventId).join('_')}',
+      );
+    }
+    return ValueKey('message_${item.event?.eventId}');
+  }
+
   bool _canAppendToMediaAlbum(Event previous, Event next) {
     if (!_canGroupInMediaAlbum(next)) return false;
     if (previous.senderId != next.senderId) return false;
@@ -2266,6 +2391,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       rowWidgets.add(
         _buildAlbumRow(
           events.sublist(index, index + rowSize),
+          albumEvents: events,
           height: _albumRowHeight(events.length, rowIndex, albumWidth),
         ),
       );
@@ -2299,7 +2425,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           children: [
             Expanded(
               flex: 2,
-              child: _buildAlbumTile(events.first),
+              child: _buildAlbumTile(events.first, events),
             ),
             _albumSeparator(width: 1.5),
             Expanded(
@@ -2307,7 +2433,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   for (var i = 1; i < events.length; i++) ...[
-                    Expanded(child: _buildAlbumTile(events[i])),
+                    Expanded(child: _buildAlbumTile(events[i], events)),
                     if (i != events.length - 1) _albumSeparator(height: 1.5),
                   ],
                 ],
@@ -2352,14 +2478,18 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     return width * 0.38;
   }
 
-  Widget _buildAlbumRow(List<Event> rowEvents, {required double height}) {
+  Widget _buildAlbumRow(
+    List<Event> rowEvents, {
+    required List<Event> albumEvents,
+    required double height,
+  }) {
     return SizedBox(
       height: height,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (var i = 0; i < rowEvents.length; i++) ...[
-            Expanded(child: _buildAlbumTile(rowEvents[i])),
+            Expanded(child: _buildAlbumTile(rowEvents[i], albumEvents)),
             if (i != rowEvents.length - 1) _albumSeparator(width: 1.5),
           ],
         ],
@@ -2375,13 +2505,18 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     );
   }
 
-  Widget _buildAlbumTile(Event event) {
+  Widget _buildAlbumTile(Event event, List<Event> albumEvents) {
     final displayEvent = _displayEventFor(event);
     final isVideo = displayEvent.messageType == MessageTypes.Video;
+    final canShowMenu = event.type == EventTypes.Message ||
+        _copyableMessageText(event) != null ||
+        _canForwardMessage(event) ||
+        _canDeleteMessage(event) ||
+        _canDownloadAttachment(event);
     return GestureDetector(
-      onTap: isVideo
-          ? () => _openVideoPlayer(displayEvent)
-          : () => _openAlbumImage(displayEvent),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _openAlbumMediaViewer(albumEvents, event),
+      onLongPress: canShowMenu ? () => _showMessageOptions(event) : null,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -2464,10 +2599,30 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     );
   }
 
-  Future<void> _openAlbumImage(Event event) async {
-    final bytes = await _mediaHandler.loadImageBytes(event);
-    if (!mounted || bytes == null || bytes.isEmpty) return;
-    _openFullscreenImage(bytes, event.body, event);
+  void _openAlbumMediaViewer(List<Event> events, Event initialEvent) {
+    var initialIndex = events.indexWhere(
+      (event) => event.eventId == initialEvent.eventId,
+    );
+    if (initialIndex < 0) {
+      initialIndex = 0;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AlbumMediaViewer(
+          events: events,
+          initialIndex: initialIndex,
+          loadImageBytes: _mediaHandler.loadImageBytes,
+          loadVideoThumbnail: _mediaHandler.loadVideoThumbnail,
+          downloadAttachment: _downloadAttachment,
+          playVideo: _openVideoPlayer,
+          onReply: (event) async => _setReplyTo(event),
+          onDelete: (event) async => _deleteMessage(event),
+          canDelete: _canDeleteMessage,
+        ),
+      ),
+    );
   }
 
   List<GroupMember> _mentionMembersForCurrentRoom() {
@@ -2494,13 +2649,6 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
               _buildPendingAlbumGrid(
                 album.uploads,
                 currentUploadId: album.currentUploadId,
-              ),
-              Positioned(
-                top: 8,
-                right: 8,
-                child: _PendingAlbumCancelButton(
-                  onCancel: () => _cancelPendingAlbumUpload(album.id),
-                ),
               ),
               Positioned(
                 bottom: 8,
@@ -3150,7 +3298,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                leading: const Icon(Icons.reply, color: kLimeGreen),
+                leading: const Icon(Icons.reply, color: kWhite),
                 title: Text(
                   'Reply',
                   style: GoogleFonts.inter(color: kWhite),
@@ -3162,7 +3310,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
               ),
               if (canCopy)
                 ListTile(
-                  leading: const Icon(Icons.copy, color: kLimeGreen),
+                  leading: const Icon(Icons.copy, color: kWhite),
                   title: Text(
                     'Copy',
                     style: GoogleFonts.inter(color: kWhite),
@@ -3174,8 +3322,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                 ),
               if (_isDirectRoom)
                 ListTile(
-                  leading: const Icon(Icons.add_reaction_outlined,
-                      color: kLimeGreen),
+                  leading:
+                      const Icon(Icons.add_reaction_outlined, color: kWhite),
                   title: Text(
                     'Add Reaction',
                     style: GoogleFonts.inter(color: kWhite),
@@ -3189,7 +3337,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                 ListTile(
                   leading: Transform.scale(
                     scaleX: -1,
-                    child: const Icon(Icons.reply, color: kLimeGreen),
+                    child: const Icon(Icons.reply, color: kWhite),
                   ),
                   title: Text(
                     'Forward',
@@ -3208,7 +3356,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                     return ListTile(
                       leading: Icon(
                         isSaved ? Icons.bookmark : Icons.bookmark_border,
-                        color: kLimeGreen,
+                        color: kWhite,
                       ),
                       title: Text(
                         isSaved ? 'Saved' : 'Save',
@@ -3223,7 +3371,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                 ),
               if (canDownload)
                 ListTile(
-                  leading: const Icon(Icons.download, color: kLimeGreen),
+                  leading: const Icon(Icons.download, color: kWhite),
                   title: Text(
                     'Download',
                     style: GoogleFonts.inter(color: kWhite),
@@ -3235,7 +3383,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                 ),
               if (canDownload && !kIsWeb)
                 ListTile(
-                  leading: const Icon(Icons.share, color: kLimeGreen),
+                  leading: const Icon(Icons.share, color: kWhite),
                   title: Text(
                     'Share',
                     style: GoogleFonts.inter(color: kWhite),
@@ -3247,7 +3395,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                 ),
               if (canEdit)
                 ListTile(
-                  leading: const Icon(Icons.edit, color: kLimeGreen),
+                  leading: const Icon(Icons.edit, color: kWhite),
                   title: Text(
                     'Edit Message',
                     style: GoogleFonts.inter(color: kWhite),
@@ -3261,7 +3409,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                 ListTile(
                   leading: Icon(
                     isPinned ? Icons.push_pin_outlined : Icons.push_pin,
-                    color: kLimeGreen,
+                    color: kWhite,
                   ),
                   title: Text(
                     isPinned ? 'Unpin Message' : 'Pin Message',
@@ -3414,39 +3562,45 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     );
     final controller = TextEditingController(text: currentText);
 
-    final newText = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: kDarkerGrey,
-        title: Text('Edit Message', style: GoogleFonts.inter(color: kWhite)),
-        content: TextField(
-          controller: controller,
-          style: const TextStyle(color: kWhite),
-          maxLines: 5,
-          decoration: InputDecoration(
-            hintText: 'Enter new message',
-            hintStyle: const TextStyle(color: Colors.white54),
-            filled: true,
-            fillColor: kDarkGrey,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
+    String? newText;
+    try {
+      newText = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: kDarkerGrey,
+          title: Text('Edit Message', style: GoogleFonts.inter(color: kWhite)),
+          content: TextField(
+            controller: controller,
+            style: const TextStyle(color: kWhite),
+            maxLines: 5,
+            decoration: InputDecoration(
+              hintText: 'Enter new message',
+              hintStyle: const TextStyle(color: Colors.white54),
+              filled: true,
+              fillColor: kDarkGrey,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
             ),
+            autofocus: true,
           ),
-          autofocus: true,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child:
+                  Text('Cancel', style: GoogleFonts.inter(color: kLightGrey)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+              child: Text('Save', style: GoogleFonts.inter(color: kLimeGreen)),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel', style: GoogleFonts.inter(color: kLightGrey)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: Text('Save', style: GoogleFonts.inter(color: kLimeGreen)),
-          ),
-        ],
-      ),
-    );
+      );
+    } finally {
+      controller.dispose();
+    }
 
     if (newText == null || newText.isEmpty || newText == currentText) return;
 
@@ -3618,7 +3772,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         return const ReadReceipt(status: ReadReceiptStatus.sent);
       }
 
-      final isRead = _directChatService.isMessageRead(event, _room!);
+      final isRead = _directChatService.isMessageRead(
+        event,
+        _room!,
+        timelineEvents: _timeline?.events,
+      );
 
       if (isRead) {
         return const ReadReceipt(status: ReadReceiptStatus.read);
@@ -3675,6 +3833,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
   Future<void> _handleDeleteGroup() async {
     if (_room == null) return;
+    final isChannel = _room!.isChannel;
+    final roomType = isChannel ? 'channel' : 'group';
+    final roomTypeTitle = isChannel ? 'Channel' : 'Group';
 
     // Show confirmation dialog
     final confirmed = await showDialog<bool>(
@@ -3682,11 +3843,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: kDarkerGrey,
         title: Text(
-          'Delete Group/Channel?',
+          'Delete $roomTypeTitle?',
           style: GoogleFonts.inter(color: kWhite),
         ),
         content: Text(
-          'This will permanently delete the group/channel for all members. This action cannot be undone.',
+          'This will permanently delete the $roomType for all ${isChannel ? 'subscribers' : 'members'}. This action cannot be undone.',
           style: GoogleFonts.inter(color: kLightGrey),
         ),
         actions: [
@@ -3727,7 +3888,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  'Deleting group...',
+                  'Deleting $roomType...',
                   style: GoogleFonts.inter(color: kWhite, fontSize: 13),
                 ),
               ],
@@ -3746,8 +3907,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Group/Channel deleted successfully'),
+          SnackBar(
+            content: Text('$roomTypeTitle deleted successfully'),
             backgroundColor: kLimeGreen,
           ),
         );
@@ -3757,7 +3918,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to delete group: $e'),
+            content: Text('Failed to delete $roomType: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -3771,8 +3932,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     _amplitudeSub?.cancel();
     unawaited(_audioRecorder.dispose());
     _textCtrl.dispose();
-    _scrollCtrl.removeListener(_handlePinnedBannerScroll);
+    _scrollCtrl.removeListener(_handleChatScroll);
     _scrollCtrl.dispose();
+    _mentionAutocomplete.dispose();
     _eventSub?.cancel();
     _typingTimer?.cancel();
     _highlightTimer?.cancel();
@@ -3974,7 +4136,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                   ),
             body: Stack(
               children: [
-                const Positioned.fill(child: ChatSpaceBackground()),
+                const Positioned.fill(
+                  child: RepaintBoundary(child: ChatSpaceBackground()),
+                ),
                 Column(
                   children: [
                     // Pinned Messages Banner
@@ -4017,6 +4181,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                               : RepaintBoundary(
                                   child: ListView.builder(
                                     controller: _scrollCtrl,
+                                    cacheExtent: 900,
+                                    keyboardDismissBehavior:
+                                        ScrollViewKeyboardDismissBehavior
+                                            .onDrag,
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 0,
                                       vertical: 8,
@@ -4028,6 +4196,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                                       if (i < messageItems.length) {
                                         final item = messageItems[i];
                                         return RepaintBoundary(
+                                          key: _messageListItemKey(item),
                                           child: item.albumEvents == null
                                               ? _buildBubble(item.event!)
                                               : _buildMediaAlbumBubble(
@@ -4039,17 +4208,27 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                                           i - messageItems.length;
                                       if (pendingAlbumIndex <
                                           _pendingAlbumUploads.length) {
-                                        return RepaintBoundary(
-                                          child: _buildPendingAlbumUploadBubble(
+                                        final pendingAlbum =
                                             _pendingAlbumUploads[
-                                                pendingAlbumIndex],
+                                                pendingAlbumIndex];
+                                        return RepaintBoundary(
+                                          key: ValueKey(
+                                            'pending_album_${pendingAlbum.id}',
+                                          ),
+                                          child: _buildPendingAlbumUploadBubble(
+                                            pendingAlbum,
                                           ),
                                         );
                                       }
+                                      final pendingUpload = _pendingUploads[
+                                          pendingAlbumIndex -
+                                              _pendingAlbumUploads.length];
                                       return RepaintBoundary(
+                                        key: ValueKey(
+                                          'pending_upload_${pendingUpload.id}',
+                                        ),
                                         child: _buildPendingUploadBubble(
-                                          _pendingUploads[pendingAlbumIndex -
-                                              _pendingAlbumUploads.length],
+                                          pendingUpload,
                                         ),
                                       );
                                     },
@@ -4063,12 +4242,19 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                         onCancel: _cancelReply,
                       ),
                     // Mention Autocomplete
-                    if (_showMentionAutocomplete && _groupMembers.isNotEmpty)
-                      MentionAutocomplete(
-                        members: _groupMembers,
-                        query: _mentionQuery,
-                        onMemberSelected: _insertMention,
-                      ),
+                    ValueListenableBuilder<_MentionAutocompleteState>(
+                      valueListenable: _mentionAutocomplete,
+                      builder: (context, mention, _) {
+                        if (!mention.visible || _groupMembers.isEmpty) {
+                          return const SizedBox.shrink();
+                        }
+                        return MentionAutocomplete(
+                          members: _groupMembers,
+                          query: mention.query,
+                          onMemberSelected: _insertMention,
+                        );
+                      },
+                    ),
                     // Typing Indicator (Direct Chats Only)
                     if (_isDirectRoom && _typingUsers.isNotEmpty)
                       TypingIndicator(userName: _typingUsers.first),
@@ -4100,7 +4286,6 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                     else if (_room!.canSendEvent('m.room.message'))
                       ChatInputBar(
                         textController: _textCtrl,
-                        hasText: _hasText,
                         uploading: _isUploadBusy,
                         recording: _recording,
                         recordingPaused: _recordingPaused,
@@ -4191,6 +4376,28 @@ class _MentionActionCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _MentionAutocompleteState {
+  final bool visible;
+  final String query;
+
+  const _MentionAutocompleteState._({
+    required this.visible,
+    required this.query,
+  });
+
+  static const hidden = _MentionAutocompleteState._(
+    visible: false,
+    query: '',
+  );
+
+  factory _MentionAutocompleteState.visible(String query) {
+    return _MentionAutocompleteState._(
+      visible: true,
+      query: query,
     );
   }
 }
@@ -4517,32 +4724,6 @@ class _PendingCancelProgressButton extends StatelessWidget {
               size: 26,
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PendingAlbumCancelButton extends StatelessWidget {
-  final VoidCallback onCancel;
-
-  const _PendingAlbumCancelButton({required this.onCancel});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onCancel,
-      child: Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.58),
-          shape: BoxShape.circle,
-        ),
-        child: const Icon(
-          Icons.close_rounded,
-          color: Colors.white,
-          size: 22,
         ),
       ),
     );

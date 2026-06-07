@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as webrtc;
@@ -112,13 +113,21 @@ class VoipService {
     return _rejectedGroupCallIds.contains(groupCall.groupCallId);
   }
 
+  static const AndroidAudioAttributes _ringtoneAudioAttributes =
+      AndroidAudioAttributes(
+    contentType: AndroidAudioContentType.music,
+    usage: AndroidAudioUsage.media,
+  );
+
   Future<void> _startRingtone() async {
     if (_ringtoneStarting || _ringtonePlayer?.playing == true) return;
     _ringtoneStarting = true;
     try {
+      await _prepareRingtoneAudioRoute();
       final player = _ringtonePlayer ??= AudioPlayer();
+      await player.setAndroidAudioAttributes(_ringtoneAudioAttributes);
       await player.setLoopMode(LoopMode.one);
-      await player.setVolume(1.0);
+      await player.setVolume(5.0);
       try {
         await player.setAsset('assets/images/Tin Cup Banjo.mp3');
       } catch (e) {
@@ -130,11 +139,49 @@ class VoipService {
           debugPrint('[VoipService] Failed while playing ringtone: $e');
         }),
       );
+      unawaited(_keepRingtoneOnSpeaker());
     } catch (e) {
       debugPrint('[VoipService] Failed to start ringtone: $e');
     } finally {
       _ringtoneStarting = false;
     }
+  }
+
+  Future<void> _prepareRingtoneAudioRoute() async {
+    try {
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration.music());
+      await session.setActive(
+        true,
+        androidAudioAttributes: _ringtoneAudioAttributes,
+      );
+    } catch (e) {
+      debugPrint(
+          '[VoipService] Failed to configure ringtone audio session: $e');
+    }
+    try {
+      await AndroidAudioManager().setMode(AndroidAudioHardwareMode.normal);
+    } catch (e) {
+      debugPrint('[VoipService] Failed to set ringtone audio mode: $e');
+    }
+    await _routeRingtoneToSpeaker();
+  }
+
+  Future<void> _routeRingtoneToSpeaker() async {
+    try {
+      await webrtc.Helper.setSpeakerphoneOn(true);
+    } catch (e) {
+      debugPrint('[VoipService] Failed to route ringtone to speaker: $e');
+    }
+  }
+
+  Future<void> _keepRingtoneOnSpeaker() async {
+    await Future.delayed(const Duration(milliseconds: 80));
+    if (_ringtonePlayer?.playing != true) return;
+    await _routeRingtoneToSpeaker();
+    await Future.delayed(const Duration(milliseconds: 180));
+    if (_ringtonePlayer?.playing != true) return;
+    await _routeRingtoneToSpeaker();
   }
 
   Future<void> _stopRingtone() async {
@@ -316,6 +363,9 @@ class VoipService {
       if (state == CallState.kConnected && _callConnectedAt == null) {
         _callConnectedAt = DateTime.now();
         unawaited(_stopRingtone());
+        if (session.type == CallType.kVoice) {
+          unawaited(_routeDirectVoiceCallToEarpiece());
+        }
         if (incomingCall.value == session) {
           incomingCall.value = null;
         }
@@ -423,6 +473,97 @@ class VoipService {
     _pushCallScreen(session);
   }
 
+  Future<void> handleNativeCallNotificationAction(
+    Map<String, String> payload,
+  ) async {
+    final action = (payload['xmo_action'] ?? payload['action'] ?? 'open')
+        .toLowerCase()
+        .trim();
+    if (action.isEmpty) return;
+
+    final roomId = _nativeCallRoomId(payload);
+    final deadline = DateTime.now().add(const Duration(seconds: 14));
+    while (DateTime.now().isBefore(deadline)) {
+      final session = _matchingNativeIncomingSession(roomId);
+      if (session != null) {
+        if (action == 'answer') {
+          await answerIncomingCall(session);
+        } else if (action == 'decline') {
+          await rejectIncomingCall(session);
+        } else {
+          await _pushCallScreen(session);
+        }
+        return;
+      }
+
+      final groupCall = _matchingNativeIncomingGroupCall(roomId);
+      if (groupCall != null) {
+        if (action == 'answer') {
+          await answerIncomingGroupCall(groupCall);
+        } else if (action == 'decline') {
+          rejectGroupCall(groupCall);
+        } else {
+          await _pushIncomingGroupCallScreen(groupCall);
+        }
+        return;
+      }
+
+      await Future.delayed(const Duration(milliseconds: 250));
+    }
+
+    debugPrint(
+      '[VoipService] Native call action had no matching incoming call: '
+      '$payload',
+    );
+  }
+
+  String? _nativeCallRoomId(Map<String, String> payload) {
+    for (final key in const [
+      'room_id',
+      'roomId',
+      'room',
+      'room_id!',
+      'roomId!',
+    ]) {
+      final value = payload[key]?.trim();
+      if (value != null && value.isNotEmpty) return value;
+    }
+    return null;
+  }
+
+  CallSession? _matchingNativeIncomingSession(String? roomId) {
+    final candidates = <CallSession?>[
+      incomingCall.value,
+      _activeSession,
+    ];
+    for (final session in candidates) {
+      if (session == null || session.isGroupCall) continue;
+      if (session.direction != CallDirection.kIncoming) continue;
+      if (session.state != CallState.kRinging) continue;
+      if (roomId == null || roomId.isEmpty || session.room.id == roomId) {
+        return session;
+      }
+    }
+    return null;
+  }
+
+  GroupCall? _matchingNativeIncomingGroupCall(String? roomId) {
+    final candidates = <GroupCall?>[
+      incomingGroupCall.value,
+      if (roomId != null && roomId.isNotEmpty)
+        _voip?.getGroupCallForRoom(roomId),
+    ];
+
+    for (final groupCall in candidates) {
+      if (groupCall == null || groupCall.terminated) continue;
+      if (groupCall.state == GroupCallState.Ended) continue;
+      if (roomId == null || roomId.isEmpty || groupCall.room.id == roomId) {
+        return groupCall;
+      }
+    }
+    return null;
+  }
+
   // ── Navigation ───────────────────────────────────────────────────────────
 
   Future<void> _openCallScreen(CallSession session) async {
@@ -473,6 +614,9 @@ class VoipService {
     }
     incomingCall.value = null;
     await session.answer();
+    if (session.type == CallType.kVoice) {
+      unawaited(_routeDirectVoiceCallToEarpiece());
+    }
     unawaited(
       CallHistoryService().recordDirectCall(
         session,
@@ -481,6 +625,20 @@ class VoipService {
       ),
     );
     await _pushCallScreen(session);
+  }
+
+  Future<void> _routeDirectVoiceCallToEarpiece() async {
+    try {
+      await AndroidAudioManager()
+          .setMode(AndroidAudioHardwareMode.inCommunication);
+    } catch (e) {
+      debugPrint('[VoipService] Failed to set direct voice audio mode: $e');
+    }
+    try {
+      await webrtc.Helper.setSpeakerphoneOn(false);
+    } catch (e) {
+      debugPrint('[VoipService] Failed to route direct voice to earpiece: $e');
+    }
   }
 
   Future<void> rejectIncomingCall(CallSession session) async {
@@ -730,7 +888,7 @@ double _ringtoneEnvelope(double ms) {
   final localMs = ms >= 720 ? ms - 720 : ms;
   final attack = (localMs / 55).clamp(0.0, 1.0);
   final release = ((520 - localMs) / 90).clamp(0.0, 1.0);
-  return math.min(attack, release) * 0.48;
+  return math.min(attack, release) * 0.85;
 }
 
 class _RingtoneAudioSource extends StreamAudioSource {

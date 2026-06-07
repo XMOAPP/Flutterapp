@@ -21,13 +21,12 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen>
   @override
   void initState() {
     super.initState();
-    _bgCtrl = AnimationController(
-        vsync: this, duration: const Duration(seconds: 4))
-      ..repeat();
+    _bgCtrl =
+        AnimationController(vsync: this, duration: const Duration(seconds: 4))
+          ..repeat();
     _fadeCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 800));
-    _fadeAnim =
-        CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
+    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
     _fadeCtrl.forward();
   }
 
@@ -45,8 +44,7 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen>
         pageBuilder: (_, __, ___) => const LoginScreen(),
         transitionDuration: const Duration(milliseconds: 450),
         transitionsBuilder: (_, anim, __, child) => SlideTransition(
-          position: Tween<Offset>(
-                  begin: const Offset(1, 0), end: Offset.zero)
+          position: Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero)
               .animate(
                   CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
           child: child,
@@ -62,8 +60,7 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen>
         pageBuilder: (_, __, ___) => const WalletAuthScreen(),
         transitionDuration: const Duration(milliseconds: 450),
         transitionsBuilder: (_, anim, __, child) => SlideTransition(
-          position: Tween<Offset>(
-                  begin: const Offset(1, 0), end: Offset.zero)
+          position: Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero)
               .animate(
                   CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
           child: child,
@@ -134,13 +131,11 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen>
                       child: Column(
                         children: [
                           _AuthButton(
-                            title: 'Sign Up / Sign In',
+                            title: 'Sign Up / Login',
                             onTap: _goToSignUp,
                             isFirst: true,
                           ),
-
                           const SizedBox(height: 16),
-
                           _AuthButton(
                             title: 'Connect Wallet',
                             onTap: _goToWallet,
@@ -240,8 +235,7 @@ class _OrbPainter extends CustomPainter {
       final paint = Paint()
         ..shader = RadialGradient(
           colors: [color.withValues(alpha: 0.35), Colors.transparent],
-        ).createShader(
-            Rect.fromCircle(center: Offset(cx, cy), radius: r));
+        ).createShader(Rect.fromCircle(center: Offset(cx, cy), radius: r));
       canvas.drawCircle(Offset(cx, cy), r, paint);
     }
 

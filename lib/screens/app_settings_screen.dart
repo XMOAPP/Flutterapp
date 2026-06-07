@@ -13,6 +13,7 @@ import 'package:matrix/matrix.dart';
 import 'package:mime/mime.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 
 import '../providers/matrix_provider.dart';
@@ -20,6 +21,7 @@ import '../providers/story_provider.dart';
 import '../services/app_settings_service.dart';
 import '../services/direct_chat_service.dart';
 import '../services/privacy_service.dart';
+import '../services/push_notification_service.dart';
 import '../services/story_service.dart';
 import '../theme.dart';
 import '../widgets/matrix_chat/fullscreen_video_player.dart';
@@ -63,6 +65,20 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     await _settingsService.save(settings);
   }
 
+  Future<void> _setNotificationsEnabled(bool enabled) async {
+    final current = _settings;
+    if (current == null) return;
+
+    final updated = current.copyWith(notificationsEnabled: enabled);
+    await _updateSettings(updated);
+
+    if (enabled) {
+      await PushNotificationService().registerCurrentUser();
+    } else {
+      await PushNotificationService().unregisterCurrentUser();
+    }
+  }
+
   // ignore: unused_element
   Future<void> _clearMediaCache() async {
     final memoryCount = MediaHandler.memoryCacheCount;
@@ -80,6 +96,20 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         backgroundColor: kLimeGreen,
       ),
     );
+  }
+
+  Future<void> _openLegalUrl(String url) async {
+    final uri = Uri.parse(url);
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication) ||
+        await launchUrl(uri, mode: LaunchMode.platformDefault);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open link'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   @override
@@ -129,6 +159,17 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                     );
                   },
                 ),
+                _switchTile(
+                  icon: settings.notificationsEnabled
+                      ? Icons.notifications
+                      : Icons.notifications_off,
+                  title: 'Notifications',
+                  subtitle: settings.notificationsEnabled
+                      ? 'Messages, media, files, audio, and calls'
+                      : 'Notifications are turned off',
+                  value: settings.notificationsEnabled,
+                  onChanged: _setNotificationsEnabled,
+                ),
                 _navTile(
                   icon: Icons.block,
                   title: 'Blocked Users',
@@ -156,6 +197,22 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                       ),
                     );
                   },
+                ),
+                _navTile(
+                  icon: Icons.description,
+                  title: 'Terms of Service',
+                  subtitle: 'Read the XMO terms and conditions',
+                  onTap: () => _openLegalUrl(
+                    'https://xmo.dpdns.org/terms-of-service',
+                  ),
+                ),
+                _navTile(
+                  icon: Icons.privacy_tip,
+                  title: 'Privacy Policy',
+                  subtitle: 'Read how XMO handles privacy and data',
+                  onTap: () => _openLegalUrl(
+                    'https://xmo.dpdns.org/privacy-policy',
+                  ),
                 ),
                 _infoTile(
                   icon: Icons.info,
@@ -265,7 +322,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         dense: true,
         visualDensity: const VisualDensity(horizontal: 0, vertical: -3),
         onTap: onTap,
-        leading: Icon(icon, color: kLimeGreen, size: 19),
+        leading: Icon(icon, color: kWhite, size: 19),
         title: Text(
           title,
           style: GoogleFonts.inter(
@@ -572,7 +629,7 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
         visualDensity: const VisualDensity(horizontal: 0, vertical: -3),
         leading: Icon(
           _settings.accountIsPublic ? Icons.public : Icons.lock,
-          color: kLimeGreen,
+          color: kWhite,
           size: 19,
         ),
         title: Text(
@@ -632,7 +689,7 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
         dense: true,
         visualDensity: const VisualDensity(horizontal: 0, vertical: -3),
         onTap: onTap,
-        leading: Icon(icon, color: kLimeGreen, size: 19),
+        leading: Icon(icon, color: kWhite, size: 19),
         title: Text(
           title,
           style: GoogleFonts.inter(

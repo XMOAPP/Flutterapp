@@ -84,12 +84,13 @@ class DirectChatService {
   Future<List<SharedMediaItem>> getSharedMedia(
     String roomId, {
     MediaType? filterType,
+    Timeline? timeline,
   }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
 
-    final timeline = await room.getTimeline();
-    final mediaEvents = timeline.events.where((e) {
+    final sourceTimeline = timeline ?? await room.getTimeline();
+    final mediaEvents = sourceTimeline.events.where((e) {
       if (e.redacted) return false;
       final msgType = e.messageType;
       return msgType == MessageTypes.Image ||
@@ -359,15 +360,37 @@ class DirectChatService {
   }
 
   /// Checks if message has been read
-  bool isMessageRead(Event event, Room room) {
+  bool isMessageRead(
+    Event event,
+    Room room, {
+    List<Event>? timelineEvents,
+  }) {
     final otherUserId = room.directChatMatrixID;
 
     if (otherUserId == null) return false;
 
     try {
-      return event.receipts.any(
+      final hasExactReceipt = event.receipts.any(
         (receipt) => receipt.user.senderId == otherUserId,
       );
+      if (hasExactReceipt) return true;
+
+      final latestReadEventId =
+          room.receiptState.global.otherUsers[otherUserId]?.eventId;
+      if (latestReadEventId == null || latestReadEventId.isEmpty) {
+        return false;
+      }
+      if (latestReadEventId == event.eventId) return true;
+
+      final events = timelineEvents;
+      if (events == null || events.isEmpty) return false;
+
+      final latestReadEvent = events
+          .where((candidate) => candidate.eventId == latestReadEventId)
+          .firstOrNull;
+      if (latestReadEvent == null) return false;
+
+      return !event.originServerTs.isAfter(latestReadEvent.originServerTs);
     } catch (e) {
       debugPrint('[DirectChat] Error checking read status: $e');
       return false;

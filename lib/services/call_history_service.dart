@@ -12,6 +12,7 @@ enum CallHistoryStatus { answered, missed, rejected, ended }
 
 class CallHistoryEntry {
   final String id;
+  final String? ownerUserId;
   final String roomId;
   final String roomName;
   final String? avatarUrl;
@@ -24,6 +25,7 @@ class CallHistoryEntry {
 
   const CallHistoryEntry({
     required this.id,
+    required this.ownerUserId,
     required this.roomId,
     required this.roomName,
     required this.kind,
@@ -68,6 +70,7 @@ class CallHistoryEntry {
   Map<String, dynamic> toJson() {
     return {
       'id': id,
+      'ownerUserId': ownerUserId,
       'roomId': roomId,
       'roomName': roomName,
       'avatarUrl': avatarUrl,
@@ -84,6 +87,7 @@ class CallHistoryEntry {
     final durationMs = json['durationMs'];
     return CallHistoryEntry(
       id: json['id'] as String? ?? '',
+      ownerUserId: json['ownerUserId'] as String?,
       roomId: json['roomId'] as String? ?? '',
       roomName: json['roomName'] as String? ?? 'Unknown',
       avatarUrl: json['avatarUrl'] as String?,
@@ -129,6 +133,7 @@ class CallHistoryService {
 
   Box? _box;
   bool _loaded = false;
+  String? _ownerUserId;
 
   Future<void> ensureLoaded() async {
     if (_loaded) return;
@@ -140,6 +145,17 @@ class CallHistoryService {
   }
 
   int get count => entries.value.length;
+
+  Future<void> setCurrentUser(String? userId) async {
+    final normalized = userId?.trim();
+    final nextOwner = normalized == null || normalized.isEmpty
+        ? null
+        : normalized.toLowerCase();
+    if (_ownerUserId == nextOwner && _loaded) return;
+    _ownerUserId = nextOwner;
+    await ensureLoaded();
+    _refreshFromBox();
+  }
 
   Future<void> recordDirectCall(
     CallSession session, {
@@ -182,10 +198,17 @@ class CallHistoryService {
     Duration? duration,
   }) async {
     await ensureLoaded();
+    final ownerUserId =
+        _ownerUserId ?? room.client.userID?.trim().toLowerCase();
+    if (ownerUserId == null || ownerUserId.isEmpty) {
+      return;
+    }
     final entry = CallHistoryEntry(
       id: '${DateTime.now().microsecondsSinceEpoch}_${room.id}',
+      ownerUserId: ownerUserId,
       roomId: room.id,
-      roomName: MatrixService.cleanName(MatrixService().getResolvedDisplayName(room)),
+      roomName:
+          MatrixService.cleanName(MatrixService().getResolvedDisplayName(room)),
       avatarUrl: room.avatar?.toString(),
       kind: kind,
       direction: direction,
@@ -202,17 +225,38 @@ class CallHistoryService {
 
   Future<void> clear() async {
     await ensureLoaded();
-    await _box!.clear();
+    final ownerUserId = _ownerUserId;
+    if (ownerUserId == null) {
+      entries.value = const [];
+      return;
+    }
+    final box = _box!;
+    final keysToDelete = <dynamic>[];
+    for (final key in box.keys) {
+      final value = box.get(key);
+      if (value is! Map) continue;
+      final entry = CallHistoryEntry.fromJson(value);
+      if (entry.ownerUserId == ownerUserId) {
+        keysToDelete.add(key);
+      }
+    }
+    await box.deleteAll(keysToDelete);
     _refreshFromBox();
   }
 
   void _refreshFromBox() {
     final box = _box;
     if (box == null) return;
+    final ownerUserId = _ownerUserId;
+    if (ownerUserId == null) {
+      entries.value = const [];
+      return;
+    }
     final next = box.values
         .whereType<Map>()
         .map(CallHistoryEntry.fromJson)
-        .where((entry) => entry.id.isNotEmpty)
+        .where(
+            (entry) => entry.id.isNotEmpty && entry.ownerUserId == ownerUserId)
         .toList()
       ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     entries.value = List.unmodifiable(next);
@@ -220,13 +264,16 @@ class CallHistoryService {
 
   Future<void> _trim() async {
     final box = _box;
-    if (box == null || box.length <= _maxEntries) return;
+    final ownerUserId = _ownerUserId;
+    if (box == null || ownerUserId == null) return;
     final sorted = box.values
         .whereType<Map>()
         .map(CallHistoryEntry.fromJson)
-        .where((entry) => entry.id.isNotEmpty)
+        .where(
+            (entry) => entry.id.isNotEmpty && entry.ownerUserId == ownerUserId)
         .toList()
       ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    if (sorted.length <= _maxEntries) return;
     for (final entry in sorted.skip(_maxEntries)) {
       await box.delete(entry.id);
     }

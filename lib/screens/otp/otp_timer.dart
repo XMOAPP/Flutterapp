@@ -29,7 +29,7 @@ class OtpTimer extends StatelessWidget {
           Text(
             '${(remaining ~/ 60).toString().padLeft(2, '0')}:${(remaining % 60).toString().padLeft(2, '0')}',
             style: GoogleFonts.inter(
-              color: kLimeGreen,
+              color: kWhite,
               fontSize: 14,
               fontWeight: FontWeight.w700,
             ),
@@ -43,11 +43,9 @@ class OtpTimer extends StatelessWidget {
       child: Text(
         'Resend OTP',
         style: GoogleFonts.inter(
-          color: kLimeGreen,
+          color: kWhite,
           fontSize: 14,
           fontWeight: FontWeight.w700,
-          decoration: TextDecoration.underline,
-          decorationColor: kLimeGreen,
         ),
       ),
     );
