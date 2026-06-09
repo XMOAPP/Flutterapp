@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -16,6 +18,13 @@ import '../native_thumb_stub.dart'
     if (dart.library.io) '../native_thumb_io.dart';
 import '../native_video_metadata_stub.dart'
     if (dart.library.io) '../native_video_metadata_io.dart';
+
+class MatrixDownloadCancelledException implements Exception {
+  const MatrixDownloadCancelledException();
+
+  @override
+  String toString() => 'Download cancelled';
+}
 
 /// Handles all media-related operations (upload, download, caching)
 class MediaHandler {
@@ -91,6 +100,88 @@ class MediaHandler {
       }
       return response.bodyBytes;
     };
+  }
+
+  /// Authenticated Matrix media download with chunk progress and cancellation.
+  ///
+  /// This intentionally exists next to [authenticatedDownload] instead of
+  /// replacing it, because thumbnails and inline previews should keep the
+  /// stable cached path. Use this for manual user-triggered downloads.
+  Future<Uint8List> Function(Uri) authenticatedDownloadWithProgress({
+    void Function(int downloadedBytes, int totalBytes)? onProgress,
+    bool Function()? isCancelled,
+  }) {
+    final token = matrixProvider.service.accessToken;
+    return (Uri url) async {
+      final newUrl = _authenticatedMediaUrl(url, token);
+      debugPrint('[MediaDownload] Streaming: $newUrl');
+      final client = http.Client();
+      Timer? cancelTimer;
+      try {
+        cancelTimer = Timer.periodic(const Duration(milliseconds: 120), (_) {
+          if (isCancelled?.call() == true) {
+            client.close();
+          }
+        });
+        _throwIfDownloadCancelled(isCancelled);
+        final request = http.Request('GET', newUrl);
+        final response = await client.send(request);
+        _throwIfDownloadCancelled(isCancelled);
+
+        if (response.statusCode != 200) {
+          throw Exception(
+            'Media download failed: ${response.statusCode} ${response.reasonPhrase}',
+          );
+        }
+
+        final totalBytes = response.contentLength ?? 0;
+        var downloadedBytes = 0;
+        onProgress?.call(0, totalBytes);
+        final builder = BytesBuilder(copy: false);
+
+        await for (final chunk in response.stream) {
+          _throwIfDownloadCancelled(isCancelled);
+          builder.add(chunk);
+          downloadedBytes += chunk.length;
+          onProgress?.call(downloadedBytes, totalBytes);
+        }
+
+        _throwIfDownloadCancelled(isCancelled);
+        final bytes = builder.takeBytes();
+        onProgress?.call(
+            bytes.length, totalBytes > 0 ? totalBytes : bytes.length);
+        return bytes;
+      } on http.ClientException {
+        _throwIfDownloadCancelled(isCancelled);
+        rethrow;
+      } finally {
+        cancelTimer?.cancel();
+        client.close();
+      }
+    };
+  }
+
+  Uri _authenticatedMediaUrl(Uri url, String? token) {
+    var newUrl = url;
+    final path = url.path;
+    if (path.contains('/_matrix/media/')) {
+      final newPath =
+          path.replaceFirst('/_matrix/media/v3/', '/_matrix/client/v1/media/');
+      final queryParams = Map<String, String>.from(url.queryParameters);
+      if (token != null) queryParams['access_token'] = token;
+      newUrl = url.replace(path: newPath, queryParameters: queryParams);
+    } else if (token != null) {
+      final queryParams = Map<String, String>.from(url.queryParameters);
+      queryParams['access_token'] = token;
+      newUrl = url.replace(queryParameters: queryParams);
+    }
+    return newUrl;
+  }
+
+  void _throwIfDownloadCancelled(bool Function()? isCancelled) {
+    if (isCancelled != null && isCancelled()) {
+      throw const MatrixDownloadCancelledException();
+    }
   }
 
   /// Downloads image bytes from event with caching
@@ -524,6 +615,7 @@ class MediaHandler {
     String caption = '',
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
+    bool rethrowErrors = false,
   }) async {
     if (bytes.isEmpty) return;
 
@@ -541,6 +633,7 @@ class MediaHandler {
       );
     } catch (e) {
       if (e is MatrixUploadCancelledException) rethrow;
+      if (rethrowErrors) rethrow;
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -563,6 +656,7 @@ class MediaHandler {
     String caption = '',
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
+    bool rethrowErrors = false,
   }) async {
     if (bytes.isEmpty) return;
 
@@ -599,6 +693,7 @@ class MediaHandler {
       );
     } catch (e) {
       if (e is MatrixUploadCancelledException) rethrow;
+      if (rethrowErrors) rethrow;
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

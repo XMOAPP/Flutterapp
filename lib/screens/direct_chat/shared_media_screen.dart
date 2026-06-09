@@ -9,8 +9,8 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
-import '../../services/direct_chat_service.dart';
 import '../../services/matrix_service.dart';
+import '../../services/shared_media_index_service.dart';
 import '../../models/direct_chat_models.dart';
 import '../../widgets/incoming_call_fullscreen_scope.dart';
 import '../../widgets/matrix_chat/fullscreen_image_viewer.dart';
@@ -46,14 +46,10 @@ class SharedMediaScreen extends StatefulWidget {
 
 class _SharedMediaScreenState extends State<SharedMediaScreen>
     with SingleTickerProviderStateMixin {
-  static final RegExp _linkPattern = RegExp(
-    r'(?:(?:https?|ftp)://[^\s<>()]+|(?:mailto:|tel:|sms:|geo:|magnet:|matrix:)[^\s<>()]+|www\.[^\s<>()]+|(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+(?:com|org|net|edu|gov|io|co|in|me|app|dev|ai|info|biz|xyz|site|online|store|tech|link|ly|to|tv|uk|us|ca|au|de|fr|jp|cn|ru|br|za|nl|it|es|se|no|fi|ch|be|at|dk|pl|ie|sg|ae|sa|qa|kw|om|bh|pk|bd|lk|np|id|my|th|vn|ph)(?:/[^\s<>()]*)?)',
-    caseSensitive: false,
-  );
-
   late TabController _tabController;
-  late DirectChatService _directChatService;
   late MediaHandler _mediaHandler;
+  final SharedMediaIndexService _indexService =
+      SharedMediaIndexService.instance;
   final Map<String, Future<Uint8List?>> _thumbnailFutures = {};
   bool get _showChatTab =>
       context.read<MatrixProvider>().service.isSavedMessagesRoom(widget.room);
@@ -62,11 +58,12 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
   List<SharedMediaItem> _videos = [];
   List<SharedMediaItem> _audio = [];
   List<SharedMediaItem> _files = [];
-  List<_SharedLinkItem> _links = [];
+  List<SharedMediaLinkItem> _links = [];
   List<Room> _chatRooms = [];
   Map<String, int> _savedCountsByRoomId = {};
   Timeline? _sharedTimeline;
   bool _loading = true;
+  bool _indexingHistory = false;
 
   @override
   void initState() {
@@ -74,7 +71,6 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
     final matrixProvider = context.read<MatrixProvider>();
     final showChatTab = matrixProvider.service.isSavedMessagesRoom(widget.room);
     _tabController = TabController(length: showChatTab ? 6 : 5, vsync: this);
-    _directChatService = DirectChatService(matrixProvider.service);
     _mediaHandler = MediaHandler(
       matrixProvider: matrixProvider,
       context: context,
@@ -83,48 +79,86 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
   }
 
   Future<void> _loadMedia() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _indexingHistory = false;
+    });
     try {
-      final timeline = await _loadSharedMediaTimeline();
-      final media = await _directChatService.getSharedMedia(
-        widget.room.id,
-        timeline: timeline,
+      final matrixProvider = context.read<MatrixProvider>();
+      final ownerUserId = matrixProvider.userId;
+      if (ownerUserId == null || ownerUserId.isEmpty) {
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
+
+      final cached = await _indexService.read(
+        ownerUserId: ownerUserId,
+        roomId: widget.room.id,
       );
-      final links = _loadLinks(timeline);
+      _applyIndexSnapshot(cached);
+
+      final timeline = await widget.room.getTimeline();
+      _sharedTimeline = timeline;
       final chatRooms = _loadChatRooms(timeline);
+      var snapshot = await _indexService.indexTimeline(
+        ownerUserId: ownerUserId,
+        room: widget.room,
+        timeline: timeline,
+        historyComplete: !timeline.canRequestHistory,
+      );
 
       if (mounted) {
         setState(() {
-          _photos = media.where((m) => m.type == MediaType.image).toList();
-          _videos = media.where((m) => m.type == MediaType.video).toList();
-          _audio = media.where((m) => m.type == MediaType.audio).toList();
-          _files = media.where((m) => m.type == MediaType.file).toList();
-          _links = links;
           _chatRooms = chatRooms;
           _savedCountsByRoomId = _pendingSavedCountsByRoomId;
+          _photos = snapshot.photos;
+          _videos = snapshot.videos;
+          _audio = snapshot.audio;
+          _files = snapshot.files;
+          _links = snapshot.links;
           _loading = false;
+          _indexingHistory = !snapshot.historyComplete;
         });
       }
+
+      while (!snapshot.historyComplete && timeline.canRequestHistory) {
+        final beforeEventCount = timeline.events.length;
+        await timeline.requestHistory(historyCount: 100);
+        final loadedAny = timeline.events.length > beforeEventCount;
+        snapshot = await _indexService.indexTimeline(
+          ownerUserId: ownerUserId,
+          room: widget.room,
+          timeline: timeline,
+          historyComplete: !loadedAny || !timeline.canRequestHistory,
+        );
+        _applyIndexSnapshot(snapshot);
+        if (!loadedAny) break;
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      if (mounted) setState(() => _indexingHistory = false);
     } catch (e) {
       debugPrint('[SharedMedia] Error loading media: $e');
       if (mounted) {
-        setState(() => _loading = false);
+        setState(() {
+          _loading = false;
+          _indexingHistory = false;
+        });
       }
     }
   }
 
-  Future<Timeline> _loadSharedMediaTimeline() async {
-    final timeline = await widget.room.getTimeline();
-    _sharedTimeline = timeline;
-
-    while (timeline.canRequestHistory) {
-      final beforeEventCount = timeline.events.length;
-      await timeline.requestHistory(historyCount: 100);
-      if (timeline.events.length <= beforeEventCount) break;
-      await Future<void>.delayed(Duration.zero);
-    }
-
-    return timeline;
+  void _applyIndexSnapshot(SharedMediaIndexSnapshot snapshot) {
+    if (!mounted) return;
+    setState(() {
+      _photos = snapshot.photos;
+      _videos = snapshot.videos;
+      _audio = snapshot.audio;
+      _files = snapshot.files;
+      _links = snapshot.links;
+      _loading = false;
+      _indexingHistory = !snapshot.historyComplete;
+    });
   }
 
   @override
@@ -210,6 +244,12 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
           ],
         ),
         if (widget.showDivider) const Divider(color: kWhite, height: 1),
+        if (_indexingHistory)
+          const LinearProgressIndicator(
+            minHeight: 2,
+            color: kLimeGreen,
+            backgroundColor: Colors.transparent,
+          ),
         Expanded(
           child: _loading
               ? const Center(
@@ -502,7 +542,7 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
     );
   }
 
-  Widget _buildLinksList(List<_SharedLinkItem> items) {
+  Widget _buildLinksList(List<SharedMediaLinkItem> items) {
     if (items.isEmpty) {
       return Center(
         child: Column(
@@ -533,7 +573,7 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
     );
   }
 
-  Widget _buildLinkTile(_SharedLinkItem item) {
+  Widget _buildLinkTile(SharedMediaLinkItem item) {
     final uri = _uriForLink(item.url);
     return Padding(
       padding: const EdgeInsets.only(bottom: 0.5),
@@ -679,52 +719,6 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
         ),
       );
     }
-  }
-
-  List<_SharedLinkItem> _loadLinks(Timeline timeline) {
-    final links = <_SharedLinkItem>[];
-    final seen = <String>{};
-
-    for (final event in timeline.events) {
-      if (event.redacted ||
-          event.type != EventTypes.Message ||
-          event.messageType != MessageTypes.Text) {
-        continue;
-      }
-
-      for (final url in _extractLinks(event.body)) {
-        if (url == null || !seen.add('${event.eventId}:$url')) continue;
-        links.add(
-          _SharedLinkItem(
-            url: url,
-            eventId: event.eventId,
-            timestamp: event.originServerTs,
-            senderId: event.senderId,
-          ),
-        );
-      }
-    }
-
-    links.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-    return links;
-  }
-
-  Iterable<String?> _extractLinks(String text) sync* {
-    for (final match in _linkPattern.allMatches(text)) {
-      final raw = match.group(0);
-      if (raw == null) continue;
-      final trimmed = _trimLink(raw);
-      if (trimmed.isNotEmpty) yield trimmed;
-    }
-  }
-
-  String _trimLink(String value) {
-    const trailing = '.,;:!?)]}\'"';
-    var text = value;
-    while (text.isNotEmpty && trailing.contains(text[text.length - 1])) {
-      text = text.substring(0, text.length - 1);
-    }
-    return text;
   }
 
   List<Room> _loadChatRooms(Timeline timeline) {
@@ -895,20 +889,6 @@ class _SavedSourceRoomTile extends StatelessWidget {
       onTap: onTap,
     );
   }
-}
-
-class _SharedLinkItem {
-  final String url;
-  final String eventId;
-  final DateTime timestamp;
-  final String senderId;
-
-  const _SharedLinkItem({
-    required this.url,
-    required this.eventId,
-    required this.timestamp,
-    required this.senderId,
-  });
 }
 
 class _SharedAudioTile extends StatefulWidget {

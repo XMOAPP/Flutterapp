@@ -9,7 +9,8 @@ push notification forwarding to Firebase Cloud Messaging.
 - `POST /send` or `POST /auth/otp/send`
 - `POST /verify` or `POST /auth/otp/verify`
 - `POST /donations/create`, `POST /auth/donations/create`, or `POST /auth/otp/donations/create`
-- `POST /push`, `POST /auth/otp/push`, or `POST /_matrix/push/v1/notify`
+- `POST /_matrix/push/v1/notify` for Matrix push gateway delivery
+- `POST /push` or `POST /auth/otp/push` for manual/internal tests only
 
 ## Environment
 
@@ -39,3 +40,7 @@ FCM data messages to Android devices. Calls are marked as call pushes, while
 messages include text/media/file/audio labels when Synapse provides that event
 content. Encrypted messages may only show a generic encrypted-message label
 because the server cannot read encrypted content.
+
+Synapse validates HTTP pusher URLs and requires the public path to be exactly
+`/_matrix/push/v1/notify`. If this server is behind a reverse proxy, route that
+path to the auth server before the normal Synapse catch-all route.

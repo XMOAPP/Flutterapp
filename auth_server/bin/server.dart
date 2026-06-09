@@ -300,6 +300,13 @@ Future<void> _handleMatrixPush(HttpRequest request) async {
   );
 
   try {
+    stdout.writeln(
+      'Matrix push received: devices=${devices.length}, '
+      'type=${fcmPayload.isCall ? 'call' : 'message'}, '
+      'room=${notification['room_id'] ?? '-'}, '
+      'event=${notification['event_id'] ?? '-'}',
+    );
+
     for (final device in devices) {
       final deviceMap = _asMap(device);
       if (deviceMap == null) continue;
@@ -312,6 +319,11 @@ Future<void> _handleMatrixPush(HttpRequest request) async {
         projectId: fcmConfig.projectId,
         token: pushKey,
         payload: fcmPayload,
+      );
+      stdout.writeln(
+        'FCM ${ok ? 'accepted' : 'rejected'}: '
+        'token=${_redactPushKey(pushKey)}, '
+        'type=${fcmPayload.isCall ? 'call' : 'message'}',
       );
       if (!ok) rejected.add(pushKey);
     }
@@ -610,6 +622,12 @@ String _normalizeEmail(Object? value) =>
 
 bool _isValidEmail(String email) =>
     RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
+
+String _redactPushKey(String pushKey) {
+  if (pushKey.isEmpty) return '<empty>';
+  if (pushKey.length <= 12) return '<short:${pushKey.length}>';
+  return '${pushKey.substring(0, 6)}...${pushKey.substring(pushKey.length - 6)}';
+}
 
 void _setCorsHeaders(HttpResponse response) {
   response.headers.add('Access-Control-Allow-Origin', '*');

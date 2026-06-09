@@ -3,9 +3,9 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:just_audio/just_audio.dart';
@@ -20,6 +20,7 @@ import '../providers/matrix_provider.dart';
 import '../providers/story_provider.dart';
 import '../services/app_settings_service.dart';
 import '../services/direct_chat_service.dart';
+import '../services/e2ee_service.dart';
 import '../services/privacy_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/story_service.dart';
@@ -142,6 +143,19 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                       context,
                       MaterialPageRoute(
                         builder: (_) => const ProfileSettingsScreen(),
+                      ),
+                    );
+                  },
+                ),
+                _navTile(
+                  icon: Icons.security,
+                  title: 'Security',
+                  subtitle: 'Encryption, recovery, and key backup',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const SecuritySettingsScreen(),
                       ),
                     );
                   },
@@ -341,6 +355,401 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
       ),
     );
+  }
+}
+
+class SecuritySettingsScreen extends StatefulWidget {
+  const SecuritySettingsScreen({super.key});
+
+  @override
+  State<SecuritySettingsScreen> createState() => _SecuritySettingsScreenState();
+}
+
+class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
+  late final E2eeService _e2eeService;
+  bool _loading = true;
+  bool _working = false;
+  E2eeStatus? _status;
+
+  @override
+  void initState() {
+    super.initState();
+    _e2eeService = E2eeService(context.read<MatrixProvider>().service);
+    _loadStatus();
+  }
+
+  Future<void> _loadStatus() async {
+    final status = await _e2eeService.getStatus();
+    if (!mounted) return;
+    setState(() {
+      _status = status;
+      _loading = false;
+    });
+  }
+
+  Future<void> _setupRecovery() async {
+    final passphrase = await _promptInput(
+      title: 'Set up recovery',
+      hint: 'Optional passphrase',
+      obscure: true,
+      message:
+          'Leave this empty to create a recovery key only. Store the recovery key somewhere safe.',
+    );
+    if (passphrase == null || !mounted) return;
+
+    setState(() => _working = true);
+    final result = await _e2eeService.setupRecoveryAndKeyBackup(
+      passphrase: passphrase,
+    );
+    if (!mounted) return;
+    setState(() => _working = false);
+    await _loadStatus();
+
+    if (result.success) {
+      await _showRecoveryKey(result.recoveryKey);
+    } else {
+      _showSnack(result.error ?? 'Recovery setup failed');
+    }
+  }
+
+  Future<void> _unlockRecovery() async {
+    final secret = await _promptInput(
+      title: 'Unlock recovery',
+      hint: 'Recovery key or passphrase',
+      obscure: true,
+      message: 'Use your recovery key or passphrase to load key backup.',
+    );
+    if (secret == null || secret.trim().isEmpty || !mounted) return;
+
+    setState(() => _working = true);
+    final result = await _e2eeService.unlockRecoveryAndLoadKeys(secret);
+    if (!mounted) return;
+    setState(() => _working = false);
+    await _loadStatus();
+    _showSnack(result.success
+        ? 'Recovery unlocked and keys loaded'
+        : result.error ?? 'Recovery unlock failed');
+  }
+
+  Future<void> _requestSecrets() async {
+    setState(() => _working = true);
+    try {
+      await _e2eeService.requestSecretsFromVerifiedDevices();
+      if (mounted) _showSnack('Requested keys from verified devices');
+    } catch (e) {
+      if (mounted) _showSnack('Unable to request keys: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _working = false);
+        await _loadStatus();
+      }
+    }
+  }
+
+  Future<String?> _promptInput({
+    required String title,
+    required String hint,
+    required String message,
+    bool obscure = false,
+  }) async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: kDarkerGrey,
+          title: Text(
+            title,
+            style: GoogleFonts.inter(color: kWhite, fontSize: 18),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                message,
+                style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                obscureText: obscure,
+                style: GoogleFonts.inter(color: kWhite),
+                decoration: InputDecoration(
+                  hintText: hint,
+                  hintStyle: GoogleFonts.inter(color: kLightGrey),
+                  filled: true,
+                  fillColor: const Color(0xFF2C2C2E),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(
+                'Cancel',
+                style: GoogleFonts.inter(color: kLightGrey),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, controller.text),
+              child: Text(
+                'Continue',
+                style: GoogleFonts.inter(color: kWhite),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+    return result;
+  }
+
+  Future<void> _showRecoveryKey(String? recoveryKey) async {
+    if (recoveryKey == null || recoveryKey.isEmpty) {
+      _showSnack('Recovery and key backup are ready');
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: kDarkerGrey,
+          title: Text(
+            'Recovery key',
+            style: GoogleFonts.inter(color: kWhite, fontSize: 18),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Save this key. It is needed to recover encrypted messages on another device.',
+                style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2C2C2E),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: SelectableText(
+                  recoveryKey,
+                  style: GoogleFonts.robotoMono(
+                    color: kWhite,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: recoveryKey));
+                _showSnack('Recovery key copied');
+              },
+              child: Text(
+                'Copy',
+                style: GoogleFonts.inter(color: kWhite),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(
+                'Done',
+                style: GoogleFonts.inter(color: kWhite),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final status = _status;
+    return Scaffold(
+      backgroundColor: kBlack,
+      appBar: AppBar(
+        backgroundColor: kBlack,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: kWhite),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          'Security',
+          style: GoogleFonts.inter(
+            color: kWhite,
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+      body: _loading
+          ? const Center(
+              child: CircularProgressIndicator(color: kLimeGreen),
+            )
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(22, 10, 22, 22),
+              children: [
+                _statusRow(
+                  'Encryption',
+                  status?.available == true ? 'Available' : 'Unavailable',
+                  status?.available == true,
+                ),
+                _statusRow(
+                  'Cross-signing',
+                  status?.crossSigningEnabled == true
+                      ? status?.crossSigningCached == true
+                          ? 'Ready'
+                          : 'Needs recovery unlock'
+                      : 'Not set up',
+                  status?.crossSigningEnabled == true &&
+                      status?.crossSigningCached == true,
+                ),
+                _statusRow(
+                  'Key backup',
+                  status?.keyBackupEnabled == true
+                      ? status?.keyBackupCached == true
+                          ? 'Ready'
+                          : 'Needs recovery unlock'
+                      : 'Not set up',
+                  status?.keyBackupEnabled == true &&
+                      status?.keyBackupCached == true,
+                ),
+                _detailRow('Device ID', status?.deviceId ?? 'Unknown'),
+                _detailRow('Recovery key ID',
+                    status?.defaultRecoveryKeyId ?? 'Not configured'),
+                _detailRow('Fingerprint', _shortKey(status?.fingerprintKey)),
+                const SizedBox(height: 18),
+                _actionButton(
+                  'Set up recovery and key backup',
+                  _working ? null : _setupRecovery,
+                ),
+                const SizedBox(height: 10),
+                _actionButton(
+                  'Unlock recovery',
+                  _working ? null : _unlockRecovery,
+                ),
+                const SizedBox(height: 10),
+                _actionButton(
+                  'Request keys from verified devices',
+                  _working ? null : _requestSecrets,
+                  secondary: true,
+                ),
+                if (_working) ...[
+                  const SizedBox(height: 20),
+                  const Center(
+                    child: CircularProgressIndicator(color: kLimeGreen),
+                  ),
+                ],
+              ],
+            ),
+    );
+  }
+
+  Widget _statusRow(String label, String value, bool ok) {
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(
+        ok ? Icons.check_circle : Icons.info,
+        color: ok ? kLimeGreen : kLightGrey,
+        size: 19,
+      ),
+      title: Text(
+        label,
+        style: GoogleFonts.inter(
+          color: kWhite,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      subtitle: Text(
+        value,
+        style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+      ),
+    );
+  }
+
+  Widget _detailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label.toUpperCase(),
+            style: GoogleFonts.inter(
+              color: kLightGrey,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            value,
+            style: GoogleFonts.inter(color: kWhite, fontSize: 13),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _actionButton(
+    String label,
+    VoidCallback? onPressed, {
+    bool secondary = false,
+  }) {
+    return SizedBox(
+      height: 52,
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: secondary ? const Color(0xFF2C2C2E) : kWhite,
+          foregroundColor: secondary ? kWhite : kBlack,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+        ),
+        onPressed: onPressed,
+        child: Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _shortKey(String? key) {
+    if (key == null || key.isEmpty) return 'Unavailable';
+    if (key.length <= 18) return key;
+    return '${key.substring(0, 9)}...${key.substring(key.length - 9)}';
   }
 }
 

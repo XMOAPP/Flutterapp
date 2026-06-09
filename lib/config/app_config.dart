@@ -42,7 +42,7 @@ class AppConfig {
   static const pushGatewayUrl = String.fromEnvironment(
     'XMO_PUSH_GATEWAY_URL',
     defaultValue:
-        'https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp/push',
+        'https://xmo-matrix.centralindia.cloudapp.azure.com/_matrix/push/v1/notify',
   );
 
   static const pushAppId = String.fromEnvironment(

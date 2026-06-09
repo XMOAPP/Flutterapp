@@ -133,10 +133,19 @@ class PushNotificationService {
 
   Future<void> registerCurrentUser() async {
     final service = _matrixService;
-    if (service == null || !service.isLoggedIn) return;
+    if (service == null || !service.isLoggedIn) {
+      debugPrint(
+        '[PushNotificationService] Pusher registration skipped: '
+        'Matrix user is not logged in.',
+      );
+      return;
+    }
 
     final settings = await AppSettingsService().load();
     if (!settings.notificationsEnabled) {
+      debugPrint(
+        '[PushNotificationService] Notifications disabled; removing pusher.',
+      );
       await unregisterCurrentUser();
       return;
     }
@@ -154,6 +163,11 @@ class PushNotificationService {
     if (token == null || token.isEmpty) return;
 
     try {
+      debugPrint(
+        '[PushNotificationService] Registering Matrix pusher: '
+        'user=${service.userId}, gateway=$gatewayUrl, '
+        'token=${_redactToken(token)}',
+      );
       await service.setHttpPusher(
         pushKey: token,
         appId: AppConfig.pushAppId,
@@ -171,10 +185,21 @@ class PushNotificationService {
 
   Future<void> unregisterCurrentUser() async {
     final service = _matrixService;
-    if (service == null || !service.isLoggedIn) return;
+    if (service == null || !service.isLoggedIn) {
+      debugPrint(
+        '[PushNotificationService] Pusher removal skipped: '
+        'Matrix user is not logged in.',
+      );
+      return;
+    }
 
     final token = _registeredToken ?? await _getFcmToken();
-    if (token == null || token.isEmpty) return;
+    if (token == null || token.isEmpty) {
+      debugPrint(
+        '[PushNotificationService] Pusher removal skipped: no FCM token.',
+      );
+      return;
+    }
 
     try {
       await service.removeHttpPusher(
@@ -235,11 +260,21 @@ class PushNotificationService {
 
   Future<String?> _getFcmToken() async {
     try {
-      return await _messaging.getToken();
+      final token = await _messaging.getToken();
+      debugPrint(
+        '[PushNotificationService] FCM token: ${_redactToken(token)}',
+      );
+      return token;
     } catch (e) {
       debugPrint('[PushNotificationService] Failed to read FCM token: $e');
       return null;
     }
+  }
+
+  String _redactToken(String? token) {
+    if (token == null || token.isEmpty) return '<empty>';
+    if (token.length <= 12) return '<short:${token.length}>';
+    return '${token.substring(0, 6)}...${token.substring(token.length - 6)}';
   }
 
   Future<void> _handleForegroundMessage(RemoteMessage message) async {

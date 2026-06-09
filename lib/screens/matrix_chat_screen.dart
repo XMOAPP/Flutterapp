@@ -16,6 +16,8 @@ import '../services/matrix_service.dart';
 import '../services/group_service.dart';
 import '../services/app_settings_service.dart';
 import '../services/voip_service.dart';
+import '../services/shared_media_index_service.dart';
+import '../services/transfer_queue_service.dart';
 import '../widgets/matrix_chat/album_media_viewer.dart';
 import '../widgets/matrix_chat/fullscreen_image_viewer.dart';
 import '../widgets/matrix_chat/fullscreen_video_player.dart';
@@ -108,6 +110,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   final Set<String> _cancelledPendingUploadIds = {};
   final Set<String> _dismissedGroupCallBannerIds = {};
   final Map<String, DateTime> _pendingUploadProgressUiUpdates = {};
+  final _transferQueue = TransferQueueService.instance;
   final _appSettingsService = AppSettingsService();
   AppSettings _appSettings = const AppSettings(
     notificationsEnabled: true,
@@ -118,7 +121,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   );
   bool get _isUploadBusy =>
       _uploading ||
-      _pendingUploads.isNotEmpty ||
+      _pendingUploads.any((upload) => !upload.failed && !upload.cancelled) ||
       _pendingAlbumUploads.isNotEmpty;
 
   Room? get _room => widget.room;
@@ -183,8 +186,61 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   Future<void> _initializeChat() async {
     await _loadAppSettings();
     if (!mounted) return;
+    await _restorePendingTransfers();
     _loadPreviewType();
     _loadTimeline();
+  }
+
+  Future<void> _restorePendingTransfers() async {
+    final room = _room;
+    if (room == null) return;
+    await _transferQueue.init();
+    final jobs = _transferQueue.jobsForRoom(room.id).where((job) {
+      return job.direction == TransferDirection.upload &&
+          job.status != TransferStatus.completed;
+    }).toList();
+    if (jobs.isEmpty) return;
+
+    final restored = <_PendingUpload>[];
+    for (final job in jobs) {
+      try {
+        final bytes = await _transferQueue.readPayload(job);
+        final thumbnailBytes = await _transferQueue.readThumbnail(job);
+        restored.add(
+          _PendingUpload(
+            id: job.id,
+            transferJobId: job.id,
+            bytes: bytes,
+            fileName: job.fileName,
+            mimeType: job.mimeType,
+            isVideo: job.kind == TransferKind.video,
+            isAudio: job.kind == TransferKind.audio ||
+                job.kind == TransferKind.voice,
+            isFile: job.kind == TransferKind.file,
+            totalBytes: job.totalBytes,
+            createdAt: job.createdAt,
+            thumbnailBytes: thumbnailBytes,
+          )
+            ..uploadedBytes = job.uploadedBytes
+            ..failed = job.status == TransferStatus.failed
+            ..cancelled = job.status == TransferStatus.cancelled
+            ..error = job.error,
+        );
+      } catch (e) {
+        debugPrint('[TransferQueue] Failed to restore ${job.id}: $e');
+        await _transferQueue.markFailed(job.id, e);
+      }
+    }
+
+    if (!mounted || restored.isEmpty) return;
+    setState(() => _pendingUploads.addAll(restored));
+
+    final queued = restored
+        .where((upload) => !upload.failed && !upload.cancelled)
+        .toList(growable: false);
+    if (queued.isNotEmpty) {
+      unawaited(_runPendingQueuedUploads(room.id, queued));
+    }
   }
 
   Future<void> _loadPreviewType() async {
@@ -338,6 +394,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       return;
     }
     final timeline = await widget.matrixProvider.service.getTimeline(_room!.id);
+    if (timeline != null) {
+      unawaited(_indexSharedMediaTimeline(timeline));
+    }
     if (mounted) {
       setState(() {
         _timeline = timeline;
@@ -356,6 +415,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         if (update.roomID == _room!.id && mounted) {
           setState(() {});
           if (update.type == EventUpdateType.timeline) {
+            final timeline = _timeline;
+            if (timeline != null) {
+              unawaited(_indexSharedMediaTimeline(timeline));
+            }
             _scrollToBottom();
             _markRoomAsRead();
           }
@@ -415,6 +478,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     try {
       await timeline.requestHistory(historyCount: historyCount);
       final loadedAny = timeline.events.length > beforeEventCount;
+      unawaited(
+        _indexSharedMediaTimeline(
+          timeline,
+          historyComplete: !loadedAny || !timeline.canRequestHistory,
+        ),
+      );
       if (!mounted) return;
       setState(() {
         _historyExhausted = !loadedAny || !timeline.canRequestHistory;
@@ -612,6 +681,25 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     for (final event in videoEvents) {
       // Fire-and-forget: fills _mediaHandler cache in background
       _mediaHandler.loadVideoThumbnail(event).ignore();
+    }
+  }
+
+  Future<void> _indexSharedMediaTimeline(
+    Timeline timeline, {
+    bool historyComplete = false,
+  }) async {
+    final room = _room;
+    final ownerUserId = widget.matrixProvider.userId;
+    if (room == null || ownerUserId == null || ownerUserId.isEmpty) return;
+    try {
+      await SharedMediaIndexService.instance.indexTimeline(
+        ownerUserId: ownerUserId,
+        room: room,
+        timeline: timeline,
+        historyComplete: historyComplete,
+      );
+    } catch (e) {
+      debugPrint('[SharedMediaIndex] Failed to index chat timeline: $e');
     }
   }
 
@@ -922,6 +1010,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
   void _cancelPendingUpload(String id) {
     _cancelledPendingUploadIds.add(id);
+    unawaited(_transferQueue.cancel(id));
     _removePendingUpload(id);
     _setUploading(false);
   }
@@ -976,10 +1065,159 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     }
 
     _pendingUploadProgressUiUpdates[id] = now;
+    unawaited(_transferQueue.updateProgress(
+      id,
+      clampedUploadedBytes,
+      clampedTotalBytes,
+    ));
     setState(() {
       upload.uploadedBytes = clampedUploadedBytes;
       upload.totalBytes = clampedTotalBytes;
     });
+  }
+
+  Future<void> _ensureTransferJob(
+    String roomId,
+    _PendingUpload upload,
+  ) async {
+    if (upload.transferJobId != null) return;
+    final job = await _transferQueue.createUploadJob(
+      id: upload.id,
+      roomId: roomId,
+      bytes: upload.bytes,
+      thumbnailBytes: upload.thumbnailBytes,
+      fileName: upload.fileName,
+      mimeType: upload.mimeType,
+      kind: _transferKindFor(upload),
+    );
+    upload.transferJobId = job.id;
+  }
+
+  TransferKind _transferKindFor(_PendingUpload upload) {
+    if (upload.isVideo) return TransferKind.video;
+    if (upload.isAudio) return TransferKind.audio;
+    if (upload.isFile) return TransferKind.file;
+    return TransferKind.photo;
+  }
+
+  Future<void> _runSinglePendingMediaUpload(
+    String roomId,
+    _PendingUpload upload, {
+    String caption = '',
+  }) async {
+    _setUploading(true);
+    try {
+      await _sendPendingUpload(roomId, upload, caption: caption);
+      _removePendingUpload(upload.id);
+      await _transferQueue.remove(upload.id);
+      _cancelledPendingUploadIds.remove(upload.id);
+    } catch (e) {
+      if (e is MatrixUploadCancelledException ||
+          _isPendingUploadCancelled(upload.id) ||
+          upload.cancelled) {
+        await _transferQueue.cancel(upload.id);
+        _removePendingUpload(upload.id);
+      } else if (mounted) {
+        setState(() {
+          upload.failed = true;
+          upload.error = e.toString();
+        });
+        await _transferQueue.markFailed(upload.id, e);
+        _showSnackBar('Failed to send media: $e');
+      }
+    } finally {
+      _setUploading(false);
+      _scrollToBottom();
+    }
+  }
+
+  Future<void> _sendPendingUpload(
+    String roomId,
+    _PendingUpload upload, {
+    String caption = '',
+  }) async {
+    await _ensureTransferJob(roomId, upload);
+    await _transferQueue.markRunning(upload.id);
+    if (mounted) {
+      setState(() {
+        upload.started = true;
+        upload.failed = false;
+        upload.error = null;
+      });
+    }
+
+    bool isCancelled() {
+      return _isPendingUploadCancelled(upload.id) ||
+          upload.cancelled ||
+          _transferQueue.isCancelled(upload.id);
+    }
+
+    if (upload.isVideo) {
+      await _mediaHandler.sendVideoBytes(
+        roomId,
+        _setUploading,
+        bytes: upload.bytes,
+        fileName: upload.fileName,
+        mimeType: upload.mimeType,
+        caption: caption,
+        onUploadProgress: (uploadedBytes, totalBytes) =>
+            _updatePendingUploadProgress(
+          upload.id,
+          uploadedBytes,
+          totalBytes,
+        ),
+        isCancelled: isCancelled,
+        rethrowErrors: true,
+      );
+    } else if (upload.isAudio) {
+      await widget.matrixProvider.service.sendAudio(
+        roomId: roomId,
+        audioBytes: upload.bytes,
+        fileName: upload.fileName,
+        mimeType: upload.mimeType,
+        durationMs: upload.durationMs ?? 0,
+        isVoiceMessage: upload.isVoiceMessage,
+        onUploadProgress: (uploadedBytes, totalBytes) =>
+            _updatePendingUploadProgress(
+          upload.id,
+          uploadedBytes,
+          totalBytes,
+        ),
+        isCancelled: isCancelled,
+      );
+    } else if (upload.isFile) {
+      await widget.matrixProvider.service.sendFileWithProgress(
+        roomId: roomId,
+        bytes: upload.bytes,
+        fileName: upload.fileName,
+        mimeType: upload.mimeType,
+        onUploadProgress: (uploadedBytes, totalBytes) =>
+            _updatePendingUploadProgress(
+          upload.id,
+          uploadedBytes,
+          totalBytes,
+        ),
+        isCancelled: isCancelled,
+      );
+    } else {
+      await _mediaHandler.sendPhotoBytes(
+        roomId,
+        _setUploading,
+        bytes: upload.bytes,
+        fileName: upload.fileName,
+        mimeType: upload.mimeType,
+        caption: caption,
+        onUploadProgress: (uploadedBytes, totalBytes) =>
+            _updatePendingUploadProgress(
+          upload.id,
+          uploadedBytes,
+          totalBytes,
+        ),
+        isCancelled: isCancelled,
+        rethrowErrors: true,
+      );
+    }
+    await _transferQueue.markCompleted(upload.id);
   }
 
   Future<void> _sendPhotoWithPending(
@@ -1014,18 +1252,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       ),
     );
 
-    await _mediaHandler.sendPhotoBytes(
+    final upload = _pendingUploads.firstWhere((item) => item.id == pendingId);
+    await _runSinglePendingMediaUpload(
       roomId,
-      _setUploading,
-      bytes: bytes,
-      fileName: fileName,
-      mimeType: mimeType,
+      upload,
       caption: caption,
-      onUploadProgress: (uploadedBytes, totalBytes) =>
-          _updatePendingUploadProgress(pendingId, uploadedBytes, totalBytes),
     );
-    _removePendingUpload(pendingId);
-    _scrollToBottom();
   }
 
   Future<Size?> _readImageSize(Uint8List bytes) async {
@@ -1082,18 +1314,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       ),
     );
 
-    await _mediaHandler.sendVideoBytes(
+    final upload = _pendingUploads.firstWhere((item) => item.id == pendingId);
+    await _runSinglePendingMediaUpload(
       roomId,
-      _setUploading,
-      bytes: bytes,
-      fileName: fileName,
-      mimeType: mimeType,
+      upload,
       caption: caption,
-      onUploadProgress: (uploadedBytes, totalBytes) =>
-          _updatePendingUploadProgress(pendingId, uploadedBytes, totalBytes),
     );
-    _removePendingUpload(pendingId);
-    _scrollToBottom();
   }
 
   Future<_PendingUpload> _createPendingMediaUpload({
@@ -1182,6 +1408,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       }
 
       try {
+        await _ensureTransferJob(roomId, upload);
+        await _transferQueue.markRunning(upload.id);
         if (upload.isVideo) {
           await _mediaHandler.sendVideoBytes(
             roomId,
@@ -1197,7 +1425,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
               uploadedBytes,
               totalBytes,
             ),
-            isCancelled: () => album.cancelled || upload.cancelled,
+            isCancelled: () =>
+                album.cancelled ||
+                upload.cancelled ||
+                _transferQueue.isCancelled(upload.id),
+            rethrowErrors: true,
           );
         } else {
           await _mediaHandler.sendPhotoBytes(
@@ -1214,11 +1446,16 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
               uploadedBytes,
               totalBytes,
             ),
-            isCancelled: () => album.cancelled || upload.cancelled,
+            isCancelled: () =>
+                album.cancelled ||
+                upload.cancelled ||
+                _transferQueue.isCancelled(upload.id),
+            rethrowErrors: true,
           );
         }
 
         if (!album.cancelled && !upload.cancelled && mounted) {
+          await _transferQueue.markCompleted(upload.id);
           setState(() {
             if (upload.totalBytes <= 0 ||
                 upload.uploadedBytes >= upload.totalBytes) {
@@ -1234,8 +1471,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         if (e is MatrixUploadCancelledException ||
             album.cancelled ||
             upload.cancelled) {
+          await _transferQueue.cancel(upload.id);
           break;
         }
+        await _transferQueue.markFailed(upload.id, e);
         if (mounted) {
           setState(() {
             upload.failed = true;
@@ -1319,6 +1558,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     }
 
     _pendingUploadProgressUiUpdates[uploadId] = now;
+    unawaited(_transferQueue.updateProgress(
+      uploadId,
+      clampedUploadedBytes,
+      clampedTotalBytes,
+    ));
     setState(() {
       upload.uploadedBytes = clampedUploadedBytes;
       upload.totalBytes = clampedTotalBytes;
@@ -1341,31 +1585,15 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         mimeType: mimeType,
         isVideo: false,
         isAudio: true,
+        isVoiceMessage: isVoiceMessage,
         totalBytes: bytes.length,
         createdAt: DateTime.now(),
         durationMs: durationMs,
       ),
     );
 
-    _setUploading(true);
-    try {
-      await widget.matrixProvider.service.sendAudio(
-        roomId: roomId,
-        audioBytes: bytes,
-        fileName: fileName,
-        mimeType: mimeType,
-        durationMs: durationMs,
-        isVoiceMessage: isVoiceMessage,
-        onUploadProgress: (uploadedBytes, totalBytes) =>
-            _updatePendingUploadProgress(pendingId, uploadedBytes, totalBytes),
-        isCancelled: () => _isPendingUploadCancelled(pendingId),
-      );
-    } finally {
-      _removePendingUpload(pendingId);
-      _cancelledPendingUploadIds.remove(pendingId);
-      _setUploading(false);
-    }
-    _scrollToBottom();
+    final upload = _pendingUploads.firstWhere((item) => item.id == pendingId);
+    await _runSinglePendingMediaUpload(roomId, upload);
   }
 
   _PendingUpload _createPendingAudioUpload({
@@ -1381,6 +1609,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       mimeType: mimeType,
       isVideo: false,
       isAudio: true,
+      isVoiceMessage: false,
       totalBytes: bytes.length,
       createdAt: DateTime.now(),
       durationMs: durationMs,
@@ -1424,56 +1653,49 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         if (mounted) setState(() => upload.started = true);
 
         try {
-          if (upload.isAudio) {
-            await widget.matrixProvider.service.sendAudio(
-              roomId: roomId,
-              audioBytes: upload.bytes,
-              fileName: upload.fileName,
-              mimeType: upload.mimeType,
-              durationMs: upload.durationMs ?? 0,
-              isVoiceMessage: false,
-              onUploadProgress: (uploadedBytes, totalBytes) =>
-                  _updatePendingUploadProgress(
-                upload.id,
-                uploadedBytes,
-                totalBytes,
-              ),
-              isCancelled: () =>
-                  _isPendingUploadCancelled(upload.id) || upload.cancelled,
-            );
-          } else {
-            await widget.matrixProvider.service.sendFileWithProgress(
-              roomId: roomId,
-              bytes: upload.bytes,
-              fileName: upload.fileName,
-              mimeType: upload.mimeType,
-              onUploadProgress: (uploadedBytes, totalBytes) =>
-                  _updatePendingUploadProgress(
-                upload.id,
-                uploadedBytes,
-                totalBytes,
-              ),
-              isCancelled: () =>
-                  _isPendingUploadCancelled(upload.id) || upload.cancelled,
-            );
-          }
+          await _sendPendingUpload(roomId, upload);
+          _removePendingUpload(upload.id);
+          await _transferQueue.remove(upload.id);
+          _cancelledPendingUploadIds.remove(upload.id);
         } catch (e) {
           if (e is! MatrixUploadCancelledException &&
               !_isPendingUploadCancelled(upload.id) &&
               !upload.cancelled) {
+            await _transferQueue.markFailed(upload.id, e);
+            if (mounted) {
+              setState(() {
+                upload.failed = true;
+                upload.error = e.toString();
+              });
+            }
             _showSnackBar(
               'Failed to send ${upload.isAudio ? 'audio' : 'file'}: $e',
             );
+          } else {
+            await _transferQueue.cancel(upload.id);
+            _removePendingUpload(upload.id);
+            _cancelledPendingUploadIds.remove(upload.id);
           }
-        } finally {
-          _removePendingUpload(upload.id);
-          _cancelledPendingUploadIds.remove(upload.id);
         }
       }
     } finally {
       _setUploading(false);
       _scrollToBottom();
     }
+  }
+
+  Future<void> _retryPendingUpload(_PendingUpload upload) async {
+    final room = _room;
+    if (room == null || _isUploadBusy) return;
+    _cancelledPendingUploadIds.remove(upload.id);
+    upload.cancelled = false;
+    upload.failed = false;
+    upload.error = null;
+    upload.uploadedBytes = 0;
+    upload.started = false;
+    await _transferQueue.retry(upload.id);
+    if (mounted) setState(() {});
+    await _runSinglePendingMediaUpload(room.id, upload);
   }
 
   Future<void> _pickAndSendAudioWithPending() async {
@@ -1851,23 +2073,82 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   Future<void> _downloadAndOpenFile(Event event) async {
+    TransferJob? downloadJob;
+    final messenger = ScaffoldMessenger.of(context);
+    var cancellationSnackShown = false;
+
+    void showDownloadCancelledSnackBar() {
+      if (!mounted || cancellationSnackShown) return;
+      cancellationSnackShown = true;
+      messenger.removeCurrentSnackBar();
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Download cancelled'),
+          backgroundColor: kLimeGreen,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+
     try {
-      ScaffoldMessenger.of(context).showSnackBar(
+      final fileName = event.body.isNotEmpty ? event.body : 'download';
+      final info = event.content['info'];
+      final size = info is Map ? (info['size'] as num?)?.toInt() ?? 0 : 0;
+      downloadJob = await _transferQueue.createDownloadJob(
+        roomId: event.room.id,
+        fileName: fileName,
+        mimeType: _attachmentMimeTypeFor(event),
+        kind: _downloadTransferKindFor(event),
+        totalBytes: size,
+      );
+      await _transferQueue.markRunning(downloadJob.id);
+
+      messenger.showSnackBar(
         SnackBar(
-          content: Text('Downloading ${event.body}...'),
-          backgroundColor: kDarkerGrey,
-          duration: const Duration(seconds: 2),
+          content: _DownloadSnackBarContent(
+            jobId: downloadJob.id,
+            initialJobs: _transferQueue.jobs,
+            stream: _transferQueue.stream,
+            onCancel: () {
+              unawaited(_transferQueue.cancel(downloadJob!.id));
+              showDownloadCancelledSnackBar();
+            },
+          ),
+          backgroundColor: kWhite,
+          padding: EdgeInsets.zero,
+          duration: const Duration(minutes: 5),
         ),
       );
 
       final matrixFile = await event.downloadAndDecryptAttachment(
-        downloadCallback: _mediaHandler.authenticatedDownload(),
+        downloadCallback: _mediaHandler.authenticatedDownloadWithProgress(
+          onProgress: (downloadedBytes, totalBytes) {
+            unawaited(_transferQueue.updateProgress(
+              downloadJob!.id,
+              downloadedBytes,
+              totalBytes,
+            ));
+          },
+          isCancelled: () => _transferQueue.isCancelled(downloadJob!.id),
+        ),
       );
+      if (_transferQueue.isCancelled(downloadJob.id)) {
+        throw const MatrixDownloadCancelledException();
+      }
       final bytes = matrixFile.bytes;
+      await _transferQueue.updateProgress(
+        downloadJob.id,
+        bytes.length,
+        bytes.length,
+      );
+      if (_transferQueue.isCancelled(downloadJob.id)) {
+        throw const MatrixDownloadCancelledException();
+      }
 
       if (bytes.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          messenger.removeCurrentSnackBar();
+          messenger.showSnackBar(
             const SnackBar(
               content: Text('Downloaded file is empty'),
               backgroundColor: Colors.red,
@@ -1883,9 +2164,13 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         mimeType: matrixFile.mimeType,
         storageCategory: _downloadStorageCategoryFor(event),
       );
+      if (_transferQueue.isCancelled(downloadJob.id)) {
+        throw const MatrixDownloadCancelledException();
+      }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger.removeCurrentSnackBar();
+        messenger.showSnackBar(
           SnackBar(
             content: Text(kIsWeb
                 ? 'Downloaded: ${matrixFile.name}'
@@ -1895,15 +2180,49 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           ),
         );
       }
+      await _transferQueue.markCompleted(downloadJob.id);
+      await _transferQueue.remove(downloadJob.id);
     } catch (e) {
+      if (e is MatrixDownloadCancelledException ||
+          (downloadJob != null && _transferQueue.isCancelled(downloadJob.id))) {
+        if (downloadJob != null) {
+          await _transferQueue.cancel(downloadJob.id);
+        }
+        showDownloadCancelledSnackBar();
+        return;
+      }
+      if (downloadJob != null) {
+        await _transferQueue.markFailed(downloadJob.id, e);
+      }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger.removeCurrentSnackBar();
+        messenger.showSnackBar(
           SnackBar(
             content: Text('Failed to download: $e'),
             backgroundColor: Colors.red,
           ),
         );
       }
+    }
+  }
+
+  String _attachmentMimeTypeFor(Event event) {
+    final info = event.content['info'];
+    final mimetype = info is Map ? info['mimetype'] : null;
+    if (mimetype is String && mimetype.isNotEmpty) return mimetype;
+    return lookupMimeType(event.body) ?? 'application/octet-stream';
+  }
+
+  TransferKind _downloadTransferKindFor(Event event) {
+    switch (event.messageType) {
+      case MessageTypes.Image:
+        return TransferKind.photo;
+      case MessageTypes.Video:
+        return TransferKind.video;
+      case MessageTypes.Audio:
+        return TransferKind.audio;
+      default:
+        return TransferKind.file;
     }
   }
 
@@ -2858,6 +3177,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                       iconColor: Colors.white,
                       onCancel: () {
                         upload.cancelled = true;
+                        unawaited(_transferQueue.cancel(upload.id));
                         setState(() {});
                       },
                     ),
@@ -2964,13 +3284,18 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
               ? _PendingAudioUploadBubble(
                   upload: upload,
                   onCancel: () => _cancelPendingUpload(upload.id),
+                  onRetry: () => _retryPendingUpload(upload),
                 )
               : upload.isFile
                   ? _PendingFileUploadBubble(
                       upload: upload,
                       onCancel: () => _cancelPendingUpload(upload.id),
+                      onRetry: () => _retryPendingUpload(upload),
                     )
-                  : _PendingMediaUploadBubble(upload: upload),
+                  : _PendingMediaUploadBubble(
+                      upload: upload,
+                      onRetry: () => _retryPendingUpload(upload),
+                    ),
         ),
       ),
     );
@@ -4411,8 +4736,10 @@ class _PendingUpload {
   final bool isVideo;
   final bool isAudio;
   final bool isFile;
+  final bool isVoiceMessage;
   int totalBytes;
   int uploadedBytes = 0;
+  String? transferJobId;
   bool started = false;
   bool completed = false;
   bool failed = false;
@@ -4431,8 +4758,10 @@ class _PendingUpload {
     required this.isVideo,
     this.isAudio = false,
     this.isFile = false,
+    this.isVoiceMessage = false,
     required this.totalBytes,
     required this.createdAt,
+    this.transferJobId,
     this.thumbnailBytes,
     this.width,
     this.height,
@@ -4482,6 +4811,115 @@ String _pendingBytes(int bytes) {
   return '${mb.toStringAsFixed(mb >= 10 ? 0 : 1)} MB';
 }
 
+class _DownloadSnackBarContent extends StatelessWidget {
+  final String jobId;
+  final List<TransferJob> initialJobs;
+  final Stream<List<TransferJob>> stream;
+  final VoidCallback onCancel;
+
+  const _DownloadSnackBarContent({
+    required this.jobId,
+    required this.initialJobs,
+    required this.stream,
+    required this.onCancel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<TransferJob>>(
+      stream: stream,
+      initialData: initialJobs,
+      builder: (context, snapshot) {
+        final jobs = snapshot.data ?? const <TransferJob>[];
+        final job = jobs.cast<TransferJob?>().firstWhere(
+              (item) => item?.id == jobId,
+              orElse: () => null,
+            );
+        final downloaded = job?.uploadedBytes ?? 0;
+        final total = job?.totalBytes ?? 0;
+        final progress =
+            total > 0 ? (downloaded / total).clamp(0.0, 1.0).toDouble() : null;
+        final sizeText = total > 0
+            ? '${_pendingBytes(downloaded)} / ${_pendingBytes(total)}'
+            : '${_pendingBytes(downloaded)} / --';
+
+        return SizedBox(
+          height: 48,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final progressWidth = constraints.maxWidth * (progress ?? 0);
+
+              return Stack(
+                fit: StackFit.expand,
+                children: [
+                  const ColoredBox(color: kWhite),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOut,
+                      width: progressWidth,
+                      height: double.infinity,
+                      color: kLimeGreen,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Downloading',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.inter(
+                              color: kBlack,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          sizeText,
+                          style: GoogleFonts.inter(
+                            color: kBlack.withValues(alpha: 0.76),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(width: 18),
+                        TextButton(
+                          onPressed: onCancel,
+                          style: TextButton.styleFrom(
+                            foregroundColor: kBlack,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 8,
+                            ),
+                          ),
+                          child: Text(
+                            'Cancel',
+                            style: GoogleFonts.inter(
+                              color: kBlack,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+
 String _pendingDuration(int durationMs) {
   final duration = Duration(milliseconds: durationMs);
   final hours = duration.inHours;
@@ -4504,10 +4942,12 @@ String _pendingClock(DateTime time) {
 class _PendingAudioUploadBubble extends StatelessWidget {
   final _PendingUpload upload;
   final VoidCallback onCancel;
+  final VoidCallback onRetry;
 
   const _PendingAudioUploadBubble({
     required this.upload,
     required this.onCancel,
+    required this.onRetry,
   });
 
   @override
@@ -4538,10 +4978,12 @@ class _PendingAudioUploadBubble extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      _PendingCancelProgressButton(
-                        progress: progress,
-                        onCancel: onCancel,
-                      ),
+                      upload.failed
+                          ? _PendingRetryButton(onRetry: onRetry)
+                          : _PendingCancelProgressButton(
+                              progress: progress,
+                              onCancel: onCancel,
+                            ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: VoiceWaveform(
@@ -4586,10 +5028,12 @@ class _PendingAudioUploadBubble extends StatelessWidget {
 class _PendingFileUploadBubble extends StatelessWidget {
   final _PendingUpload upload;
   final VoidCallback onCancel;
+  final VoidCallback onRetry;
 
   const _PendingFileUploadBubble({
     required this.upload,
     required this.onCancel,
+    required this.onRetry,
   });
 
   @override
@@ -4617,10 +5061,12 @@ class _PendingFileUploadBubble extends StatelessWidget {
         children: [
           Row(
             children: [
-              _PendingCancelProgressButton(
-                progress: progress,
-                onCancel: onCancel,
-              ),
+              upload.failed
+                  ? _PendingRetryButton(onRetry: onRetry)
+                  : _PendingCancelProgressButton(
+                      progress: progress,
+                      onCancel: onCancel,
+                    ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -4730,6 +5176,32 @@ class _PendingCancelProgressButton extends StatelessWidget {
   }
 }
 
+class _PendingRetryButton extends StatelessWidget {
+  final VoidCallback onRetry;
+
+  const _PendingRetryButton({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onRetry,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: Colors.redAccent.withValues(alpha: 0.92),
+          shape: BoxShape.circle,
+        ),
+        child: const Icon(
+          Icons.refresh_rounded,
+          color: Colors.white,
+          size: 26,
+        ),
+      ),
+    );
+  }
+}
+
 class _PendingSmallTime extends StatelessWidget {
   final _PendingUpload upload;
 
@@ -4760,8 +5232,12 @@ class _PendingSmallTime extends StatelessWidget {
 
 class _PendingMediaUploadBubble extends StatelessWidget {
   final _PendingUpload upload;
+  final VoidCallback onRetry;
 
-  const _PendingMediaUploadBubble({required this.upload});
+  const _PendingMediaUploadBubble({
+    required this.upload,
+    required this.onRetry,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -4790,6 +5266,10 @@ class _PendingMediaUploadBubble extends StatelessWidget {
               left: 6,
               child: _buildUploadInfo(),
             ),
+            if (upload.failed)
+              Center(
+                child: _PendingRetryButton(onRetry: onRetry),
+              ),
             Positioned(
               bottom: 8,
               right: 8,

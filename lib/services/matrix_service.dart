@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
 import 'package:flutter/foundation.dart';
+import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import '../config/app_config.dart';
 import '../models/invite_link_models.dart';
+import 'transfer_queue_service.dart';
 
 enum XmoRoomKind { direct, group, channel, saved }
 
@@ -15,6 +17,18 @@ class MatrixUploadCancelledException implements Exception {
 
   @override
   String toString() => 'Upload cancelled';
+}
+
+class _PreparedMediaUpload {
+  final Uint8List bytes;
+  final String contentType;
+  final EncryptedFile? encryptedFile;
+
+  const _PreparedMediaUpload({
+    required this.bytes,
+    required this.contentType,
+    this.encryptedFile,
+  });
 }
 
 /// Singleton service that wraps the Matrix Dart SDK.
@@ -221,9 +235,16 @@ class MatrixService {
     await Hive.openBox<Uint8List>('xmo_media_cache');
     await Hive.openBox('xmo_app_settings');
     await Hive.openBox('xmo_call_history');
+    await Hive.openBox('xmo_shared_media_index');
+    await Hive.openBox(TransferQueueService.boxName);
+    await TransferQueueService.instance.init();
 
     _client = Client(
       'XMO',
+      verificationMethods: {
+        KeyVerificationMethod.numbers,
+        KeyVerificationMethod.emoji,
+      },
       databaseBuilder: (_) async {
         if (kIsWeb) {
           final db = HiveCollectionsDatabase('matrix_xmo', '');
@@ -1226,10 +1247,16 @@ class MatrixService {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
 
+    final preparedAudio = await _prepareMediaUpload(
+      room,
+      bytes: audioBytes,
+      fileName: fileName,
+      mimeType: mimeType,
+    );
     final audioMxc = await _uploadContentWithProgress(
-      audioBytes,
+      preparedAudio.bytes,
       filename: fileName,
-      contentType: mimeType,
+      contentType: preparedAudio.contentType,
       onProgress: onUploadProgress,
       isCancelled: isCancelled,
     );
@@ -1239,7 +1266,10 @@ class MatrixService {
       'msgtype': 'm.audio',
       'body': fileName,
       'filename': fileName,
-      'url': audioMxc.toString(),
+      if (preparedAudio.encryptedFile == null) 'url': audioMxc.toString(),
+      if (preparedAudio.encryptedFile != null)
+        'file': _encryptedFileContent(preparedAudio.encryptedFile!, audioMxc,
+            mimeType: mimeType),
       'info': {
         'mimetype': mimeType,
         'size': audioBytes.length,
@@ -1334,10 +1364,16 @@ class MatrixService {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
 
+    final preparedFile = await _prepareMediaUpload(
+      room,
+      bytes: bytes,
+      fileName: fileName,
+      mimeType: mimeType,
+    );
     final fileMxc = await _uploadContentWithProgress(
-      bytes,
+      preparedFile.bytes,
       filename: fileName,
-      contentType: mimeType,
+      contentType: preparedFile.contentType,
       onProgress: onUploadProgress,
       isCancelled: isCancelled,
     );
@@ -1347,7 +1383,10 @@ class MatrixService {
       'msgtype': 'm.file',
       'body': fileName,
       'filename': fileName,
-      'url': fileMxc.toString(),
+      if (preparedFile.encryptedFile == null) 'url': fileMxc.toString(),
+      if (preparedFile.encryptedFile != null)
+        'file': _encryptedFileContent(preparedFile.encryptedFile!, fileMxc,
+            mimeType: mimeType),
       'info': {
         'mimetype': mimeType,
         'size': bytes.length,
@@ -1367,10 +1406,16 @@ class MatrixService {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
 
+    final preparedImage = await _prepareMediaUpload(
+      room,
+      bytes: bytes,
+      fileName: fileName,
+      mimeType: mimeType,
+    );
     final imageMxc = await _uploadContentWithProgress(
-      bytes,
+      preparedImage.bytes,
       filename: fileName,
-      contentType: mimeType,
+      contentType: preparedImage.contentType,
       onProgress: onUploadProgress,
       isCancelled: isCancelled,
     );
@@ -1382,7 +1427,10 @@ class MatrixService {
       'body': cleanCaption.isEmpty ? fileName : cleanCaption,
       'filename': fileName,
       if (cleanCaption.isNotEmpty) 'xmo_caption': cleanCaption,
-      'url': imageMxc.toString(),
+      if (preparedImage.encryptedFile == null) 'url': imageMxc.toString(),
+      if (preparedImage.encryptedFile != null)
+        'file': _encryptedFileContent(preparedImage.encryptedFile!, imageMxc,
+            mimeType: mimeType),
       'info': {
         'mimetype': mimeType,
         'size': bytes.length,
@@ -1415,10 +1463,16 @@ class MatrixService {
 
     // Step 1: Upload video
     debugPrint('[sendVideo] Uploading video (${videoBytes.length} bytes)...');
+    final preparedVideo = await _prepareMediaUpload(
+      room,
+      bytes: videoBytes,
+      fileName: videoFileName,
+      mimeType: videoMimeType,
+    );
     final videoMxc = await _uploadContentWithProgress(
-      videoBytes,
+      preparedVideo.bytes,
       filename: videoFileName,
-      contentType: videoMimeType,
+      contentType: preparedVideo.contentType,
       onProgress: onUploadProgress,
       isCancelled: isCancelled,
     );
@@ -1440,13 +1494,27 @@ class MatrixService {
         _throwIfCancelled(isCancelled);
         debugPrint(
             '[sendVideo] Uploading thumbnail (${thumbBytes.length} bytes)...');
+        final preparedThumb = await _prepareMediaUpload(
+          room,
+          bytes: thumbBytes,
+          fileName: '${videoFileName}_thumb.jpg',
+          mimeType: 'image/jpeg',
+        );
         final thumbMxc = await _client.uploadContent(
-          thumbBytes,
+          preparedThumb.bytes,
           filename: '${videoFileName}_thumb.jpg',
-          contentType: 'image/jpeg',
+          contentType: preparedThumb.contentType,
         );
         debugPrint('[sendVideo] Thumbnail uploaded: $thumbMxc');
-        info['thumbnail_url'] = thumbMxc.toString();
+        if (preparedThumb.encryptedFile == null) {
+          info['thumbnail_url'] = thumbMxc.toString();
+        } else {
+          info['thumbnail_file'] = _encryptedFileContent(
+            preparedThumb.encryptedFile!,
+            thumbMxc,
+            mimeType: 'image/jpeg',
+          );
+        }
         info['thumbnail_info'] = {
           'mimetype': 'image/jpeg',
           'size': thumbBytes.length,
@@ -1469,10 +1537,59 @@ class MatrixService {
       'body': cleanCaption.isEmpty ? videoFileName : cleanCaption,
       'filename': videoFileName,
       if (cleanCaption.isNotEmpty) 'xmo_caption': cleanCaption,
-      'url': videoMxc.toString(),
+      if (preparedVideo.encryptedFile == null) 'url': videoMxc.toString(),
+      if (preparedVideo.encryptedFile != null)
+        'file': _encryptedFileContent(preparedVideo.encryptedFile!, videoMxc,
+            mimeType: videoMimeType),
       'info': info,
     });
     debugPrint('[sendVideo] Event sent.');
+  }
+
+  Future<_PreparedMediaUpload> _prepareMediaUpload(
+    Room room, {
+    required Uint8List bytes,
+    required String fileName,
+    required String mimeType,
+  }) async {
+    if (!room.encrypted || !_client.fileEncryptionEnabled) {
+      return _PreparedMediaUpload(
+        bytes: bytes,
+        contentType: mimeType,
+      );
+    }
+
+    final encryptedFile = await MatrixFile(
+      bytes: bytes,
+      name: fileName,
+      mimeType: mimeType,
+    ).encrypt();
+    return _PreparedMediaUpload(
+      bytes: encryptedFile.data,
+      contentType: 'application/octet-stream',
+      encryptedFile: encryptedFile,
+    );
+  }
+
+  Map<String, dynamic> _encryptedFileContent(
+    EncryptedFile encryptedFile,
+    Uri uri, {
+    required String mimeType,
+  }) {
+    return {
+      'url': uri.toString(),
+      'mimetype': mimeType,
+      'v': 'v2',
+      'key': {
+        'alg': 'A256CTR',
+        'ext': true,
+        'k': encryptedFile.k,
+        'key_ops': ['encrypt', 'decrypt'],
+        'kty': 'oct',
+      },
+      'iv': encryptedFile.iv,
+      'hashes': {'sha256': encryptedFile.sha256},
+    };
   }
 
   Future<Uri> _uploadContentWithProgress(
