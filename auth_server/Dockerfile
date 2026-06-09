@@ -10,7 +10,6 @@ RUN dart compile exe bin/server.dart -o /app/server
 FROM debian:bookworm-slim
 
 WORKDIR /app
-COPY --from=build /runtime/ /
 COPY --from=build /app/server /app/server
 
 ENV PORT=3000
