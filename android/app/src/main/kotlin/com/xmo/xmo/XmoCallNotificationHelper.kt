@@ -24,18 +24,15 @@ object XmoCallNotificationHelper {
     private const val NOTIFICATION_ID_FALLBACK = 910001
 
     fun looksLikeCall(data: Map<String, String>, title: String?, body: String?): Boolean {
-        val joined = buildString {
-            append(title.orEmpty()).append(' ')
-            append(body.orEmpty()).append(' ')
-            data.forEach { (key, value) ->
-                append(key).append(' ').append(value).append(' ')
-            }
-        }.lowercase()
+        if (data["xmo_push_type"] == "call") return true
 
-        return joined.contains("m.call") ||
-            joined.contains("call") ||
-            joined.contains("voice") ||
-            joined.contains("video")
+        val eventType = (data["event_type"] ?: data["type"] ?: "").lowercase()
+        if (eventType.startsWith("m.call.")) return true
+
+        val msgType = (data["msgtype"] ?: data["message_type"] ?: "").lowercase()
+        val hasCallId = data.containsKey("call_id") || data.containsKey("m.call.id")
+        val hasCallPayload = data.containsKey("offer") || data.containsKey("answer")
+        return hasCallId && hasCallPayload && !msgType.startsWith("m.")
     }
 
     fun showIncomingCall(
@@ -177,9 +174,9 @@ object XmoCallNotificationHelper {
     private fun notificationId(data: Map<String, String>): Int {
         val seed = data["call_id"]
             ?: data["m.call.id"]
-            ?: data["event_id"]
             ?: data["room_id"]
             ?: data["roomId"]
+            ?: data["event_id"]
             ?: return NOTIFICATION_ID_FALLBACK
         return seed.hashCode() and Int.MAX_VALUE
     }

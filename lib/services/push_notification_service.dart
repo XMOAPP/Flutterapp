@@ -327,16 +327,20 @@ class PushNotificationService {
   }
 
   bool _looksLikeCall(RemoteMessage message) {
-    final values = <String>[
-      ...message.data.keys,
-      ...message.data.values.map((value) => value.toString()),
-      message.notification?.title ?? '',
-      message.notification?.body ?? '',
-    ].join(' ').toLowerCase();
-    return values.contains('call') ||
-        values.contains('m.call') ||
-        values.contains('voice') ||
-        values.contains('video');
+    if (message.data['xmo_push_type'] == 'call') return true;
+    final eventType = (message.data['event_type'] ?? message.data['type'] ?? '')
+        .toString()
+        .toLowerCase();
+    if (eventType.startsWith('m.call.')) return true;
+    final msgType =
+        (message.data['msgtype'] ?? message.data['message_type'] ?? '')
+            .toString()
+            .toLowerCase();
+    final hasCallId = message.data.containsKey('call_id') ||
+        message.data.containsKey('m.call.id');
+    final hasCallPayload =
+        message.data.containsKey('offer') || message.data.containsKey('answer');
+    return hasCallId && hasCallPayload && !msgType.startsWith('m.');
   }
 
   String _notificationTitle(RemoteMessage message, bool isCall) {
@@ -355,16 +359,33 @@ class PushNotificationService {
 
   String _notificationBody(RemoteMessage message, bool isCall) {
     final body = message.notification?.body?.trim();
-    if (body != null && body.isNotEmpty) return body;
+    if (body != null && _isDisplayablePushText(body)) return body;
     final dataBody = message.data['body']?.toString().trim();
-    if (dataBody != null && dataBody.isNotEmpty) return dataBody;
+    if (dataBody != null && _isDisplayablePushText(dataBody)) {
+      return dataBody;
+    }
     final content = message.data['content'] ??
         message.data['body'] ??
         message.data['event_type'];
-    if (content != null && content.toString().trim().isNotEmpty) {
-      return content.toString();
+    final contentText = content?.toString().trim();
+    if (contentText != null && _isDisplayablePushText(contentText)) {
+      return contentText;
     }
+    final eventType =
+        (message.data['event_type'] ?? message.data['msgtype'] ?? '')
+            .toString()
+            .toLowerCase();
+    if (eventType.startsWith('m.room.')) return 'Room updated';
     return isCall ? 'Tap to open XMO' : 'Open XMO to view this message';
+  }
+
+  bool _isDisplayablePushText(String text) {
+    final value = text.trim();
+    if (value.isEmpty) return false;
+    if (value.startsWith('m.call.') || value.startsWith('m.room.')) {
+      return false;
+    }
+    return true;
   }
 
   int _notificationId(RemoteMessage message) {

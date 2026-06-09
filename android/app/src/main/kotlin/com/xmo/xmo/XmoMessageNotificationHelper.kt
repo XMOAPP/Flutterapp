@@ -79,12 +79,14 @@ object XmoMessageNotificationHelper {
     }
 
     private fun bodyFromPayload(data: Map<String, String>): String {
-        data["content"]?.takeIf { it.isNotBlank() }?.let { return it }
-        data["body"]?.takeIf { it.isNotBlank() }?.let { return it }
+        data["content"]?.takeIf { it.isDisplayableText() }?.let { return it }
+        data["body"]?.takeIf { it.isDisplayableText() }?.let { return it }
 
         val msgType = (data["msgtype"] ?: data["message_type"] ?: data["event_type"] ?: "")
             .lowercase()
         return when {
+            msgType.startsWith("m.call.") -> "Incoming call"
+            msgType.startsWith("m.room.") -> "Room updated"
             msgType.contains("m.image") || msgType.contains("image") -> "Photo"
             msgType.contains("m.video") || msgType.contains("video") -> "Video"
             msgType.contains("m.audio") || msgType.contains("audio") -> "Audio"
@@ -94,6 +96,13 @@ object XmoMessageNotificationHelper {
                 "New encrypted message"
             else -> "Open XMO to view this message"
         }
+    }
+
+    private fun String.isDisplayableText(): Boolean {
+        val value = trim()
+        if (value.isBlank()) return false
+        if (value.startsWith("m.call.") || value.startsWith("m.room.")) return false
+        return true
     }
 
     private fun notificationId(data: Map<String, String>): Int {

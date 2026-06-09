@@ -431,7 +431,7 @@ String _notificationBody(
   }
 
   final contentBody = content['body']?.toString().trim();
-  if (contentBody != null && contentBody.isNotEmpty) {
+  if (contentBody != null && _isDisplayablePushText(contentBody)) {
     return contentBody;
   }
 
@@ -443,6 +443,7 @@ String _notificationBody(
   if (lowerMsgType.contains('audio')) return 'Audio';
   if (lowerMsgType.contains('file')) return 'File';
   if (lowerMsgType.contains('location')) return 'Location';
+  if (lowerEventType.startsWith('m.room.')) return 'Room updated';
 
   final eventId = notification['event_id']?.toString();
   return eventId == null || eventId.isEmpty
@@ -450,24 +451,31 @@ String _notificationBody(
       : 'New message';
 }
 
+bool _isDisplayablePushText(String text) {
+  final value = text.trim();
+  if (value.isEmpty) return false;
+  if (value.startsWith('m.call.') || value.startsWith('m.room.')) return false;
+  return true;
+}
+
 bool _isCallNotification(
   String eventType,
   String msgType,
   Map<String, dynamic> content,
 ) {
-  final joined = [
-    eventType,
-    msgType,
-    content['type'],
-    content['call_type'],
-    content['body'],
-  ].whereType<Object>().join(' ').toLowerCase();
+  final lowerEventType = eventType.toLowerCase();
+  final lowerContentType = content['type']?.toString().toLowerCase() ?? '';
+  final lowerMsgType = msgType.toLowerCase();
 
-  return joined.contains('m.call') ||
-      joined.contains(' call') ||
-      joined.startsWith('call') ||
-      joined.contains('voice') ||
-      joined.contains('video');
+  if (lowerEventType.startsWith('m.call.') ||
+      lowerContentType.startsWith('m.call.')) {
+    return true;
+  }
+
+  final hasCallId = content['call_id'] != null || content['id'] != null;
+  final hasCallOfferOrAnswer =
+      content['offer'] != null || content['answer'] != null;
+  return hasCallId && hasCallOfferOrAnswer && !lowerMsgType.startsWith('m.');
 }
 
 String _callType(
