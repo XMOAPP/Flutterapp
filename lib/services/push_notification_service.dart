@@ -358,9 +358,45 @@ class PushNotificationService {
   }
 
   String _notificationBody(RemoteMessage message, bool isCall) {
+    final dataBody = message.data['body']?.toString().trim();
+    final eventType =
+        (message.data['event_type'] ?? message.data['msgtype'] ?? '')
+            .toString()
+            .toLowerCase();
+    final msgType =
+        (message.data['msgtype'] ?? message.data['message_type'] ?? '')
+            .toString()
+            .toLowerCase();
+    if (eventType.contains('encrypted')) return 'New encrypted message';
+    if (msgType.contains('image')) return 'Photo';
+    if (msgType.contains('video')) return 'Video';
+    if (msgType.contains('audio')) {
+      final fileName = (message.data['filename'] ??
+              message.data['content'] ??
+              message.data['body'])
+          ?.toString()
+          .trim();
+      if (fileName != null && fileName.toLowerCase().startsWith('voice_')) {
+        return 'Voice message';
+      }
+      return fileName != null && _isDisplayablePushText(fileName)
+          ? fileName
+          : 'Audio';
+    }
+    if (msgType.contains('file')) {
+      final fileName = (message.data['filename'] ??
+              message.data['content'] ??
+              message.data['body'])
+          ?.toString()
+          .trim();
+      return fileName != null && _isDisplayablePushText(fileName)
+          ? fileName
+          : 'File';
+    }
+    if (msgType.contains('location')) return 'Location';
+    if (eventType.startsWith('m.room.')) return 'Room updated';
     final body = message.notification?.body?.trim();
     if (body != null && _isDisplayablePushText(body)) return body;
-    final dataBody = message.data['body']?.toString().trim();
     if (dataBody != null && _isDisplayablePushText(dataBody)) {
       return dataBody;
     }
@@ -371,11 +407,6 @@ class PushNotificationService {
     if (contentText != null && _isDisplayablePushText(contentText)) {
       return contentText;
     }
-    final eventType =
-        (message.data['event_type'] ?? message.data['msgtype'] ?? '')
-            .toString()
-            .toLowerCase();
-    if (eventType.startsWith('m.room.')) return 'Room updated';
     return isCall ? 'Tap to open XMO' : 'Open XMO to view this message';
   }
 

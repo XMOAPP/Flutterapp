@@ -376,6 +376,7 @@ _FcmPayload _buildFcmPayload(Map<String, dynamic> notification) {
   final title = _notificationTitle(notification, isCall);
   final body =
       _notificationBody(notification, content, eventType, msgType, isCall);
+  final avatarUrl = _notificationAvatarUrl(notification);
 
   final data = <String, String>{
     'title': title,
@@ -394,6 +395,7 @@ _FcmPayload _buildFcmPayload(Map<String, dynamic> notification) {
     if (eventType.isNotEmpty) 'event_type': eventType,
     if (msgType.isNotEmpty) 'msgtype': msgType,
     if (content['body'] != null) 'content': content['body'].toString(),
+    if (avatarUrl != null) 'avatar_url': avatarUrl,
   };
 
   if (isCall) {
@@ -431,19 +433,32 @@ String _notificationBody(
   }
 
   final contentBody = content['body']?.toString().trim();
-  if (contentBody != null && _isDisplayablePushText(contentBody)) {
-    return contentBody;
-  }
-
   final lowerEventType = eventType.toLowerCase();
   final lowerMsgType = msgType.toLowerCase();
   if (lowerEventType.contains('encrypted')) return 'New encrypted message';
-  if (lowerMsgType.contains('image')) return 'Photo';
-  if (lowerMsgType.contains('video')) return 'Video';
-  if (lowerMsgType.contains('audio')) return 'Audio';
-  if (lowerMsgType.contains('file')) return 'File';
+
+  if (lowerMsgType.contains('image')) {
+    return _captionOrLabel(content, 'Photo');
+  }
+  if (lowerMsgType.contains('video')) {
+    return _captionOrLabel(content, 'Video');
+  }
+  if (lowerMsgType.contains('audio')) {
+    final duration = _formatDuration(_contentDurationMs(content));
+    if (_looksLikeVoiceMessage(content)) {
+      return 'Voice message${duration == null ? '' : ' ($duration)'}';
+    }
+    return _fileName(content, fallback: 'Audio');
+  }
+  if (lowerMsgType.contains('file')) {
+    return _fileName(content, fallback: 'File');
+  }
   if (lowerMsgType.contains('location')) return 'Location';
   if (lowerEventType.startsWith('m.room.')) return 'Room updated';
+
+  if (contentBody != null && _isDisplayablePushText(contentBody)) {
+    return contentBody;
+  }
 
   final eventId = notification['event_id']?.toString();
   return eventId == null || eventId.isEmpty
@@ -456,6 +471,69 @@ bool _isDisplayablePushText(String text) {
   if (value.isEmpty) return false;
   if (value.startsWith('m.call.') || value.startsWith('m.room.')) return false;
   return true;
+}
+
+String _captionOrLabel(Map<String, dynamic> content, String label) {
+  final caption = content['xmo_caption']?.toString().trim();
+  if (caption != null && caption.isNotEmpty) return caption;
+  return label;
+}
+
+String _fileName(Map<String, dynamic> content, {required String fallback}) {
+  final filename = content['filename']?.toString().trim();
+  if (filename != null && filename.isNotEmpty) return filename;
+  final body = content['body']?.toString().trim();
+  return body == null || body.isEmpty ? fallback : body;
+}
+
+bool _looksLikeVoiceMessage(Map<String, dynamic> content) {
+  final body = content['body']?.toString().toLowerCase() ?? '';
+  final filename = content['filename']?.toString().toLowerCase() ?? '';
+  return content.containsKey('org.matrix.msc3245.voice') ||
+      body.startsWith('voice_') ||
+      filename.startsWith('voice_');
+}
+
+int? _contentDurationMs(Map<String, dynamic> content) {
+  final info = _asMap(content['info']);
+  final rawDuration = info?['duration'] ?? content['duration'];
+  if (rawDuration is int) return rawDuration;
+  if (rawDuration is num) return rawDuration.toInt();
+  return int.tryParse(rawDuration?.toString() ?? '');
+}
+
+String? _formatDuration(int? durationMs) {
+  if (durationMs == null || durationMs <= 0) return null;
+  final duration = Duration(milliseconds: durationMs);
+  final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+  final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+  if (duration.inHours > 0) {
+    return '${duration.inHours}:$minutes:$seconds';
+  }
+  return '$minutes:$seconds';
+}
+
+String? _notificationAvatarUrl(Map<String, dynamic> notification) {
+  for (final key in const [
+    'sender_avatar_url',
+    'room_avatar_url',
+    'avatar_url',
+    'icon_url',
+  ]) {
+    final value = notification[key]?.toString().trim();
+    if (value != null && value.isNotEmpty) return _mediaUrlToHttp(value);
+  }
+  return null;
+}
+
+String _mediaUrlToHttp(String value) {
+  if (!value.startsWith('mxc://')) return value;
+  final homeserver = Platform.environment['XMO_HOMESERVER_URL']
+      ?.replaceFirst(RegExp(r'/$'), '');
+  if (homeserver == null || homeserver.isEmpty) return value;
+  final parts = value.substring('mxc://'.length).split('/');
+  if (parts.length < 2) return value;
+  return '$homeserver/_matrix/media/v3/thumbnail/${Uri.encodeComponent(parts[0])}/${Uri.encodeComponent(parts.sublist(1).join('/'))}?width=96&height=96&method=crop';
 }
 
 bool _isCallNotification(
