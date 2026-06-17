@@ -30,10 +30,15 @@ class AudioMessageBubble extends StatefulWidget {
 }
 
 class _AudioMessageBubbleState extends State<AudioMessageBubble> {
+  static _AudioMessageBubbleState? _activeBubble;
+
   final AudioPlayer _player = AudioPlayer();
   bool _loading = false;
   bool _prepared = false;
+  Future<void>? _prepareFuture;
   StreamSubscription<PlayerState>? _playerStateSub;
+  double? _scrubProgress;
+  int _seekRequestId = 0;
 
   @override
   void initState() {
@@ -49,6 +54,9 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
 
   @override
   void dispose() {
+    if (_activeBubble == this) {
+      _activeBubble = null;
+    }
     _playerStateSub?.cancel();
     _player.dispose();
     super.dispose();
@@ -57,26 +65,84 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
   Future<void> _togglePlayback() async {
     if (_player.playing) {
       await _player.pause();
+      if (_activeBubble == this) {
+        _activeBubble = null;
+      }
       return;
     }
 
-    if (!_prepared) {
-      setState(() => _loading = true);
-      try {
-        final matrixFile = await widget.downloadAttachment(widget.event);
-        await _player.setAudioSource(
-          _BytesAudioSource(
-            matrixFile.bytes,
-            contentType: _mimeType,
-          ),
-        );
-        _prepared = true;
-      } finally {
-        if (mounted) setState(() => _loading = false);
+    await _prepareAudio();
+    await _stopOtherActiveBubble();
+    _activeBubble = this;
+    await _player.play();
+  }
+
+  Future<void> _stopOtherActiveBubble() async {
+    final active = _activeBubble;
+    if (active == null || active == this || !active.mounted) return;
+    await active._stopForNewAudio();
+  }
+
+  Future<void> _stopForNewAudio() async {
+    try {
+      await _player.pause();
+    } finally {
+      if (_activeBubble == this) {
+        _activeBubble = null;
       }
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _prepareAudio() {
+    if (_prepared) return Future.value();
+    return _prepareFuture ??= _loadAudio();
+  }
+
+  Future<void> _loadAudio() async {
+    if (mounted) {
+      setState(() => _loading = true);
+    }
+    try {
+      final matrixFile = await widget.downloadAttachment(widget.event);
+      await _player.setAudioSource(
+        _BytesAudioSource(
+          matrixFile.bytes,
+          contentType: _mimeType,
+        ),
+      );
+      _prepared = true;
+    } finally {
+      _prepareFuture = null;
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _seekToProgress(double progress) async {
+    final normalizedProgress = progress.clamp(0.0, 1.0);
+    final requestId = ++_seekRequestId;
+    if (mounted) {
+      setState(() => _scrubProgress = normalizedProgress);
     }
 
-    await _player.play();
+    try {
+      await _prepareAudio();
+      if (requestId != _seekRequestId) return;
+
+      final duration = _player.duration ?? _eventDuration;
+      if (duration.inMilliseconds <= 0) return;
+      final target = Duration(
+        milliseconds: (duration.inMilliseconds * normalizedProgress).round(),
+      );
+      await _player.seek(target);
+    } catch (_) {
+      // Playback preparation already reports failures through the existing
+      // attachment download path. Keep waveform seeking non-disruptive.
+    } finally {
+      if (mounted && requestId == _seekRequestId) {
+        setState(() => _scrubProgress = null);
+      }
+    }
   }
 
   String get _mimeType {
@@ -90,7 +156,8 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
   Duration get _eventDuration {
     final info = widget.event.content['info'];
     final raw = info is Map ? info['duration'] : null;
-    final millis = raw is num ? raw.toInt() : int.tryParse(raw?.toString() ?? '');
+    final millis =
+        raw is num ? raw.toInt() : int.tryParse(raw?.toString() ?? '');
     return Duration(milliseconds: millis ?? 0);
   }
 
@@ -114,9 +181,16 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
       initialData: _player.position,
       builder: (context, snapshot) {
         final position = snapshot.data ?? Duration.zero;
-        final progress = duration.inMilliseconds <= 0
+        final playbackProgress = duration.inMilliseconds <= 0
             ? 0.0
             : position.inMilliseconds / duration.inMilliseconds;
+        final progress = _scrubProgress ?? playbackProgress;
+        final displayedPosition = _scrubProgress == null
+            ? position
+            : Duration(
+                milliseconds:
+                    (duration.inMilliseconds * _scrubProgress!).round(),
+              );
 
         return ConstrainedBox(
           constraints: const BoxConstraints(minWidth: 280, maxWidth: 330),
@@ -171,6 +245,7 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
                             inactiveColor: inactive,
                             progress: progress,
                             height: 30,
+                            onSeek: _seekToProgress,
                           ),
                         ),
                       ],
@@ -183,7 +258,11 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
                     children: [
                       const SizedBox(width: 54),
                       Text(
-                        _format(_prepared || isPlaying ? position : duration),
+                        _format(
+                          _scrubProgress != null
+                              ? displayedPosition
+                              : (_prepared || isPlaying ? position : duration),
+                        ),
                         style: GoogleFonts.inter(
                           color: widget.isMe
                               ? kLimeGreen.withValues(alpha: 0.75)

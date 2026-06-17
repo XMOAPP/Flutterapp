@@ -9,6 +9,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:matrix/matrix.dart';
 import 'package:mime/mime.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:record/record.dart';
 import '../theme.dart';
 import '../providers/matrix_provider.dart';
@@ -16,6 +17,7 @@ import '../services/matrix_service.dart';
 import '../services/group_service.dart';
 import '../services/app_settings_service.dart';
 import '../services/voip_service.dart';
+import '../services/room_controls_service.dart';
 import '../services/shared_media_index_service.dart';
 import '../services/transfer_queue_service.dart';
 import '../widgets/matrix_chat/album_media_viewer.dart';
@@ -51,30 +53,80 @@ import 'web_download_stub.dart' if (dart.library.js_interop) 'web_download.dart'
 
 // Web video view
 
+const String _pollStartEventType = 'm.poll.start';
+const String _pollResponseEventType = 'm.poll.response';
+const String _pollStartContentKey = 'm.poll.start';
+const String _pollResponseContentKey = 'm.poll.response';
+const String _unstablePollStartContentKey = 'org.matrix.msc3381.poll.start';
+const String _unstablePollResponseContentKey =
+    'org.matrix.msc3381.poll.response';
+const double _jumpToLatestShowExtent = 160;
+const double _jumpToLatestHideExtent = 56;
+
 /// Real-time Matrix chat screen for a given Room
 class MatrixChatScreen extends StatefulWidget {
   final Room? room;
   final PublicRoomsChunk? previewChannel;
   final MatrixProvider matrixProvider;
+  final String? initialComposerText;
+  final PrivateReplyDraft? initialPrivateReply;
+  final String? initialHighlightedEventId;
 
   const MatrixChatScreen({
     super.key,
     this.room,
     this.previewChannel,
     required this.matrixProvider,
+    this.initialComposerText,
+    this.initialPrivateReply,
+    this.initialHighlightedEventId,
   }) : assert(room != null || previewChannel != null);
 
   @override
   State<MatrixChatScreen> createState() => _MatrixChatScreenState();
 }
 
+class PrivateReplyDraft {
+  final String sourceRoomId;
+  final String sourceRoomName;
+  final String sourceEventId;
+  final String senderId;
+  final String senderName;
+  final String preview;
+  final String msgtype;
+
+  const PrivateReplyDraft({
+    required this.sourceRoomId,
+    required this.sourceRoomName,
+    required this.sourceEventId,
+    required this.senderId,
+    required this.senderName,
+    required this.preview,
+    required this.msgtype,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'source_room_id': sourceRoomId,
+        'source_room_name': sourceRoomName,
+        'source_event_id': sourceEventId,
+        'sender_id': senderId,
+        'sender_name': senderName,
+        'preview': preview,
+        'msgtype': msgtype,
+      };
+}
+
 class _MatrixChatScreenState extends State<MatrixChatScreen> {
   final _textCtrl = TextEditingController();
+  final _textFocusNode = FocusNode();
   final _scrollCtrl = ScrollController();
   Timeline? _timeline;
   bool _loading = true;
   bool _loadingHistory = false;
   bool _historyExhausted = false;
+  bool _showJumpToLatestButton = false;
+  int _newMessagesBelowCount = 0;
+  bool _scrollToBottomScheduled = false;
   bool _uploading = false;
   bool _recording = false;
   bool _recordingPaused = false;
@@ -84,6 +136,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   StreamSubscription<EventUpdate>? _eventSub;
   late MediaHandler _mediaHandler;
   Event? _replyToEvent; // Track which message we're replying to
+  PrivateReplyDraft? _privateReplyDraft;
   List<Event> _pinnedEvents = []; // Track pinned messages
   int? _pinnedBannerIndex;
   double _lastPinnedScrollOffset = 0;
@@ -105,6 +158,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   final Map<String, GlobalKey> _messageKeys = {};
   String? _highlightedEventId;
   Timer? _highlightTimer;
+  bool _handledInitialHighlightedEvent = false;
   final List<_PendingUpload> _pendingUploads = [];
   final List<_PendingAlbumUpload> _pendingAlbumUploads = [];
   final Set<String> _cancelledPendingUploadIds = {};
@@ -146,6 +200,17 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   @override
   void initState() {
     super.initState();
+    _privateReplyDraft = widget.initialPrivateReply;
+    final initialComposerText = widget.initialComposerText;
+    if (initialComposerText != null && initialComposerText.isNotEmpty) {
+      _textCtrl.text = initialComposerText;
+      _textCtrl.selection = TextSelection.collapsed(
+        offset: initialComposerText.length,
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _textFocusNode.requestFocus();
+      });
+    }
     _mediaHandler = MediaHandler(
       matrixProvider: widget.matrixProvider,
       context: context,
@@ -409,18 +474,34 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         autoScrollAfterLoad: true,
       );
       _scrollToBottom();
+      _openInitialHighlightedMessage();
       _markRoomAsRead();
       _loadPinnedMessages();
       _eventSub = widget.matrixProvider.service.onEvent.listen((update) {
         if (update.roomID == _room!.id && mounted) {
-          setState(() {});
+          final shouldAutoScroll = _shouldAutoScrollForTimelineUpdate();
           if (update.type == EventUpdateType.timeline) {
             final timeline = _timeline;
             if (timeline != null) {
               unawaited(_indexSharedMediaTimeline(timeline));
             }
-            _scrollToBottom();
+            if (shouldAutoScroll) {
+              if (_showJumpToLatestButton || _newMessagesBelowCount > 0) {
+                setState(_clearNewMessagesBelow);
+              }
+              _scrollToBottom();
+            } else if (!_loadingHistory) {
+              setState(() {
+                _showJumpToLatestButton = true;
+                _newMessagesBelowCount =
+                    (_newMessagesBelowCount + 1).clamp(0, 999);
+              });
+            } else {
+              setState(() {});
+            }
             _markRoomAsRead();
+          } else {
+            setState(() {});
           }
           // Reload pinned messages if state changed
           if (update.type == EventUpdateType.state) {
@@ -441,6 +522,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   void _handleChatScroll() {
     _handlePinnedBannerScroll();
     _maybeLoadOlderMessages();
+    _syncJumpButtonWithScrollPosition();
   }
 
   void _maybeLoadOlderMessages() {
@@ -703,16 +785,208 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     }
   }
 
-  void _scrollToBottom() {
+  void _scrollToBottom({bool animate = false}) {
+    if (_scrollToBottomScheduled) return;
+    _scrollToBottomScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToBottomScheduled = false;
       if (_scrollCtrl.hasClients) {
-        _scrollCtrl.animateTo(
-          _scrollCtrl.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+        final target = _scrollCtrl.position.maxScrollExtent;
+        if ((_scrollCtrl.offset - target).abs() <= 1) return;
+        if (animate) {
+          unawaited(
+            _scrollCtrl
+                .animateTo(
+              target,
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+            )
+                .then((_) {
+              if (!_scrollCtrl.hasClients) return;
+              final finalTarget = _scrollCtrl.position.maxScrollExtent;
+              if ((_scrollCtrl.offset - finalTarget).abs() > 1) {
+                _scrollCtrl.jumpTo(finalTarget);
+              }
+            }),
+          );
+        } else {
+          _scrollCtrl.jumpTo(target);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!_scrollCtrl.hasClients || !_isNearBottom) return;
+            final finalTarget = _scrollCtrl.position.maxScrollExtent;
+            if ((_scrollCtrl.offset - finalTarget).abs() > 1) {
+              _scrollCtrl.jumpTo(finalTarget);
+            }
+          });
+        }
       }
     });
+  }
+
+  bool get _isNearBottom {
+    if (!_scrollCtrl.hasClients) return true;
+    return _scrollCtrl.position.extentAfter <= _jumpToLatestHideExtent;
+  }
+
+  bool _shouldAutoScrollForTimelineUpdate() {
+    if (_loadingHistory) return false;
+    return _isNearBottom;
+  }
+
+  void _clearNewMessagesBelow() {
+    _showJumpToLatestButton = false;
+    _newMessagesBelowCount = 0;
+  }
+
+  void _syncJumpButtonWithScrollPosition() {
+    if (!_scrollCtrl.hasClients) return;
+
+    final extentAfter = _scrollCtrl.position.extentAfter;
+    final shouldShow = _showJumpToLatestButton
+        ? extentAfter > _jumpToLatestHideExtent
+        : extentAfter > _jumpToLatestShowExtent;
+    if (shouldShow == _showJumpToLatestButton) {
+      if (!shouldShow && _newMessagesBelowCount > 0) {
+        setState(() => _newMessagesBelowCount = 0);
+      }
+      return;
+    }
+    setState(() {
+      _showJumpToLatestButton = shouldShow;
+      if (!shouldShow) {
+        _newMessagesBelowCount = 0;
+      }
+    });
+  }
+
+  void _jumpToLatestMessages() {
+    if (mounted && (_showJumpToLatestButton || _newMessagesBelowCount > 0)) {
+      setState(_clearNewMessagesBelow);
+    }
+    _scrollToBottom(animate: true);
+    _markRoomAsRead();
+  }
+
+  Widget _buildJumpToLatestButton() {
+    final countLabel =
+        _newMessagesBelowCount >= 999 ? '999+' : '$_newMessagesBelowCount';
+    final visible = _showJumpToLatestButton;
+
+    return Positioned(
+      right: 18,
+      bottom: 78,
+      child: SafeArea(
+        minimum: const EdgeInsets.only(bottom: 4),
+        child: IgnorePointer(
+          ignoring: !visible,
+          child: AnimatedOpacity(
+            opacity: visible ? 1 : 0,
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOutCubic,
+            child: AnimatedSlide(
+              offset: visible ? Offset.zero : const Offset(0, 0.22),
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeOutCubic,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _jumpToLatestMessages,
+                child: SizedBox(
+                  width: 54,
+                  height: 62,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    alignment: Alignment.bottomCenter,
+                    children: [
+                      Container(
+                        width: 50,
+                        height: 50,
+                        decoration: BoxDecoration(
+                          color:
+                              const Color(0xFF1B2A36).withValues(alpha: 0.98),
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: kBlack.withValues(alpha: 0.38),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          color: kWhite,
+                          size: 34,
+                        ),
+                      ),
+                      if (_newMessagesBelowCount > 0)
+                        Positioned(
+                          top: 0,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF4B9CE2),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              countLabel,
+                              style: GoogleFonts.inter(
+                                color: kWhite,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                height: 1.05,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHistoryLoadingIndicator() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 10),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: kDarkGrey.withValues(alpha: 0.92),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: kLimeGreen,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Loading old messages...',
+                style: GoogleFonts.inter(
+                  color: kLightGrey,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _sendMessage() async {
@@ -722,13 +996,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       _showSnackBar('Please wait for the current upload to finish.');
       return;
     }
-    if (_isReadOnlyRestricted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('You are in read-only mode in this group'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+    if (!_ensureRoomActionAllowed(XmoRoomPermission.sendMessages) ||
+        !_ensureSlowModeAllowed()) {
       return;
     }
     _textCtrl.clear();
@@ -737,11 +1006,74 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     if (_replyToEvent != null) {
       await _room!.sendTextEvent(text, inReplyTo: _replyToEvent);
       setState(() => _replyToEvent = null);
+    } else if (_privateReplyDraft != null) {
+      await _room!.sendEvent({
+        'msgtype': MessageTypes.Text,
+        'body': text,
+        'com.xmo.private_reply': _privateReplyDraft!.toJson(),
+      });
+      setState(() => _privateReplyDraft = null);
     } else {
       await widget.matrixProvider.sendMessage(_room!.id, text);
     }
 
     _scrollToBottom();
+  }
+
+  void _showComposerEmojiPicker() {
+    if (!_canSendMessages) return;
+
+    void switchToKeyboard() {
+      Navigator.pop(context);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _textFocusNode.requestFocus();
+      });
+    }
+
+    ReactionPicker.show(
+      context,
+      (emoji) {
+        final value = _textCtrl.value;
+        final selection = value.selection;
+        final start = selection.isValid ? selection.start : value.text.length;
+        final end = selection.isValid ? selection.end : value.text.length;
+        final updatedText = value.text.replaceRange(start, end, emoji);
+        final cursorOffset = start + emoji.length;
+
+        _textCtrl.value = TextEditingValue(
+          text: updatedText,
+          selection: TextSelection.collapsed(offset: cursorOffset),
+        );
+      },
+      closeOnSelection: false,
+      composer: ChatInputBar(
+        textController: _textCtrl,
+        emojiButtonIcon: Icons.keyboard_alt_outlined,
+        uploading: _isUploadBusy,
+        recording: false,
+        enabled: _canSendMessages,
+        disabledText: _isReadOnlyRestricted
+            ? 'Read-only mode'
+            : 'You cannot send messages',
+        onSend: () {
+          Navigator.pop(context);
+          _sendMessage();
+        },
+        onShowEmojiPicker: switchToKeyboard,
+        onTextFieldTap: switchToKeyboard,
+        onShowAttachmentSheet: () {
+          Navigator.pop(context);
+          _showAttachmentSheet();
+        },
+        onStartRecording: () {
+          Navigator.pop(context);
+          _startAudioRecording();
+        },
+        onCancelRecording: _cancelAudioRecording,
+        onToggleRecordingPause: _toggleAudioRecordingPause,
+        onStopAndSendRecording: _stopAndSendAudioRecording,
+      ),
+    );
   }
 
   Future<void> _startAudioRecording() async {
@@ -750,8 +1082,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       _showSnackBar('Voice recording is not available in the web build yet.');
       return;
     }
-    if (_isReadOnlyRestricted) {
-      _showSnackBar('You are in read-only mode in this group');
+    if (!_ensureRoomActionAllowed(XmoRoomPermission.sendMedia) ||
+        !_ensureSlowModeAllowed()) {
       return;
     }
 
@@ -938,11 +1270,18 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   void _setReplyTo(Event event) {
-    setState(() => _replyToEvent = event);
+    setState(() {
+      _replyToEvent = event;
+      _privateReplyDraft = null;
+    });
   }
 
   void _cancelReply() {
     setState(() => _replyToEvent = null);
+  }
+
+  void _cancelPrivateReply() {
+    setState(() => _privateReplyDraft = null);
   }
 
   Future<void> _joinPreviewChannel() async {
@@ -1705,6 +2044,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       _showSnackBar('Please wait for the current upload to finish.');
       return;
     }
+    if (!_ensureRoomActionAllowed(XmoRoomPermission.sendMedia) ||
+        !_ensureSlowModeAllowed()) {
+      return;
+    }
     final result = await FilePicker.platform.pickFiles(
       type: FileType.audio,
       withData: true,
@@ -1755,6 +2098,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       _showSnackBar('Please wait for the current upload to finish.');
       return;
     }
+    if (!_ensureRoomActionAllowed(XmoRoomPermission.sendMedia) ||
+        !_ensureSlowModeAllowed()) {
+      return;
+    }
     final result = await FilePicker.platform.pickFiles(
       type: FileType.any,
       withData: true,
@@ -1801,6 +2148,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       onDocuments: () {
         _pickAndSendFileWithPending();
       },
+      onSticker: () {
+        _pickAndSendSticker();
+      },
+      onPoll: () {
+        _showPollComposer();
+      },
       onContacts: () {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1814,11 +2167,93 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     );
   }
 
+  Future<void> _pickAndSendSticker() async {
+    final room = _room;
+    if (room == null) return;
+    if (_isUploadBusy) {
+      _showSnackBar('Please wait for the current upload to finish.');
+      return;
+    }
+    if (!_ensureRoomActionAllowed(XmoRoomPermission.sendStickers) ||
+        !_ensureSlowModeAllowed()) {
+      return;
+    }
+
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const [
+        'jpg',
+        'jpeg',
+        'png',
+        'gif',
+        'webp',
+      ],
+      withData: true,
+      allowMultiple: false,
+    );
+    final picked =
+        result == null || result.files.isEmpty ? null : result.files.first;
+    final bytes = picked?.bytes;
+    if (picked == null || bytes == null || bytes.isEmpty) return;
+
+    try {
+      _setUploading(true);
+      await widget.matrixProvider.service.sendSticker(
+        roomId: room.id,
+        bytes: bytes,
+        fileName: picked.name,
+        mimeType:
+            lookupMimeType(picked.name, headerBytes: bytes) ?? 'image/png',
+      );
+      _scrollToBottom();
+    } catch (e) {
+      if (!mounted) return;
+      _showSnackBar('Failed to send sticker: $e');
+    } finally {
+      _setUploading(false);
+    }
+  }
+
+  Future<void> _showPollComposer() async {
+    final room = _room;
+    if (room == null) return;
+    if (_isUploadBusy) {
+      _showSnackBar('Please wait for the current upload to finish.');
+      return;
+    }
+    if (!_ensureRoomActionAllowed(XmoRoomPermission.sendPolls) ||
+        !_ensureSlowModeAllowed()) {
+      return;
+    }
+
+    final result = await showDialog<_PollComposeResult>(
+      context: context,
+      builder: (_) => const _PollComposerDialog(),
+    );
+    if (result == null) return;
+
+    try {
+      await widget.matrixProvider.service.sendPoll(
+        roomId: room.id,
+        question: result.question,
+        options: result.options,
+      );
+      _scrollToBottom();
+    } catch (e) {
+      if (!mounted) return;
+      _showSnackBar('Failed to send poll: $e');
+    }
+  }
+
   Future<void> _openCameraForChat() async {
     final room = _room;
     if (room == null) return;
     if (_isUploadBusy) {
       _showSnackBar('Please wait for the current upload to finish.');
+      return;
+    }
+    if (!_ensureRoomActionAllowed(XmoRoomPermission.sendMedia) ||
+        !_ensureSlowModeAllowed()) {
       return;
     }
 
@@ -1857,6 +2292,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     if (room == null) return;
     if (_isUploadBusy) {
       _showSnackBar('Please wait for the current upload to finish.');
+      return;
+    }
+    if (!_ensureRoomActionAllowed(XmoRoomPermission.sendMedia) ||
+        !_ensureSlowModeAllowed()) {
       return;
     }
 
@@ -2310,8 +2749,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                 !e.redacted &&
                 !_isEditReplacementEvent(e) &&
                 !_isPendingAlbumTimelineEvent(e) &&
+                !MatrixService.isGroupCallPushMarker(e) &&
                 (e.type == EventTypes.Message ||
-                    e.type == EventTypes.Encrypted))
+                    e.type == EventTypes.Encrypted ||
+                    e.type == EventTypes.Sticker ||
+                    e.type == _pollStartEventType))
             .toList()
             .reversed
             .toList() ??
@@ -2397,6 +2839,72 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
     if (!mounted) return;
     _highlightMessage(eventId);
+  }
+
+  Future<void> _openInitialHighlightedMessage() async {
+    final eventId = widget.initialHighlightedEventId?.trim();
+    if (_handledInitialHighlightedEvent || eventId == null || eventId.isEmpty) {
+      return;
+    }
+    _handledInitialHighlightedEvent = true;
+
+    var found = _visibleMessages().any((event) => event.eventId == eventId);
+    while (!found &&
+        mounted &&
+        !_historyExhausted &&
+        _timeline?.canRequestHistory == true) {
+      final beforeCount = _timeline!.events.length;
+      await _loadOlderMessages(
+        historyCount: 100,
+        preserveScroll: false,
+      );
+      found = _visibleMessages().any((event) => event.eventId == eventId);
+      if (_timeline!.events.length <= beforeCount) break;
+    }
+
+    if (!mounted) return;
+    if (!found) {
+      _showSnackBar('Original message not found');
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        unawaited(_scrollToAndHighlightMessage(eventId));
+      }
+    });
+  }
+
+  Future<void> _openPrivateReplySource(
+    String sourceRoomId,
+    String sourceEventId,
+  ) async {
+    final roomId = sourceRoomId.trim();
+    final eventId = sourceEventId.trim();
+    if (roomId.isEmpty || eventId.isEmpty) return;
+
+    if (roomId == _room?.id) {
+      await _scrollToAndHighlightMessage(eventId);
+      return;
+    }
+
+    final sourceRoom = await _getRoomByIdAfterSync(roomId);
+    if (!mounted) return;
+    if (sourceRoom == null || sourceRoom.membership != Membership.join) {
+      _showSnackBar('Original group is unavailable');
+      return;
+    }
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MatrixChatScreen(
+          room: sourceRoom,
+          matrixProvider: widget.matrixProvider,
+          initialHighlightedEventId: eventId,
+        ),
+      ),
+    );
   }
 
   void _highlightMessage(String eventId) {
@@ -2505,13 +3013,15 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final isPinned = _pinnedEvents.any((e) => e.eventId == event.eventId);
     final canPin = _canPinMessages();
     final canDeleteOwnAttachment = isMe && canDelete;
+    final canReact = _canSendMessages && !event.redacted;
     final canShowMenu = canReply ||
         canCopy ||
         canForward ||
         canDownload ||
         canEdit ||
         canDelete ||
-        canPin;
+        canPin ||
+        canReact;
 
     return KeyedSubtree(
       key: key,
@@ -2534,8 +3044,27 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                   left: isMe ? 60 : 0,
                   right: isMe ? 0 : 60,
                 ),
-                child: isImage || isVideo
-                    ? MediaMessageBubble(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment:
+                      isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                  children: [
+                    if (displayEvent.type == EventTypes.Sticker)
+                      _buildStickerBubble(
+                        event: displayEvent,
+                        isMe: isMe,
+                        senderName: senderName,
+                        time: time,
+                      )
+                    else if (displayEvent.type == _pollStartEventType)
+                      _buildPollBubble(
+                        event: displayEvent,
+                        isMe: isMe,
+                        senderName: senderName,
+                        time: time,
+                      )
+                    else if (isImage || isVideo)
+                      MediaMessageBubble(
                         event: displayEvent,
                         isMe: isMe,
                         senderName: senderName,
@@ -2558,7 +3087,16 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                         buildMessageStatus: (_) => _buildMessageStatus(event),
                         isEdited: isEdited,
                       )
-                    : TextOrFileMessageBubble(
+                    else if (_hasLinkPreview(displayEvent))
+                      _buildLinkPreviewBubble(
+                        event: displayEvent,
+                        isMe: isMe,
+                        senderName: senderName,
+                        time: time,
+                        status: _buildMessageStatus(event),
+                      )
+                    else
+                      TextOrFileMessageBubble(
                         event: displayEvent,
                         isMe: isMe,
                         senderName: senderName,
@@ -2582,15 +3120,637 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                         loadVideoThumbnail: _mediaHandler.loadVideoThumbnail,
                         isEdited: isEdited,
                         onReplyTap: _scrollToAndHighlightMessage,
+                        onPrivateReplyTap: _openPrivateReplySource,
                         mentionMembers: _mentionMembersForCurrentRoom(),
                         onMentionTap: _showMentionProfileSheet,
                       ),
+                    MessageReactions(
+                      reactions: _reactionSummariesFor(event),
+                      isMyMessage: isMe,
+                      onTap: (reaction) =>
+                          _showReactionDetails(event, reaction),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
         ),
       ),
     );
+  }
+
+  bool _hasLinkPreview(Event event) {
+    return event.type == EventTypes.Message &&
+        event.content['com.xmo.link_preview'] is Map;
+  }
+
+  Widget _buildStickerBubble({
+    required Event event,
+    required bool isMe,
+    required String senderName,
+    required String time,
+  }) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 220),
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: isMe ? const Color(0xFF1A2A1A) : const Color(0xFF2C2C2E),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment:
+            isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (!isMe)
+            Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: 4),
+              child: Text(
+                senderName,
+                style: GoogleFonts.inter(
+                  color: kLimeGreen,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: SizedBox(
+              width: 190,
+              height: 190,
+              child: FutureBuilder<Uint8List?>(
+                future: _mediaHandler.loadImageBytes(event),
+                builder: (context, snapshot) {
+                  final bytes = snapshot.data;
+                  if (bytes == null || bytes.isEmpty) {
+                    return const ColoredBox(
+                      color: kDarkGrey,
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          color: kLimeGreen,
+                          strokeWidth: 2,
+                        ),
+                      ),
+                    );
+                  }
+                  return Image.memory(
+                    bytes,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const ColoredBox(
+                      color: kDarkGrey,
+                      child: Icon(Icons.sticky_note_2, color: kLightGrey),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            time,
+            style: GoogleFonts.inter(
+              color: isMe ? kLimeGreen : kLightGrey,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPollBubble({
+    required Event event,
+    required bool isMe,
+    required String senderName,
+    required String time,
+  }) {
+    final question = _pollQuestion(event);
+    final answers = _pollAnswers(event);
+    final votes = _pollVoteCounts(event.eventId);
+    final totalVotes = votes.values.fold<int>(0, (sum, count) => sum + count);
+    final ownVote = _ownPollVote(event.eventId);
+
+    return Container(
+      width: MediaQuery.sizeOf(context).width < 390 ? 285 : 320,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+      decoration: BoxDecoration(
+        color: isMe ? const Color(0xFF1A2A1A) : const Color(0xFF2C2C2E),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (!isMe)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                senderName,
+                style: GoogleFonts.inter(
+                  color: kLimeGreen,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          Row(
+            children: [
+              const Icon(Icons.poll_rounded, color: kLimeGreen, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  question,
+                  style: GoogleFonts.inter(
+                    color: kWhite,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          for (final answer in answers) ...[
+            _PollOptionTile(
+              text: answer.text,
+              count: votes[answer.id] ?? 0,
+              total: totalVotes,
+              selected: ownVote == answer.id,
+              onTap:
+                  _canSendMessages ? () => _voteInPoll(event, answer.id) : null,
+            ),
+            const SizedBox(height: 7),
+          ],
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '$totalVotes vote${totalVotes == 1 ? '' : 's'}',
+                style: GoogleFonts.inter(
+                  color: kLightGrey,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Text(
+                time,
+                style: GoogleFonts.inter(
+                  color: isMe ? kLimeGreen : kLightGrey,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLinkPreviewBubble({
+    required Event event,
+    required bool isMe,
+    required String senderName,
+    required String time,
+    required Widget status,
+  }) {
+    final preview = event.content['com.xmo.link_preview'];
+    if (preview is! Map) return const SizedBox.shrink();
+    final rawUrl = preview['url']?.toString().trim();
+    if (rawUrl == null || rawUrl.isEmpty) return const SizedBox.shrink();
+    final uri = Uri.tryParse(rawUrl);
+    if (uri == null) return const SizedBox.shrink();
+
+    final title = preview['title']?.toString().trim();
+    final host = preview['host']?.toString().trim();
+    final description = preview['description']?.toString().trim();
+    final siteName = preview['site_name']?.toString().trim();
+    final imageUrl = preview['image_url']?.toString().trim();
+    final label = (title == null || title.isEmpty) ? host ?? uri.host : title;
+    final body = event.body.trim();
+
+    return Container(
+      width: MediaQuery.sizeOf(context).width < 390 ? 270 : 315,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: isMe ? const Color(0xFF1A2A1A) : const Color(0xFF2C2C2E),
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(18),
+          topRight: const Radius.circular(18),
+          bottomLeft: Radius.circular(isMe ? 18 : 4),
+          bottomRight: Radius.circular(isMe ? 4 : 18),
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => _openExternalUrl(uri),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!isMe)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 5),
+                child: Text(
+                  senderName,
+                  style: GoogleFonts.inter(
+                    color: kLimeGreen,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            Container(
+              width: double.infinity,
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                color: isMe ? const Color(0xFF203520) : const Color(0xFF252527),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (imageUrl != null && imageUrl.isNotEmpty)
+                    ClipRRect(
+                      borderRadius: const BorderRadius.only(
+                        bottomLeft: Radius.circular(9),
+                        bottomRight: Radius.circular(9),
+                      ),
+                      child: AspectRatio(
+                        aspectRatio: 16 / 9,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Image.network(
+                              imageUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) =>
+                                  const SizedBox.shrink(),
+                            ),
+                            if (_isVideoPreviewHost(uri.host))
+                              Center(
+                                child: Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.55),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.play_arrow_rounded,
+                                    color: kWhite,
+                                    size: 32,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.all(9),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          label,
+                          style: GoogleFonts.inter(
+                            color: kWhite,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (description != null && description.isNotEmpty) ...[
+                          const SizedBox(height: 5),
+                          Text(
+                            description,
+                            style: GoogleFonts.inter(
+                              color: kLightGrey,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              height: 1.25,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.link_rounded,
+                              color: kLightGrey,
+                              size: 14,
+                            ),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                (siteName == null || siteName.isEmpty)
+                                    ? host ?? uri.host
+                                    : siteName,
+                                style: GoogleFonts.inter(
+                                  color: kLightGrey,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 6),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (body.isNotEmpty) ...[
+                  Expanded(
+                    child: Text(
+                      body,
+                      style: GoogleFonts.inter(
+                        color: kAudioBlue,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        height: 1.18,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ] else
+                  const Spacer(),
+                Text(
+                  time,
+                  style: GoogleFonts.inter(
+                    color: isMe ? kLimeGreen : kLightGrey,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                if (isMe) ...[
+                  const SizedBox(width: 4),
+                  status,
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  bool _isVideoPreviewHost(String host) {
+    final lower = host.toLowerCase();
+    return lower.contains('youtube.com') ||
+        lower.contains('youtu.be') ||
+        lower.contains('vimeo.com');
+  }
+
+  Future<void> _openExternalUrl(Uri uri) async {
+    final launchUri =
+        uri.hasScheme ? uri : Uri.parse('https://${uri.toString()}');
+    if (!await launchUrl(launchUri, mode: LaunchMode.externalApplication)) {
+      _showSnackBar('Unable to open link');
+    }
+  }
+
+  List<MessageReactionSummary> _reactionSummariesFor(Event event) {
+    final usersByEmoji = <String, List<ReactionUser>>{};
+    final reactedByMe = <String>{};
+    final events = _timeline?.events ?? const <Event>[];
+    for (final reaction in events) {
+      if (reaction.redacted || reaction.type != EventTypes.Reaction) continue;
+      if (_relationEventId(reaction) != event.eventId) continue;
+      final key = _relationKey(reaction);
+      if (key == null || key.isEmpty) continue;
+      usersByEmoji.putIfAbsent(key, () => <ReactionUser>[]).add(
+            _reactionUserFor(reaction.senderId),
+          );
+      if (reaction.senderId == _myUserId) reactedByMe.add(key);
+    }
+
+    final summaries = usersByEmoji.entries.map((entry) {
+      return MessageReactionSummary(
+        emoji: entry.key,
+        count: entry.value.length,
+        reactedByMe: reactedByMe.contains(entry.key),
+        users: entry.value,
+      );
+    }).toList(growable: false);
+
+    final quickOrder = {
+      for (var i = 0; i < ReactionPicker.quickReactions.length; i++)
+        ReactionPicker.quickReactions[i]: i,
+    };
+    return summaries.toList()
+      ..sort((a, b) {
+        final byMine = (b.reactedByMe ? 1 : 0) - (a.reactedByMe ? 1 : 0);
+        if (byMine != 0) return byMine;
+        final byCount = b.count.compareTo(a.count);
+        if (byCount != 0) return byCount;
+        return (quickOrder[a.emoji] ?? 999).compareTo(
+          quickOrder[b.emoji] ?? 999,
+        );
+      });
+  }
+
+  Future<void> _toggleReaction(Event event, String emoji) async {
+    final room = _room;
+    if (room == null) return;
+
+    final events = _timeline?.events ?? const <Event>[];
+    final myReactions = <Event>[];
+    var alreadyReactedWithEmoji = false;
+    for (final reaction in events) {
+      if (reaction.redacted || reaction.type != EventTypes.Reaction) continue;
+      if (reaction.senderId != _myUserId) continue;
+      if (_relationEventId(reaction) != event.eventId) continue;
+      myReactions.add(reaction);
+      if (_relationKey(reaction) == emoji) {
+        alreadyReactedWithEmoji = true;
+      }
+    }
+
+    if (alreadyReactedWithEmoji) {
+      for (final reaction in myReactions) {
+        if (_relationKey(reaction) != emoji) continue;
+        await room.redactEvent(reaction.eventId);
+      }
+      return;
+    }
+
+    for (final reaction in myReactions) {
+      await room.redactEvent(reaction.eventId);
+    }
+
+    await room.sendReaction(event.eventId, emoji);
+  }
+
+  ReactionUser _reactionUserFor(String userId) {
+    final room = _room;
+    if (room != null) {
+      for (final user in room.getParticipants()) {
+        if (user.id != userId) continue;
+        final displayName = user.displayName?.trim();
+        return ReactionUser(
+          userId: userId,
+          displayName: displayName == null || displayName.isEmpty
+              ? _shortUserId(userId)
+              : displayName,
+          avatarUrl: user.avatarUrl?.toString(),
+        );
+      }
+    }
+    return ReactionUser(userId: userId, displayName: _shortUserId(userId));
+  }
+
+  String _shortUserId(String userId) {
+    final localpart = userId.startsWith('@') ? userId.substring(1) : userId;
+    final colon = localpart.indexOf(':');
+    return colon == -1 ? localpart : localpart.substring(0, colon);
+  }
+
+  String? _myReactionFor(Event event) {
+    final events = _timeline?.events ?? const <Event>[];
+    for (final reaction in events) {
+      if (reaction.redacted || reaction.type != EventTypes.Reaction) continue;
+      if (reaction.senderId != _myUserId) continue;
+      if (_relationEventId(reaction) != event.eventId) continue;
+      final key = _relationKey(reaction);
+      if (key != null && key.isNotEmpty) return key;
+    }
+    return null;
+  }
+
+  String? _relationEventId(Event event) {
+    final relatesTo = event.content['m.relates_to'];
+    if (relatesTo is Map) return relatesTo['event_id']?.toString();
+    return event.relationshipEventId;
+  }
+
+  String? _relationKey(Event event) {
+    final relatesTo = event.content['m.relates_to'];
+    if (relatesTo is Map) return relatesTo['key']?.toString();
+    return null;
+  }
+
+  Map? _pollStartContent(Event event) {
+    final stable = event.content[_pollStartContentKey];
+    if (stable is Map) return stable;
+    final unstable = event.content[_unstablePollStartContentKey];
+    if (unstable is Map) return unstable;
+    return null;
+  }
+
+  String _pollQuestion(Event event) {
+    final content = _pollStartContent(event);
+    final question = content?['question'];
+    if (question is Map) {
+      final text = question['m.text'] ?? question['org.matrix.msc1767.text'];
+      if (text is String && text.trim().isNotEmpty) return text.trim();
+    }
+    final body = event.body.trim();
+    return body.isEmpty ? 'Poll' : body;
+  }
+
+  List<_PollAnswer> _pollAnswers(Event event) {
+    final content = _pollStartContent(event);
+    final answers = content?['answers'];
+    if (answers is! List) return const [];
+
+    final parsed = <_PollAnswer>[];
+    for (final answer in answers) {
+      if (answer is! Map) continue;
+      final id = answer['id']?.toString();
+      final text = answer['m.text'] ?? answer['org.matrix.msc1767.text'];
+      if (id == null || id.isEmpty || text is! String || text.trim().isEmpty) {
+        continue;
+      }
+      parsed.add(_PollAnswer(id: id, text: text.trim()));
+    }
+    return parsed;
+  }
+
+  Map<String, int> _pollVoteCounts(String pollEventId) {
+    final latestVoteBySender = <String, String>{};
+    final events = _timeline?.events ?? const <Event>[];
+    for (final event in events) {
+      if (event.redacted || event.type != _pollResponseEventType) continue;
+      if (_relationEventId(event) != pollEventId) continue;
+      final answerId = _pollResponseAnswerId(event);
+      if (answerId == null || answerId.isEmpty) continue;
+      latestVoteBySender[event.senderId] = answerId;
+    }
+
+    final counts = <String, int>{};
+    for (final answerId in latestVoteBySender.values) {
+      counts[answerId] = (counts[answerId] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  String? _ownPollVote(String pollEventId) {
+    final events = _timeline?.events ?? const <Event>[];
+    for (final event in events) {
+      if (event.redacted ||
+          event.type != _pollResponseEventType ||
+          event.senderId != _myUserId ||
+          _relationEventId(event) != pollEventId) {
+        continue;
+      }
+      final answerId = _pollResponseAnswerId(event);
+      if (answerId != null && answerId.isNotEmpty) return answerId;
+    }
+    return null;
+  }
+
+  String? _pollResponseAnswerId(Event event) {
+    final stable = event.content[_pollResponseContentKey];
+    final response =
+        stable is Map ? stable : event.content[_unstablePollResponseContentKey];
+    if (response is! Map) return null;
+    final answers = response['answers'];
+    if (answers is List && answers.isNotEmpty) {
+      return answers.first?.toString();
+    }
+    return null;
+  }
+
+  Future<void> _voteInPoll(Event pollEvent, String answerId) async {
+    final room = _room;
+    if (room == null) return;
+    try {
+      await widget.matrixProvider.service.sendPollResponse(
+        roomId: room.id,
+        pollEventId: pollEvent.eventId,
+        answerId: answerId,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _showSnackBar('Failed to vote: $e');
+    }
   }
 
   Widget _buildMediaAlbumBubble(List<Event> events) {
@@ -2683,6 +3843,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                           ),
                         ),
                       ],
+                    ),
+                    MessageReactions(
+                      reactions: _reactionSummariesFor(primaryEvent),
+                      isMyMessage: isMe,
+                      onTap: (reaction) =>
+                          _showReactionDetails(primaryEvent, reaction),
                     ),
                   ],
                 ),
@@ -3442,7 +4608,66 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   bool get _canSendMessages =>
       _room != null &&
       _room!.canSendEvent('m.room.message') &&
+      RoomControlsService.canPerform(
+        _room!,
+        _myUserId,
+        XmoRoomPermission.sendMessages,
+      ) &&
       !_isReadOnlyRestricted;
+
+  bool _canPerformRoomAction(XmoRoomPermission permission) {
+    final room = _room;
+    if (room == null) return false;
+    return RoomControlsService.canPerform(room, _myUserId, permission);
+  }
+
+  String _permissionDeniedMessage(XmoRoomPermission permission) {
+    switch (permission) {
+      case XmoRoomPermission.sendMessages:
+        return 'You do not have permission to send messages here.';
+      case XmoRoomPermission.sendMedia:
+        return 'You do not have permission to send media or files here.';
+      case XmoRoomPermission.startCalls:
+        return 'You do not have permission to start calls here.';
+      case XmoRoomPermission.sendPolls:
+        return 'You do not have permission to send polls here.';
+      case XmoRoomPermission.sendStickers:
+        return 'You do not have permission to send stickers here.';
+    }
+  }
+
+  bool _ensureRoomActionAllowed(XmoRoomPermission permission) {
+    if (_room == null) return false;
+    if (_isReadOnlyRestricted &&
+        (permission == XmoRoomPermission.sendMessages ||
+            permission == XmoRoomPermission.sendMedia ||
+            permission == XmoRoomPermission.sendPolls ||
+            permission == XmoRoomPermission.sendStickers)) {
+      _showSnackBar('You are in read-only mode in this group');
+      return false;
+    }
+    if (!_canPerformRoomAction(permission)) {
+      _showSnackBar(_permissionDeniedMessage(permission));
+      return false;
+    }
+    return true;
+  }
+
+  bool _ensureSlowModeAllowed() {
+    final room = _room;
+    final timeline = _timeline;
+    if (room == null || timeline == null) return true;
+    final remaining = RoomControlsService.slowModeRemaining(
+      room,
+      _myUserId,
+      timeline.events,
+    );
+    if (remaining <= Duration.zero) return true;
+    final seconds =
+        remaining.inSeconds + (remaining.inMilliseconds % 1000 == 0 ? 0 : 1);
+    _showSnackBar('Slow mode is on. Wait ${seconds}s before sending again.');
+    return false;
+  }
 
   int _ownPowerLevel() {
     if (_room == null) return 0;
@@ -3565,6 +4790,75 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     return widget.matrixProvider.service.getRoomById(roomId);
   }
 
+  Future<Room?> _directRoomForUserId(String userId) async {
+    final localRoom = _localDirectRoomForUserId(userId);
+    if (localRoom != null) return localRoom;
+
+    final roomId = await widget.matrixProvider.startDirectChat(userId);
+    if (roomId == null) {
+      if (!mounted) return null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            widget.matrixProvider.error ?? 'Could not open direct chat.',
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return null;
+    }
+
+    return _getRoomByIdAfterSync(roomId);
+  }
+
+  Room? _localDirectRoomForUserId(String userId) {
+    var normalizedUserId = userId.trim();
+    if (!normalizedUserId.startsWith('@')) {
+      normalizedUserId = '@$normalizedUserId';
+    }
+    if (!normalizedUserId.contains(':')) {
+      normalizedUserId = '$normalizedUserId:${MatrixService.matrixServerName}';
+    }
+
+    final service = widget.matrixProvider.service;
+    final mappedRoomId =
+        service.client.getDirectChatFromUserId(normalizedUserId);
+    if (mappedRoomId != null) {
+      final mappedRoom = service.getRoomById(mappedRoomId);
+      if (mappedRoom != null && mappedRoom.membership == Membership.join) {
+        return mappedRoom;
+      }
+    }
+
+    for (final room in service.client.rooms) {
+      if (room.membership != Membership.join) continue;
+      if (service.getDirectPeerUserId(room) == normalizedUserId ||
+          service.looksLikeLegacyDirectRoom(room, normalizedUserId)) {
+        return room;
+      }
+    }
+
+    return null;
+  }
+
+  Future<Room?> _getRoomByIdAfterSync(String roomId) async {
+    var room = widget.matrixProvider.service.getRoomById(roomId);
+    if (room != null) return room;
+
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        await widget.matrixProvider.service.client.oneShotSync();
+      } catch (e) {
+        debugPrint('[MatrixChatScreen] Failed to sync direct room: $e');
+      }
+      room = widget.matrixProvider.service.getRoomById(roomId);
+      if (room != null) return room;
+      await Future.delayed(const Duration(milliseconds: 250));
+    }
+
+    return null;
+  }
+
   Future<void> _openDirectChatForMention(GroupMember member) async {
     final directRoom = await _directRoomForMention(member);
     if (!mounted || directRoom == null) return;
@@ -3581,10 +4875,108 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     );
   }
 
+  String _privateReplyPreview(Event event) {
+    final displayEvent = _displayEventFor(event);
+    final copyableText = _copyableMessageText(displayEvent);
+    if (copyableText != null && copyableText.trim().isNotEmpty) {
+      return _limitPrivateReplyPreview(copyableText.trim());
+    }
+
+    switch (displayEvent.messageType) {
+      case MessageTypes.Image:
+        return 'Photo';
+      case MessageTypes.Video:
+        return 'Video';
+      case MessageTypes.Audio:
+        return 'Audio';
+      case MessageTypes.File:
+        return displayEvent.body.trim().isEmpty ? 'File' : displayEvent.body;
+      case MessageTypes.Text:
+      case MessageTypes.Notice:
+      case MessageTypes.Emote:
+        return _limitPrivateReplyPreview(displayEvent.body.trim());
+      default:
+        return _limitPrivateReplyPreview(
+          displayEvent.body.trim().isEmpty ? 'Message' : displayEvent.body,
+        );
+    }
+  }
+
+  String _limitPrivateReplyPreview(String text) {
+    const maxLength = 180;
+    if (text.length <= maxLength) return text;
+    return '${text.substring(0, maxLength - 3)}...';
+  }
+
+  Future<Event?> _loadPrivateReplySourceEvent(PrivateReplyDraft draft) async {
+    if (draft.sourceRoomId.isEmpty || draft.sourceEventId.isEmpty) {
+      return null;
+    }
+    final sourceRoom =
+        widget.matrixProvider.service.getRoomById(draft.sourceRoomId);
+    if (sourceRoom == null) return null;
+
+    try {
+      return sourceRoom.getEventById(draft.sourceEventId);
+    } catch (e) {
+      debugPrint('[PrivateReply] Failed to load source event: $e');
+      return null;
+    }
+  }
+
+  Future<void> _replyPrivately(Event event) async {
+    final senderId = event.senderId;
+    if (senderId.isEmpty || senderId == _myUserId) return;
+
+    final directRoom = await _directRoomForUserId(senderId);
+    if (!mounted) return;
+    if (directRoom == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open private chat. Please try again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    if (directRoom.id == _room?.id) return;
+
+    final senderName = MatrixService.cleanName(senderId);
+    final sourceName = _room == null
+        ? 'group'
+        : MatrixService.cleanName(
+            _matrixService.getResolvedDisplayName(_room!),
+          );
+    final preview = _privateReplyPreview(event);
+    final displayEvent = _displayEventFor(event);
+    final privateReply = PrivateReplyDraft(
+      sourceRoomId: _room?.id ?? '',
+      sourceRoomName: sourceName,
+      sourceEventId: event.eventId,
+      senderId: senderId,
+      senderName: senderName,
+      preview: preview,
+      msgtype: displayEvent.messageType,
+    );
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MatrixChatScreen(
+          room: directRoom,
+          matrixProvider: widget.matrixProvider,
+          initialPrivateReply: privateReply,
+        ),
+      ),
+    );
+  }
+
   Future<void> _startMentionCall(
     GroupMember member, {
     required bool video,
   }) async {
+    if (!_ensureRoomActionAllowed(XmoRoomPermission.startCalls)) return;
+
     final directRoom = await _directRoomForMention(member);
     if (!mounted || directRoom == null) return;
 
@@ -3606,158 +4998,188 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final isPinned = _pinnedEvents.any((e) => e.eventId == event.eventId);
     final canEdit = _canEditMessage(event);
     final canDelete = _canDeleteMessage(event);
+    final canReply = event.type == EventTypes.Message ||
+        event.type == EventTypes.Sticker ||
+        event.type == _pollStartEventType;
     final canForward = _canForwardMessage(event);
     final canCopy = _copyableMessageText(event) != null;
     final canDownload = _canDownloadAttachment(event);
+    final canReplyPrivately = canReply &&
+        _room != null &&
+        !_isDirectRoom &&
+        !_room!.isChannel &&
+        event.senderId.isNotEmpty &&
+        event.senderId != _myUserId;
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: kDarkerGrey,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.reply, color: kWhite),
-                title: Text(
-                  'Reply',
-                  style: GoogleFonts.inter(color: kWhite),
-                ),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _setReplyTo(event);
-                },
-              ),
-              if (canCopy)
-                ListTile(
-                  leading: const Icon(Icons.copy, color: kWhite),
-                  title: Text(
-                    'Copy',
-                    style: GoogleFonts.inter(color: kWhite),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(ctx).height * 0.78,
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (canReply)
+                  ListTile(
+                    leading: const Icon(Icons.reply, color: kWhite),
+                    title: Text(
+                      'Reply',
+                      style: GoogleFonts.inter(color: kWhite),
+                    ),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _setReplyTo(event);
+                    },
                   ),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _copyMessageText(event);
-                  },
-                ),
-              if (_isDirectRoom)
-                ListTile(
-                  leading:
-                      const Icon(Icons.add_reaction_outlined, color: kWhite),
-                  title: Text(
-                    'Add Reaction',
-                    style: GoogleFonts.inter(color: kWhite),
+                if (canReplyPrivately)
+                  ListTile(
+                    leading:
+                        const Icon(Icons.chat_bubble_outline, color: kWhite),
+                    title: Text(
+                      'Reply privately',
+                      style: GoogleFonts.inter(color: kWhite),
+                    ),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _replyPrivately(event);
+                    },
                   ),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _showReactionPicker(event);
-                  },
-                ),
-              if (canForward)
-                ListTile(
-                  leading: Transform.scale(
-                    scaleX: -1,
-                    child: const Icon(Icons.reply, color: kWhite),
+                if (canCopy)
+                  ListTile(
+                    leading: const Icon(Icons.copy, color: kWhite),
+                    title: Text(
+                      'Copy',
+                      style: GoogleFonts.inter(color: kWhite),
+                    ),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _copyMessageText(event);
+                    },
                   ),
-                  title: Text(
-                    'Forward',
-                    style: GoogleFonts.inter(color: kWhite),
+                if (_canSendMessages)
+                  ListTile(
+                    leading:
+                        const Icon(Icons.add_reaction_outlined, color: kWhite),
+                    title: Text(
+                      'Add Reaction',
+                      style: GoogleFonts.inter(color: kWhite),
+                    ),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _showReactionPicker(event);
+                    },
                   ),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _forwardMessage(event);
-                  },
-                ),
-              if (canForward)
-                FutureBuilder<bool>(
-                  future: _isMessageSaved(event),
-                  builder: (context, snapshot) {
-                    final isSaved = snapshot.data == true;
-                    return ListTile(
-                      leading: Icon(
-                        isSaved ? Icons.bookmark : Icons.bookmark_border,
-                        color: kWhite,
-                      ),
-                      title: Text(
-                        isSaved ? 'Saved' : 'Save',
-                        style: GoogleFonts.inter(color: kWhite),
-                      ),
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        _saveMessage(event);
-                      },
-                    );
-                  },
-                ),
-              if (canDownload)
-                ListTile(
-                  leading: const Icon(Icons.download, color: kWhite),
-                  title: Text(
-                    'Download',
-                    style: GoogleFonts.inter(color: kWhite),
+                if (canForward)
+                  ListTile(
+                    leading: Transform.scale(
+                      scaleX: -1,
+                      child: const Icon(Icons.reply, color: kWhite),
+                    ),
+                    title: Text(
+                      'Forward',
+                      style: GoogleFonts.inter(color: kWhite),
+                    ),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _forwardMessage(event);
+                    },
                   ),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _downloadMessageAttachment(event);
-                  },
-                ),
-              if (canDownload && !kIsWeb)
-                ListTile(
-                  leading: const Icon(Icons.share, color: kWhite),
-                  title: Text(
-                    'Share',
-                    style: GoogleFonts.inter(color: kWhite),
+                if (canForward)
+                  FutureBuilder<bool>(
+                    future: _isMessageSaved(event),
+                    builder: (context, snapshot) {
+                      final isSaved = snapshot.data == true;
+                      return ListTile(
+                        leading: Icon(
+                          isSaved ? Icons.bookmark : Icons.bookmark_border,
+                          color: kWhite,
+                        ),
+                        title: Text(
+                          isSaved ? 'Saved' : 'Save',
+                          style: GoogleFonts.inter(color: kWhite),
+                        ),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _saveMessage(event);
+                        },
+                      );
+                    },
                   ),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _shareMessageAttachment(event);
-                  },
-                ),
-              if (canEdit)
-                ListTile(
-                  leading: const Icon(Icons.edit, color: kWhite),
-                  title: Text(
-                    'Edit Message',
-                    style: GoogleFonts.inter(color: kWhite),
+                if (canDownload)
+                  ListTile(
+                    leading: const Icon(Icons.download, color: kWhite),
+                    title: Text(
+                      'Download',
+                      style: GoogleFonts.inter(color: kWhite),
+                    ),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _downloadMessageAttachment(event);
+                    },
                   ),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _editMessage(event);
-                  },
-                ),
-              if (_canPinMessages())
-                ListTile(
-                  leading: Icon(
-                    isPinned ? Icons.push_pin_outlined : Icons.push_pin,
-                    color: kWhite,
+                if (canDownload && !kIsWeb)
+                  ListTile(
+                    leading: const Icon(Icons.share, color: kWhite),
+                    title: Text(
+                      'Share',
+                      style: GoogleFonts.inter(color: kWhite),
+                    ),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _shareMessageAttachment(event);
+                    },
                   ),
-                  title: Text(
-                    isPinned ? 'Unpin Message' : 'Pin Message',
-                    style: GoogleFonts.inter(color: kWhite),
+                if (canEdit)
+                  ListTile(
+                    leading: const Icon(Icons.edit, color: kWhite),
+                    title: Text(
+                      'Edit Message',
+                      style: GoogleFonts.inter(color: kWhite),
+                    ),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _editMessage(event);
+                    },
                   ),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _togglePinMessage(event);
-                  },
-                ),
-              if (canDelete)
-                ListTile(
-                  leading: const Icon(Icons.delete_outline, color: Colors.red),
-                  title: Text(
-                    'Delete Message',
-                    style: GoogleFonts.inter(color: Colors.red),
+                if (_canPinMessages())
+                  ListTile(
+                    leading: Icon(
+                      isPinned ? Icons.push_pin_outlined : Icons.push_pin,
+                      color: kWhite,
+                    ),
+                    title: Text(
+                      isPinned ? 'Unpin Message' : 'Pin Message',
+                      style: GoogleFonts.inter(color: kWhite),
+                    ),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _togglePinMessage(event);
+                    },
                   ),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _deleteMessage(event);
-                  },
-                ),
-            ],
+                if (canDelete)
+                  ListTile(
+                    leading:
+                        const Icon(Icons.delete_outline, color: Colors.red),
+                    title: Text(
+                      'Delete Message',
+                      style: GoogleFonts.inter(color: Colors.red),
+                    ),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _deleteMessage(event);
+                    },
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -3857,11 +5279,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   void _showReactionPicker(Event event) {
     ReactionPicker.show(context, (emoji) async {
       try {
-        await _directChatService.addReaction(_room!.id, event.eventId, emoji);
+        await _toggleReaction(event, emoji);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Reaction added'),
+              content: Text('Reaction updated'),
               backgroundColor: kLimeGreen,
               duration: Duration(seconds: 1),
             ),
@@ -3877,7 +5299,144 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           );
         }
       }
-    });
+    }, selectedEmoji: _myReactionFor(event));
+  }
+
+  void _showReactionDetails(
+    Event event,
+    MessageReactionSummary selectedReaction,
+  ) {
+    final summaries = _reactionSummariesFor(event);
+    final selected = summaries.firstWhere(
+      (reaction) => reaction.emoji == selectedReaction.emoji,
+      orElse: () => selectedReaction,
+    );
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return SafeArea(
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+            decoration: const BoxDecoration(
+              color: Color(0xFF151515),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 38,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: kMediumGrey,
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Text(
+                      selected.emoji,
+                      style: const TextStyle(fontSize: 26),
+                    ),
+                    const SizedBox(width: 9),
+                    Text(
+                      selected.count == 1
+                          ? '1 reaction'
+                          : '${selected.count} reactions',
+                      style: GoogleFonts.inter(
+                        color: kWhite,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _showReactionPicker(event);
+                      },
+                      child: Text(
+                        'Change',
+                        style: GoogleFonts.inter(
+                          color: kLimeGreen,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: selected.users.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (_, index) {
+                      final user = selected.users[index];
+                      final isMe = user.userId == _myUserId;
+                      return Row(
+                        children: [
+                          StoryAvatar(
+                            userName: user.displayName,
+                            avatarUrl: user.avatarUrl,
+                            size: 38,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              isMe
+                                  ? '${user.displayName} (You)'
+                                  : user.displayName,
+                              style: GoogleFonts.inter(
+                                color: kWhite,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            selected.emoji,
+                            style: const TextStyle(fontSize: 20),
+                          ),
+                          if (isMe) ...[
+                            const SizedBox(width: 8),
+                            IconButton(
+                              onPressed: () async {
+                                Navigator.pop(ctx);
+                                try {
+                                  await _toggleReaction(event, selected.emoji);
+                                } catch (e) {
+                                  if (mounted) {
+                                    _showSnackBar('Failed to remove reaction');
+                                  }
+                                }
+                              },
+                              icon: const Icon(
+                                Icons.close,
+                                color: kLightGrey,
+                                size: 20,
+                              ),
+                            ),
+                          ],
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _editMessage(Event event) async {
@@ -4257,6 +5816,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     _amplitudeSub?.cancel();
     unawaited(_audioRecorder.dispose());
     _textCtrl.dispose();
+    _textFocusNode.dispose();
     _scrollCtrl.removeListener(_handleChatScroll);
     _scrollCtrl.dispose();
     _mentionAutocomplete.dispose();
@@ -4424,6 +5984,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   Widget build(BuildContext context) {
     final messages = _visibleMessages();
     final messageItems = _buildMessageListItems(messages);
+    final historyLoaderCount = _loadingHistory ? 1 : 0;
     final orderedPinnedEvents = _orderedPinnedEvents();
     final pinnedBannerIndex = _currentPinnedBannerIndex(orderedPinnedEvents);
 
@@ -4514,12 +6075,18 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                                       horizontal: 0,
                                       vertical: 8,
                                     ),
-                                    itemCount: messageItems.length +
+                                    itemCount: historyLoaderCount +
+                                        messageItems.length +
                                         _pendingAlbumUploads.length +
                                         _pendingUploads.length,
                                     itemBuilder: (_, i) {
-                                      if (i < messageItems.length) {
-                                        final item = messageItems[i];
+                                      if (historyLoaderCount == 1 && i == 0) {
+                                        return _buildHistoryLoadingIndicator();
+                                      }
+                                      final contentIndex =
+                                          i - historyLoaderCount;
+                                      if (contentIndex < messageItems.length) {
+                                        final item = messageItems[contentIndex];
                                         return RepaintBoundary(
                                           key: _messageListItemKey(item),
                                           child: item.albumEvents == null
@@ -4530,7 +6097,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                                         );
                                       }
                                       final pendingAlbumIndex =
-                                          i - messageItems.length;
+                                          contentIndex - messageItems.length;
                                       if (pendingAlbumIndex <
                                           _pendingAlbumUploads.length) {
                                         final pendingAlbum =
@@ -4565,6 +6132,14 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                       ReplyPreview(
                         replyToEvent: _replyToEvent!,
                         onCancel: _cancelReply,
+                      ),
+                    if (_privateReplyDraft != null)
+                      _PrivateReplyComposerPreview(
+                        draft: _privateReplyDraft!,
+                        onCancel: _cancelPrivateReply,
+                        loadSourceEvent: _loadPrivateReplySourceEvent,
+                        loadImageBytes: _mediaHandler.loadImageBytes,
+                        loadVideoThumbnail: _mediaHandler.loadVideoThumbnail,
                       ),
                     // Mention Autocomplete
                     ValueListenableBuilder<_MentionAutocompleteState>(
@@ -4611,6 +6186,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                     else if (_room!.canSendEvent('m.room.message'))
                       ChatInputBar(
                         textController: _textCtrl,
+                        textFocusNode: _textFocusNode,
                         uploading: _isUploadBusy,
                         recording: _recording,
                         recordingPaused: _recordingPaused,
@@ -4621,6 +6197,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                             ? 'Read-only mode'
                             : 'You cannot send messages',
                         onSend: _sendMessage,
+                        onShowEmojiPicker: _showComposerEmojiPicker,
                         onShowAttachmentSheet: _showAttachmentSheet,
                         onStartRecording: _startAudioRecording,
                         onCancelRecording: _cancelAudioRecording,
@@ -4645,6 +6222,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                       ),
                   ],
                 ),
+                _buildJumpToLatestButton(),
               ],
             ),
           ),
@@ -4652,6 +6230,238 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
             _buildOngoingGroupCallBanner(_room!),
         ],
       ),
+    );
+  }
+}
+
+class _PrivateReplyComposerPreview extends StatelessWidget {
+  final PrivateReplyDraft draft;
+  final VoidCallback onCancel;
+  final Future<Event?> Function(PrivateReplyDraft) loadSourceEvent;
+  final Future<Uint8List?> Function(Event, {bool getThumbnail}) loadImageBytes;
+  final Future<Uint8List?> Function(Event) loadVideoThumbnail;
+
+  const _PrivateReplyComposerPreview({
+    required this.draft,
+    required this.onCancel,
+    required this.loadSourceEvent,
+    required this.loadImageBytes,
+    required this.loadVideoThumbnail,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Event?>(
+      future: loadSourceEvent(draft),
+      builder: (context, snapshot) {
+        final sourceEvent = snapshot.data;
+        final preview = sourceEvent == null
+            ? draft.preview
+            : _privateReplyPreviewText(
+                sourceEvent,
+                fallback: draft.preview,
+              );
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: const BoxDecoration(
+            color: kDarkerGrey,
+            border: Border(
+              top: BorderSide(color: kMediumGrey, width: 1),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 3,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: kLimeGreen,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 12),
+              _PrivateReplyMediaPreview(
+                event: sourceEvent,
+                fallbackMsgtype: draft.msgtype,
+                isMe: true,
+                loadImageBytes: loadImageBytes,
+                loadVideoThumbnail: loadVideoThumbnail,
+              ),
+              if (_privateReplyHasMediaPreview(sourceEvent, draft.msgtype))
+                const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      draft.senderName,
+                      style: GoogleFonts.inter(
+                        color: kLimeGreen,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      preview,
+                      style: GoogleFonts.inter(
+                        color: kLightGrey,
+                        fontSize: 13,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, color: kLightGrey, size: 20),
+                onPressed: onCancel,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _privateReplyPreviewText(Event event, {required String fallback}) {
+    switch (event.messageType) {
+      case MessageTypes.Image:
+        return 'Photo';
+      case MessageTypes.Video:
+        return 'Video';
+      case MessageTypes.Audio:
+        return 'Audio';
+      case MessageTypes.File:
+        return event.body.trim().isEmpty ? 'File' : event.body.trim();
+      default:
+        return fallback.trim().isEmpty ? 'Message' : fallback.trim();
+    }
+  }
+}
+
+bool _privateReplyHasMediaPreview(Event? event, String fallbackMsgtype) {
+  final msgtype = event?.messageType ?? fallbackMsgtype;
+  return msgtype == MessageTypes.Image ||
+      msgtype == MessageTypes.Video ||
+      msgtype == MessageTypes.Audio ||
+      msgtype == MessageTypes.File;
+}
+
+class _PrivateReplyMediaPreview extends StatelessWidget {
+  final Event? event;
+  final String fallbackMsgtype;
+  final bool isMe;
+  final Future<Uint8List?> Function(Event, {bool getThumbnail}) loadImageBytes;
+  final Future<Uint8List?> Function(Event) loadVideoThumbnail;
+
+  const _PrivateReplyMediaPreview({
+    required this.event,
+    required this.fallbackMsgtype,
+    required this.isMe,
+    required this.loadImageBytes,
+    required this.loadVideoThumbnail,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final msgtype = event?.messageType ?? fallbackMsgtype;
+    if (msgtype == MessageTypes.Image || msgtype == MessageTypes.Video) {
+      final source = event;
+      final thumbFuture = source == null
+          ? Future<Uint8List?>.value(null)
+          : msgtype == MessageTypes.Image
+              ? loadImageBytes(source, getThumbnail: true)
+              : loadVideoThumbnail(source);
+
+      return Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: isMe ? const Color(0xFF1A2A1A) : kDarkGrey,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: FutureBuilder<Uint8List?>(
+          future: thumbFuture,
+          builder: (context, snapshot) {
+            final bytes = snapshot.data;
+            if (bytes != null && bytes.isNotEmpty) {
+              return Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.memory(
+                    bytes,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => _PrivateReplyTypeIcon(
+                      msgtype: msgtype,
+                      isMe: isMe,
+                    ),
+                  ),
+                  if (msgtype == MessageTypes.Video)
+                    Container(
+                      color: Colors.black.withValues(alpha: 0.18),
+                      child: const Icon(
+                        Icons.play_arrow_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                    ),
+                ],
+              );
+            }
+            return _PrivateReplyTypeIcon(msgtype: msgtype, isMe: isMe);
+          },
+        ),
+      );
+    }
+
+    if (msgtype == MessageTypes.Audio || msgtype == MessageTypes.File) {
+      return Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: isMe ? const Color(0xFF1A2A1A) : kDarkGrey,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: _PrivateReplyTypeIcon(msgtype: msgtype, isMe: isMe),
+      );
+    }
+
+    return const SizedBox.shrink();
+  }
+}
+
+class _PrivateReplyTypeIcon extends StatelessWidget {
+  final String msgtype;
+  final bool isMe;
+
+  const _PrivateReplyTypeIcon({
+    required this.msgtype,
+    required this.isMe,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = switch (msgtype) {
+      MessageTypes.Image => Icons.image_rounded,
+      MessageTypes.Video => Icons.play_arrow_rounded,
+      MessageTypes.Audio => Icons.headphones_rounded,
+      MessageTypes.File => Icons.insert_drive_file_rounded,
+      _ => Icons.chat_bubble_rounded,
+    };
+
+    return Icon(
+      icon,
+      color: isMe ? kLimeGreen : kLightGrey,
+      size: 20,
     );
   }
 }
@@ -4723,6 +6533,307 @@ class _MentionAutocompleteState {
     return _MentionAutocompleteState._(
       visible: true,
       query: query,
+    );
+  }
+}
+
+class _PollAnswer {
+  final String id;
+  final String text;
+
+  const _PollAnswer({
+    required this.id,
+    required this.text,
+  });
+}
+
+class _PollOptionTile extends StatelessWidget {
+  final String text;
+  final int count;
+  final int total;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  const _PollOptionTile({
+    required this.text,
+    required this.count,
+    required this.total,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = total <= 0 ? 0.0 : (count / total).clamp(0.0, 1.0);
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Stack(
+        children: [
+          Container(
+            height: 38,
+            decoration: BoxDecoration(
+              color: kDarkGrey,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: selected ? kLimeGreen : kMediumGrey,
+                width: selected ? 1.2 : 0.8,
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: progress,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: kLimeGreen.withValues(alpha: selected ? 0.3 : 0.16),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: [
+                  Icon(
+                    selected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    color: selected ? kLimeGreen : kLightGrey,
+                    size: 17,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      text,
+                      style: GoogleFonts.inter(
+                        color: kWhite,
+                        fontSize: 13,
+                        fontWeight:
+                            selected ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$count',
+                    style: GoogleFonts.inter(
+                      color: selected ? kLimeGreen : kLightGrey,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PollComposeResult {
+  final String question;
+  final List<String> options;
+
+  const _PollComposeResult({
+    required this.question,
+    required this.options,
+  });
+}
+
+class _PollComposerDialog extends StatefulWidget {
+  const _PollComposerDialog();
+
+  @override
+  State<_PollComposerDialog> createState() => _PollComposerDialogState();
+}
+
+class _PollComposerDialogState extends State<_PollComposerDialog> {
+  final _questionController = TextEditingController();
+  final _optionControllers = <TextEditingController>[
+    TextEditingController(),
+    TextEditingController(),
+  ];
+
+  @override
+  void dispose() {
+    _questionController.dispose();
+    for (final controller in _optionControllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  void _addOption() {
+    if (_optionControllers.length >= 6) return;
+    setState(() => _optionControllers.add(TextEditingController()));
+  }
+
+  void _removeOption(int index) {
+    if (_optionControllers.length <= 2) return;
+    final controller = _optionControllers.removeAt(index);
+    controller.dispose();
+    setState(() {});
+  }
+
+  void _submit() {
+    final question = _questionController.text.trim();
+    final options = _optionControllers
+        .map((controller) => controller.text.trim())
+        .where((option) => option.isNotEmpty)
+        .toList(growable: false);
+    if (question.isEmpty || options.length < 2) {
+      return;
+    }
+    Navigator.pop(
+      context,
+      _PollComposeResult(question: question, options: options),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: kDarkerGrey,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 18),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+        child: AnimatedBuilder(
+          animation: Listenable.merge([
+            _questionController,
+            ..._optionControllers,
+          ]),
+          builder: (context, _) {
+            final submitEnabled = _questionController.text.trim().isNotEmpty &&
+                _optionControllers
+                        .where(
+                          (controller) => controller.text.trim().isNotEmpty,
+                        )
+                        .length >=
+                    2;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Create Poll',
+                  style: GoogleFonts.inter(
+                    color: kWhite,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                _PollTextField(
+                  controller: _questionController,
+                  hint: 'Question',
+                ),
+                const SizedBox(height: 10),
+                for (var i = 0; i < _optionControllers.length; i++) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _PollTextField(
+                          controller: _optionControllers[i],
+                          hint: 'Option ${i + 1}',
+                        ),
+                      ),
+                      if (_optionControllers.length > 2)
+                        IconButton(
+                          onPressed: () => _removeOption(i),
+                          icon: const Icon(
+                            Icons.close,
+                            color: kLightGrey,
+                            size: 18,
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed:
+                        _optionControllers.length >= 6 ? null : _addOption,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add option'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: kLimeGreen,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                ElevatedButton(
+                  onPressed: submitEnabled ? _submit : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kWhite,
+                    disabledBackgroundColor: kMediumGrey,
+                    foregroundColor: kBlack,
+                    disabledForegroundColor: kLightGrey,
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                  ),
+                  child: Text(
+                    'Send Poll',
+                    style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _PollTextField extends StatelessWidget {
+  final TextEditingController controller;
+  final String hint;
+
+  const _PollTextField({
+    required this.controller,
+    required this.hint,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      style: GoogleFonts.inter(color: kWhite, fontSize: 14),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
+        filled: true,
+        fillColor: const Color(0xFF2C2C2E),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: kWhite, width: 1),
+        ),
+        isDense: true,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      ),
     );
   }
 }

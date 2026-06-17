@@ -12,12 +12,13 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
+import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
     private val walletEventsChannel = "com.xmo.xmo/wallet_events"
     private val walletMethodsChannel = "com.xmo.xmo/wallet_methods"
     private val mediaStoreChannel = "com.xmo.xmo/media_store"
@@ -47,8 +48,13 @@ class MainActivity : FlutterActivity() {
         initialCallAction?.let {
             XmoCallNotificationHelper.cancelCallNotification(applicationContext, it)
         }
+    }
 
-        EventChannel(flutterEngine?.dartExecutor?.binaryMessenger, walletEventsChannel)
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        val messenger = flutterEngine.dartExecutor.binaryMessenger
+
+        EventChannel(messenger, walletEventsChannel)
             .setStreamHandler(
                 object : EventChannel.StreamHandler {
                     override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
@@ -61,7 +67,7 @@ class MainActivity : FlutterActivity() {
                 },
             )
 
-        MethodChannel(flutterEngine!!.dartExecutor.binaryMessenger, walletMethodsChannel)
+        MethodChannel(messenger, walletMethodsChannel)
             .setMethodCallHandler { call, result ->
                 if (call.method == "initialLink") {
                     result.success(initialLink)
@@ -71,7 +77,7 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
-        MethodChannel(flutterEngine!!.dartExecutor.binaryMessenger, callNotificationMethodsChannel)
+        MethodChannel(messenger, callNotificationMethodsChannel)
             .setMethodCallHandler { call, result ->
                 if (call.method == "initialCallAction") {
                     result.success(initialCallAction)
@@ -81,7 +87,7 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
-        EventChannel(flutterEngine?.dartExecutor?.binaryMessenger, callNotificationEventsChannel)
+        EventChannel(messenger, callNotificationEventsChannel)
             .setStreamHandler(
                 object : EventChannel.StreamHandler {
                     override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
@@ -98,7 +104,7 @@ class MainActivity : FlutterActivity() {
                 },
             )
 
-        MethodChannel(flutterEngine!!.dartExecutor.binaryMessenger, mediaStoreChannel)
+        MethodChannel(messenger, mediaStoreChannel)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "saveMediaToGallery" -> {

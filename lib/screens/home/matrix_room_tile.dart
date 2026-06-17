@@ -151,6 +151,7 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
   static bool _isPreviewCandidate(Event event) {
     if (event.redacted) return false;
     if (_isEditReplacementEvent(event)) return false;
+    if (MatrixService.isGroupCallPushMarker(event)) return false;
     return event.type == EventTypes.Message ||
         event.type == EventTypes.Encrypted;
   }

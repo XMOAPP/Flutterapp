@@ -6,6 +6,8 @@ import 'widgets/voice_waveform.dart';
 /// Bottom input bar for sending messages and attachments.
 class ChatInputBar extends StatelessWidget {
   final TextEditingController textController;
+  final FocusNode? textFocusNode;
+  final IconData emojiButtonIcon;
   final bool uploading;
   final bool enabled;
   final bool recording;
@@ -14,6 +16,8 @@ class ChatInputBar extends StatelessWidget {
   final List<double> recordingWaveform;
   final String? disabledText;
   final VoidCallback onSend;
+  final VoidCallback onShowEmojiPicker;
+  final VoidCallback? onTextFieldTap;
   final VoidCallback onShowAttachmentSheet;
   final VoidCallback onStartRecording;
   final VoidCallback onCancelRecording;
@@ -23,6 +27,8 @@ class ChatInputBar extends StatelessWidget {
   const ChatInputBar({
     super.key,
     required this.textController,
+    this.textFocusNode,
+    this.emojiButtonIcon = Icons.emoji_emotions_outlined,
     required this.uploading,
     this.enabled = true,
     this.recording = false,
@@ -31,6 +37,8 @@ class ChatInputBar extends StatelessWidget {
     this.recordingWaveform = const [],
     this.disabledText,
     required this.onSend,
+    required this.onShowEmojiPicker,
+    this.onTextFieldTap,
     required this.onShowAttachmentSheet,
     required this.onStartRecording,
     required this.onCancelRecording,
@@ -84,17 +92,27 @@ class ChatInputBar extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    const Icon(
-                      Icons.emoji_emotions_outlined,
-                      color: kLightGrey,
-                      size: 20,
+                    GestureDetector(
+                      onTap: enabled ? onShowEmojiPicker : null,
+                      behavior: HitTestBehavior.opaque,
+                      child: Padding(
+                        padding: const EdgeInsets.all(2),
+                        child: Icon(
+                          emojiButtonIcon,
+                          color: enabled ? kLightGrey : kMediumGrey,
+                          size: 24,
+                        ),
+                      ),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: TextField(
                         controller: textController,
+                        focusNode: textFocusNode,
+                        readOnly: onTextFieldTap != null,
+                        onTap: onTextFieldTap,
                         enabled: enabled,
-                        style: GoogleFonts.inter(color: kWhite, fontSize: 14),
+                        style: GoogleFonts.inter(color: kWhite, fontSize: 17),
                         decoration: InputDecoration(
                           hintText: enabled
                               ? 'Message'

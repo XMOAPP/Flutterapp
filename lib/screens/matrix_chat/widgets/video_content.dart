@@ -12,12 +12,16 @@ class VideoContent extends StatefulWidget {
   final Event event;
   final Future<Uint8List?> Function(Event) loadVideoThumbnail;
   final Future<void> Function(Event) playVideo;
+  final BorderRadius borderRadius;
+  final ValueChanged<Size>? onRenderedSize;
 
   const VideoContent({
     super.key,
     required this.event,
     required this.loadVideoThumbnail,
     required this.playVideo,
+    this.borderRadius = const BorderRadius.all(Radius.circular(16)),
+    this.onRenderedSize,
   });
 
   @override
@@ -26,6 +30,7 @@ class VideoContent extends StatefulWidget {
 
 class _VideoContentState extends State<VideoContent> {
   late Future<Uint8List?> _thumbnailFuture;
+  Size? _lastReportedSize;
 
   /// Reads the video aspect ratio from Matrix event info metadata.
   double _getAspectRatio() {
@@ -60,7 +65,8 @@ class _VideoContentState extends State<VideoContent> {
     final thumbSize = _displaySizeForRatio(aspectRatio);
     final thumbWidth = thumbSize.width;
     final thumbHeight = thumbSize.height;
-    
+    _reportRenderedSize(thumbSize);
+
     // Check global static cache synchronously
     final cachedBytes = MediaHandler.getCachedThumbnail(widget.event.eventId);
 
@@ -69,12 +75,13 @@ class _VideoContentState extends State<VideoContent> {
       future: cachedBytes != null ? null : _thumbnailFuture,
       builder: (context, snapshot) {
         final thumbnailBytes = snapshot.data;
-        final isLoading = snapshot.connectionState == ConnectionState.waiting && thumbnailBytes == null;
+        final isLoading = snapshot.connectionState == ConnectionState.waiting &&
+            thumbnailBytes == null;
 
         return GestureDetector(
           onTap: () => widget.playVideo(widget.event),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: widget.borderRadius,
             child: SizedBox(
               width: thumbWidth,
               height: thumbHeight,
@@ -144,9 +151,8 @@ class _VideoContentState extends State<VideoContent> {
     const maxHeight = 360.0;
     const minReadableHeight = 96.0;
 
-    final ratio = aspectRatio.isFinite && aspectRatio > 0
-        ? aspectRatio
-        : 16 / 9;
+    final ratio =
+        aspectRatio.isFinite && aspectRatio > 0 ? aspectRatio : 16 / 9;
 
     double width;
     double height;
@@ -173,6 +179,21 @@ class _VideoContentState extends State<VideoContent> {
     }
 
     return Size(width, height);
+  }
+
+  void _reportRenderedSize(Size size) {
+    if (widget.onRenderedSize == null) return;
+    final last = _lastReportedSize;
+    if (last != null &&
+        (last.width - size.width).abs() < 0.5 &&
+        (last.height - size.height).abs() < 0.5) {
+      return;
+    }
+    _lastReportedSize = size;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.onRenderedSize!(size);
+    });
   }
 }
 

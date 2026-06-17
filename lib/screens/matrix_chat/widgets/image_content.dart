@@ -9,12 +9,16 @@ class ImageContent extends StatelessWidget {
   final Event event;
   final Future<Uint8List?> Function(Event, {bool getThumbnail}) loadImageBytes;
   final void Function(Uint8List, String, Event) openFullscreenImage;
+  final BorderRadius borderRadius;
+  final ValueChanged<Size>? onRenderedSize;
 
   const ImageContent({
     super.key,
     required this.event,
     required this.loadImageBytes,
     required this.openFullscreenImage,
+    this.borderRadius = const BorderRadius.all(Radius.circular(20)),
+    this.onRenderedSize,
   });
 
   @override
@@ -23,72 +27,89 @@ class ImageContent extends StatelessWidget {
       future: loadImageBytes(event),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Container(
-            width: 200,
-            height: 150,
-            decoration: BoxDecoration(
-              color: kDarkGrey,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const CircularProgressIndicator(color: kLimeGreen, strokeWidth: 2),
-                const SizedBox(height: 8),
-                Text(
-                  event.body,
-                  style: GoogleFonts.inter(color: kLightGrey, fontSize: 10),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+          return _RenderedSizeReporter(
+            onSize: onRenderedSize,
+            child: Container(
+              width: 200,
+              height: 150,
+              decoration: BoxDecoration(
+                color: kDarkGrey,
+                borderRadius: borderRadius,
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const CircularProgressIndicator(
+                      color: kLimeGreen, strokeWidth: 2),
+                  const SizedBox(height: 8),
+                  Text(
+                    event.body,
+                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 10),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
           );
         }
 
         final bytes = snapshot.data;
         if (bytes == null || bytes.isEmpty) {
-          return Container(
-            width: 200,
-            height: 80,
-            decoration: BoxDecoration(
-              color: kDarkGrey,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.broken_image_outlined, color: kLightGrey, size: 28),
-                const SizedBox(height: 4),
-                Text(event.body, style: GoogleFonts.inter(color: kLightGrey, fontSize: 11)),
-              ],
+          return _RenderedSizeReporter(
+            onSize: onRenderedSize,
+            child: Container(
+              width: 200,
+              height: 80,
+              decoration: BoxDecoration(
+                color: kDarkGrey,
+                borderRadius: borderRadius,
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.broken_image_outlined,
+                      color: kLightGrey, size: 28),
+                  const SizedBox(height: 4),
+                  Text(event.body,
+                      style:
+                          GoogleFonts.inter(color: kLightGrey, fontSize: 11)),
+                ],
+              ),
             ),
           );
         }
 
         return GestureDetector(
           onTap: () => openFullscreenImage(bytes, event.body, event),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 292, maxHeight: 336),
-              child: Image.memory(
-                bytes,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  width: 200,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: kDarkGrey,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.broken_image_outlined, color: kLightGrey, size: 28),
-                      const SizedBox(height: 4),
-                      Text(event.body, style: GoogleFonts.inter(color: kLightGrey, fontSize: 11)),
-                    ],
+          child: _RenderedSizeReporter(
+            onSize: onRenderedSize,
+            child: ClipRRect(
+              borderRadius: borderRadius,
+              child: ConstrainedBox(
+                constraints:
+                    const BoxConstraints(maxWidth: 292, maxHeight: 336),
+                child: Image.memory(
+                  bytes,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                    width: 200,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      color: kDarkGrey,
+                      borderRadius: borderRadius,
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.broken_image_outlined,
+                            color: kLightGrey, size: 28),
+                        const SizedBox(height: 4),
+                        Text(event.body,
+                            style: GoogleFonts.inter(
+                                color: kLightGrey, fontSize: 11)),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -96,6 +117,59 @@ class ImageContent extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _RenderedSizeReporter extends StatefulWidget {
+  final Widget child;
+  final ValueChanged<Size>? onSize;
+
+  const _RenderedSizeReporter({
+    required this.child,
+    required this.onSize,
+  });
+
+  @override
+  State<_RenderedSizeReporter> createState() => _RenderedSizeReporterState();
+}
+
+class _RenderedSizeReporterState extends State<_RenderedSizeReporter> {
+  final GlobalKey _key = GlobalKey();
+  Size? _lastSize;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _reportSize());
+  }
+
+  @override
+  void didUpdateWidget(covariant _RenderedSizeReporter oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _reportSize());
+  }
+
+  void _reportSize() {
+    if (!mounted || widget.onSize == null) return;
+    final box = _key.currentContext?.findRenderObject() as RenderBox?;
+    final size = box?.size;
+    if (size == null || size.width <= 0 || size.height <= 0) return;
+    final last = _lastSize;
+    if (last != null &&
+        (last.width - size.width).abs() < 0.5 &&
+        (last.height - size.height).abs() < 0.5) {
+      return;
+    }
+    _lastSize = size;
+    widget.onSize!(size);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return KeyedSubtree(
+      key: _key,
+      child: widget.child,
     );
   }
 }

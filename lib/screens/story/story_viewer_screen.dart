@@ -31,22 +31,53 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   int _currentStoryIndex = 0;
   List<Story> _currentUserStories = [];
 
+  final TextEditingController _replyController = TextEditingController();
+  final FocusNode _replyFocusNode = FocusNode();
   Timer? _progressTimer;
   double _progress = 0.0;
   bool _isPaused = false;
   String? _activeVideoStoryId;
+  bool _sendingStoryReply = false;
+
+  static const List<String> _storyReactionEmojis = [
+    '❤️',
+    '👍',
+    '😂',
+    '😮',
+    '😢',
+    '🙏',
+    '🔥',
+    '🎉',
+    '👏',
+    '💯',
+    '🤔',
+    '😍',
+  ];
 
   @override
   void initState() {
     super.initState();
     _currentUserIndex = widget.initialUserIndex;
+    _replyFocusNode.addListener(_handleReplyFocusChanged);
     _loadCurrentUserStories();
   }
 
   @override
   void dispose() {
     _progressTimer?.cancel();
+    _replyFocusNode.removeListener(_handleReplyFocusChanged);
+    _replyFocusNode.dispose();
+    _replyController.dispose();
     super.dispose();
+  }
+
+  void _handleReplyFocusChanged() {
+    if (!mounted) return;
+    if (_replyFocusNode.hasFocus) {
+      _pauseStory();
+    } else {
+      _resumeStory();
+    }
   }
 
   Future<void> _loadCurrentUserStories() async {
@@ -278,6 +309,134 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     });
   }
 
+  Future<void> _sendStoryReply(Story story) async {
+    final text = _replyController.text.trim();
+    if (text.isEmpty || _sendingStoryReply) return;
+
+    await _sendStoryDirectMessage(
+      story,
+      'Replied to your story\n$text',
+      successMessage: 'Reply sent',
+    );
+  }
+
+  Future<void> _sendStoryReaction(Story story, String emoji) async {
+    if (_sendingStoryReply) return;
+    Navigator.of(context).maybePop();
+    await _sendStoryDirectMessage(
+      story,
+      'Reacted to your story: $emoji',
+      successMessage: 'Reaction sent',
+    );
+  }
+
+  Future<void> _sendStoryDirectMessage(
+    Story story,
+    String body, {
+    required String successMessage,
+  }) async {
+    if (story.userId.isEmpty || _currentUserIndex == -1) return;
+
+    setState(() => _sendingStoryReply = true);
+    _pauseStory();
+
+    try {
+      final matrixProvider = context.read<MatrixProvider>();
+      final roomId = await matrixProvider.startDirectChat(story.userId);
+      if (roomId == null) {
+        throw Exception('Unable to open direct chat');
+      }
+
+      await matrixProvider.sendMessage(roomId, body);
+      _replyController.clear();
+      _replyFocusNode.unfocus();
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(successMessage),
+          backgroundColor: kLimeGreen,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unable to send: $e'),
+          backgroundColor: Colors.redAccent,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _sendingStoryReply = false);
+        if (!_replyFocusNode.hasFocus) _resumeStory();
+      }
+    }
+  }
+
+  void _showStoryReactionPicker(Story story) {
+    _pauseStory();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.45),
+      builder: (ctx) {
+        return SafeArea(
+          top: false,
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            decoration: BoxDecoration(
+              color: kDarkerGrey,
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'React',
+                  style: GoogleFonts.inter(
+                    color: kWhite,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 8,
+                  children: _storyReactionEmojis.map((emoji) {
+                    return InkWell(
+                      onTap: () => _sendStoryReaction(story, emoji),
+                      borderRadius: BorderRadius.circular(22),
+                      child: SizedBox(
+                        width: 42,
+                        height: 42,
+                        child: Center(
+                          child: Text(
+                            emoji,
+                            style: const TextStyle(fontSize: 25),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    ).whenComplete(() {
+      if (mounted && !_replyFocusNode.hasFocus && !_sendingStoryReply) {
+        _resumeStory();
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_currentUserStories.isEmpty) {
@@ -291,6 +450,8 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
 
     final currentStory = _currentUserStories[_currentStoryIndex];
     final isMyStory = _currentUserIndex == -1;
+    final canReply = !isMyStory && currentStory.userId.isNotEmpty;
+    final bottomInset = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
       backgroundColor: kBlack,
@@ -303,7 +464,8 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
 
           // Let header and bottom action buttons handle their own taps.
           if (tapY < mediaQuery.padding.top + 72 ||
-              (isMyStory && tapY > screenHeight - 96)) {
+              (isMyStory && tapY > screenHeight - 96) ||
+              (canReply && tapY > screenHeight - (bottomInset + 92))) {
             return;
           }
 
@@ -359,7 +521,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
             // Caption
             if (currentStory.caption != null)
               Positioned(
-                bottom: 80,
+                bottom: canReply ? bottomInset + 82 : 80,
                 left: 16,
                 right: 16,
                 child: _buildCaption(currentStory.caption!),
@@ -372,6 +534,14 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
                 left: 16,
                 right: 16,
                 child: _buildMyStoryActions(currentStory),
+              ),
+
+            if (canReply)
+              Positioned(
+                bottom: bottomInset + 10,
+                left: 12,
+                right: 12,
+                child: _buildStoryReplyBar(currentStory),
               ),
           ],
         ),
@@ -581,6 +751,91 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
         _buildActionButton(
           icon: Icons.delete_outline,
           onTap: _deleteStory,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStoryReplyBar(Story story) {
+    return Row(
+      children: [
+        InkWell(
+          onTap:
+              _sendingStoryReply ? null : () => _showStoryReactionPicker(story),
+          borderRadius: BorderRadius.circular(24),
+          child: Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.55),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.emoji_emotions_outlined,
+              color: kWhite,
+              size: 24,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Container(
+            height: 46,
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(24),
+            ),
+            alignment: Alignment.center,
+            child: ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _replyController,
+              builder: (context, value, _) {
+                return TextField(
+                  controller: _replyController,
+                  focusNode: _replyFocusNode,
+                  enabled: !_sendingStoryReply,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _sendStoryReply(story),
+                  minLines: 1,
+                  maxLines: 1,
+                  style: GoogleFonts.inter(
+                    color: kWhite,
+                    fontSize: 15,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'Reply to story',
+                    hintStyle: GoogleFonts.inter(
+                      color: Colors.white54,
+                      fontSize: 15,
+                    ),
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                    suffixIcon: value.text.trim().isEmpty
+                        ? null
+                        : IconButton(
+                            icon: _sendingStoryReply
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      color: kLimeGreen,
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(
+                                    Icons.send_rounded,
+                                    color: kLimeGreen,
+                                    size: 20,
+                                  ),
+                            onPressed: _sendingStoryReply
+                                ? null
+                                : () => _sendStoryReply(story),
+                          ),
+                  ),
+                );
+              },
+            ),
+          ),
         ),
       ],
     );

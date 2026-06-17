@@ -32,6 +32,7 @@ class TextOrFileMessageBubble extends StatelessWidget {
   final Future<Uint8List?> Function(Event)? loadVideoThumbnail;
   final bool isEdited;
   final ValueChanged<String>? onReplyTap;
+  final void Function(String roomId, String eventId)? onPrivateReplyTap;
   final List<GroupMember> mentionMembers;
   final ValueChanged<GroupMember>? onMentionTap;
 
@@ -57,6 +58,7 @@ class TextOrFileMessageBubble extends StatelessWidget {
     this.loadVideoThumbnail,
     this.isEdited = false,
     this.onReplyTap,
+    this.onPrivateReplyTap,
     this.mentionMembers = const [],
     this.onMentionTap,
   });
@@ -248,13 +250,22 @@ class TextOrFileMessageBubble extends StatelessWidget {
                     loadVideoThumbnail: loadVideoThumbnail,
                     onReplyTap: onReplyTap,
                   ),
-                  if (_replyToEventId(event) != null) const SizedBox(height: 6),
+                  _PrivateReplyContextPreview(
+                    event: event,
+                    isMe: isMe,
+                    loadImageBytes: loadImageBytes,
+                    loadVideoThumbnail: loadVideoThumbnail,
+                    onTap: onPrivateReplyTap,
+                  ),
+                  if (_replyToEventId(event) != null ||
+                      _privateReplyContent(event) != null)
+                    const SizedBox(height: 6),
                   _MentionAwareText(
                     text: displayBody,
                     members: mentionMembers,
                     baseStyle: GoogleFonts.inter(
                       color: isMe ? kLimeGreen : kWhite,
-                      fontSize: 14,
+                      fontSize: _containsEmoji(displayBody) ? 17 : 14,
                     ),
                     onMentionTap: onMentionTap,
                   ),
@@ -441,6 +452,19 @@ String _stripReplyFallback(String body) {
 
   final stripped = lines.skip(index).join('\n').trim();
   return stripped.isEmpty ? body : stripped;
+}
+
+bool _containsEmoji(String text) {
+  for (final rune in text.runes) {
+    final isEmoji = (rune >= 0x1F000 && rune <= 0x1FAFF) ||
+        (rune >= 0x2600 && rune <= 0x27BF) ||
+        (rune >= 0x2300 && rune <= 0x23FF) ||
+        (rune >= 0x2B00 && rune <= 0x2BFF) ||
+        (rune >= 0x1F1E6 && rune <= 0x1F1FF) ||
+        (rune >= 0x1F3FB && rune <= 0x1F3FF);
+    if (isEmoji) return true;
+  }
+  return false;
 }
 
 class _MentionAwareText extends StatefulWidget {
@@ -664,6 +688,288 @@ class _MentionTarget {
     required this.member,
     required this.token,
   });
+}
+
+Map<String, dynamic>? _privateReplyContent(Event event) {
+  final raw = event.content['com.xmo.private_reply'];
+  if (raw is Map<String, dynamic>) return raw;
+  if (raw is Map) return Map<String, dynamic>.from(raw);
+  return null;
+}
+
+class _PrivateReplyContextPreview extends StatelessWidget {
+  final Event event;
+  final bool isMe;
+  final Future<Uint8List?> Function(Event, {bool getThumbnail})? loadImageBytes;
+  final Future<Uint8List?> Function(Event)? loadVideoThumbnail;
+  final void Function(String roomId, String eventId)? onTap;
+
+  const _PrivateReplyContextPreview({
+    required this.event,
+    required this.isMe,
+    required this.loadImageBytes,
+    required this.loadVideoThumbnail,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final privateReply = _privateReplyContent(event);
+    if (privateReply == null) return const SizedBox.shrink();
+
+    final sender = (privateReply['sender_name'] as String?)?.trim();
+    final preview = (privateReply['preview'] as String?)?.trim();
+    final sourceRoomId = (privateReply['source_room_id'] as String?)?.trim();
+    final sourceEventId = (privateReply['source_event_id'] as String?)?.trim();
+    final msgtype = (privateReply['msgtype'] as String?)?.trim();
+
+    return FutureBuilder<Event?>(
+      future: _loadPrivateReplySourceEvent(
+        event,
+        sourceRoomId: sourceRoomId,
+        sourceEventId: sourceEventId,
+      ),
+      builder: (context, snapshot) {
+        final sourceEvent = snapshot.data;
+        final displayPreview = sourceEvent == null
+            ? (preview?.isNotEmpty == true ? preview! : 'Original message')
+            : _privateReplyPreviewText(
+                sourceEvent,
+                fallback: preview ?? 'Original message',
+              );
+
+        final canOpenSource = sourceRoomId?.isNotEmpty == true &&
+            sourceEventId?.isNotEmpty == true &&
+            onTap != null;
+
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: canOpenSource
+              ? () => onTap!(sourceRoomId!, sourceEventId!)
+              : null,
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 230),
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: isMe
+                  ? const Color(0xFF29452B)
+                  : Colors.white.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 3,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: isMe ? kLimeGreen : const Color(0xFF72B7F2),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 7),
+                _PrivateReplyMediaPreview(
+                  event: sourceEvent,
+                  fallbackMsgtype: msgtype ?? '',
+                  isMe: isMe,
+                  loadImageBytes: loadImageBytes,
+                  loadVideoThumbnail: loadVideoThumbnail,
+                ),
+                if (_privateReplyHasMediaPreview(sourceEvent, msgtype ?? ''))
+                  const SizedBox(width: 7),
+                Flexible(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        sender?.isNotEmpty == true ? sender! : 'Message',
+                        style: GoogleFonts.inter(
+                          color: isMe ? kLimeGreen : const Color(0xFF72B7F2),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        displayPreview,
+                        style: GoogleFonts.inter(
+                          color: isMe
+                              ? kLimeGreen.withValues(alpha: 0.72)
+                              : kLightGrey,
+                          fontSize: 12,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<Event?> _loadPrivateReplySourceEvent(
+    Event privateReplyEvent, {
+    required String? sourceRoomId,
+    required String? sourceEventId,
+  }) async {
+    if (sourceRoomId == null ||
+        sourceRoomId.isEmpty ||
+        sourceEventId == null ||
+        sourceEventId.isEmpty) {
+      return null;
+    }
+
+    final sourceRoom = privateReplyEvent.room.client.getRoomById(sourceRoomId);
+    if (sourceRoom == null) return null;
+
+    try {
+      return sourceRoom.getEventById(sourceEventId);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _privateReplyPreviewText(Event event, {required String fallback}) {
+    switch (event.messageType) {
+      case MessageTypes.Image:
+        return 'Photo';
+      case MessageTypes.Video:
+        return 'Video';
+      case MessageTypes.Audio:
+        return 'Audio';
+      case MessageTypes.File:
+        return event.body.trim().isEmpty ? 'File' : event.body.trim();
+      default:
+        return fallback.trim().isEmpty ? 'Original message' : fallback.trim();
+    }
+  }
+}
+
+bool _privateReplyHasMediaPreview(Event? event, String fallbackMsgtype) {
+  final msgtype = event?.messageType ?? fallbackMsgtype;
+  return msgtype == MessageTypes.Image ||
+      msgtype == MessageTypes.Video ||
+      msgtype == MessageTypes.Audio ||
+      msgtype == MessageTypes.File;
+}
+
+class _PrivateReplyMediaPreview extends StatelessWidget {
+  final Event? event;
+  final String fallbackMsgtype;
+  final bool isMe;
+  final Future<Uint8List?> Function(Event, {bool getThumbnail})? loadImageBytes;
+  final Future<Uint8List?> Function(Event)? loadVideoThumbnail;
+
+  const _PrivateReplyMediaPreview({
+    required this.event,
+    required this.fallbackMsgtype,
+    required this.isMe,
+    required this.loadImageBytes,
+    required this.loadVideoThumbnail,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final msgtype = event?.messageType ?? fallbackMsgtype;
+    if (msgtype == MessageTypes.Image || msgtype == MessageTypes.Video) {
+      final source = event;
+      final thumbFuture = source == null
+          ? Future<Uint8List?>.value(null)
+          : msgtype == MessageTypes.Image
+              ? loadImageBytes?.call(source, getThumbnail: true)
+              : loadVideoThumbnail?.call(source);
+
+      return Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: isMe ? const Color(0xFF1A2A1A) : kDarkGrey,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: FutureBuilder<Uint8List?>(
+          future: thumbFuture,
+          builder: (context, snapshot) {
+            final bytes = snapshot.data;
+            if (bytes != null && bytes.isNotEmpty) {
+              return Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.memory(
+                    bytes,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => _PrivateReplyTypeIcon(
+                      msgtype: msgtype,
+                      isMe: isMe,
+                    ),
+                  ),
+                  if (msgtype == MessageTypes.Video)
+                    Container(
+                      color: Colors.black.withValues(alpha: 0.18),
+                      child: const Icon(
+                        Icons.play_arrow_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                    ),
+                ],
+              );
+            }
+            return _PrivateReplyTypeIcon(msgtype: msgtype, isMe: isMe);
+          },
+        ),
+      );
+    }
+
+    if (msgtype == MessageTypes.Audio || msgtype == MessageTypes.File) {
+      return Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: isMe ? const Color(0xFF1A2A1A) : kDarkGrey,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: _PrivateReplyTypeIcon(msgtype: msgtype, isMe: isMe),
+      );
+    }
+
+    return const SizedBox.shrink();
+  }
+}
+
+class _PrivateReplyTypeIcon extends StatelessWidget {
+  final String msgtype;
+  final bool isMe;
+
+  const _PrivateReplyTypeIcon({
+    required this.msgtype,
+    required this.isMe,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = switch (msgtype) {
+      MessageTypes.Image => Icons.image_rounded,
+      MessageTypes.Video => Icons.play_arrow_rounded,
+      MessageTypes.Audio => Icons.headphones_rounded,
+      MessageTypes.File => Icons.insert_drive_file_rounded,
+      _ => Icons.chat_bubble_rounded,
+    };
+
+    return Icon(
+      icon,
+      color: isMe ? kLimeGreen : kLightGrey,
+      size: 20,
+    );
+  }
 }
 
 class _ReplyContextPreview extends StatelessWidget {

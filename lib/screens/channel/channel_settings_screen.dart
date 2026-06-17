@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import '../../theme.dart';
 import '../../services/channel_service.dart';
 import '../../services/matrix_service.dart';
+import '../../services/room_controls_service.dart';
 import '../../providers/matrix_provider.dart';
 import '../../widgets/story/story_avatar.dart';
 import 'package:provider/provider.dart';
@@ -23,11 +24,86 @@ class ChannelSettingsScreen extends StatefulWidget {
   State<ChannelSettingsScreen> createState() => _ChannelSettingsScreenState();
 }
 
+class _SettingsDropdown<T> extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final T value;
+  final List<DropdownMenuItem<T>> items;
+  final ValueChanged<T?> onChanged;
+  final bool compact;
+
+  const _SettingsDropdown({
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: compact ? 2 : 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.inter(
+                    color: kWhite,
+                    fontSize: compact ? 12 : 13,
+                    fontWeight: compact ? FontWeight.w500 : FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: GoogleFonts.inter(
+                    color: kLightGrey,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          DropdownButtonHideUnderline(
+            child: DropdownButton<T>(
+              value: value,
+              dropdownColor: const Color(0xFF2C2C2E),
+              iconEnabledColor: kLightGrey,
+              style: GoogleFonts.inter(
+                color: kWhite,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+              items: items,
+              onChanged: onChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
   final _nameCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   bool _loading = false;
-  bool _isPublic = false;
+  XmoJoinMode _joinMode = XmoJoinMode.invite;
+  int _slowModeSeconds = 0;
+  XmoRoomPermissions _permissions = const XmoRoomPermissions(
+    sendMessages: 50,
+    sendMedia: 50,
+    startCalls: 50,
+    sendPolls: 50,
+    sendStickers: 50,
+  );
   bool _signMessages = true;
   Uint8List? _selectedAvatarBytes;
   String? _selectedAvatarName;
@@ -50,7 +126,9 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
   Future<void> _loadSettings() async {
     _nameCtrl.text = _resolvedRoomName;
     _descCtrl.text = widget.room.topic;
-    _isPublic = widget.room.joinRules == JoinRules.public;
+    _joinMode = RoomControlsService.joinModeFor(widget.room);
+    _slowModeSeconds = RoomControlsService.slowModeSecondsFor(widget.room);
+    _permissions = XmoRoomPermissions.fromRoom(widget.room);
 
     try {
       final settings = await _channelService.getChannelSettings(widget.room.id);
@@ -182,14 +260,12 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
         await widget.room.setAvatar(matrixFile);
       }
 
-      // Update join rules
-      final newJoinRule = _isPublic ? 'public' : 'invite';
-      await widget.room.client.setRoomStateWithKey(
-        widget.room.id,
-        EventTypes.RoomJoinRules,
-        '',
-        {'join_rule': newJoinRule},
+      await RoomControlsService.setJoinMode(widget.room, _joinMode);
+      await RoomControlsService.setSlowModeSeconds(
+        widget.room,
+        _slowModeSeconds,
       );
+      await RoomControlsService.setPermissions(widget.room, _permissions);
 
       await widget.room.client.setRoomStateWithKey(
         widget.room.id,
@@ -321,6 +397,88 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildJoinModeSelector() {
+    return _SettingsDropdown<XmoJoinMode>(
+      title: 'Who can join',
+      subtitle: _joinModeSubtitle,
+      value: _joinMode,
+      items: const [
+        DropdownMenuItem(
+          value: XmoJoinMode.public,
+          child: Text('Anyone'),
+        ),
+        DropdownMenuItem(
+          value: XmoJoinMode.invite,
+          child: Text('Invite only'),
+        ),
+        DropdownMenuItem(
+          value: XmoJoinMode.request,
+          child: Text('Approve requests'),
+        ),
+      ],
+      onChanged: (value) {
+        if (value == null) return;
+        setState(() => _joinMode = value);
+      },
+    );
+  }
+
+  String get _joinModeSubtitle {
+    switch (_joinMode) {
+      case XmoJoinMode.public:
+        return 'Anyone can find and join this channel';
+      case XmoJoinMode.request:
+        return 'New subscribers must request approval';
+      case XmoJoinMode.invite:
+        return 'Only invited subscribers can join';
+    }
+  }
+
+  Widget _buildSlowModeSelector() {
+    return _SettingsDropdown<int>(
+      title: 'Slow mode',
+      subtitle: _slowModeSeconds == 0
+          ? 'Posting has no delay'
+          : 'Writers wait $_slowModeSeconds seconds between posts',
+      value: _slowModeSeconds,
+      items: const [
+        DropdownMenuItem(value: 0, child: Text('Off')),
+        DropdownMenuItem(value: 5, child: Text('5 seconds')),
+        DropdownMenuItem(value: 10, child: Text('10 seconds')),
+        DropdownMenuItem(value: 30, child: Text('30 seconds')),
+        DropdownMenuItem(value: 60, child: Text('1 minute')),
+        DropdownMenuItem(value: 300, child: Text('5 minutes')),
+      ],
+      onChanged: (value) {
+        if (value == null) return;
+        setState(() => _slowModeSeconds = value);
+      },
+    );
+  }
+
+  Widget _buildPermissionSelector(
+    String title,
+    int value,
+    ValueChanged<int> onChanged,
+  ) {
+    return _SettingsDropdown<int>(
+      title: title,
+      subtitle: RoomControlsService.roleLabelForPower(value),
+      value: value,
+      compact: true,
+      items: const [
+        DropdownMenuItem(value: 0, child: Text('All subscribers')),
+        DropdownMenuItem(value: 50, child: Text('Moderators')),
+        DropdownMenuItem(value: 75, child: Text('Admins')),
+        DropdownMenuItem(value: 100, child: Text('Owner')),
+      ],
+      onChanged: (value) {
+        if (value == null) return;
+        onChanged(value);
+      },
     );
   }
 
@@ -509,36 +667,9 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
             ),
             const SizedBox(height: 12),
 
-            // Public/Private Toggle
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.transparent,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: SwitchListTile(
-                dense: true,
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                title: Text(
-                  'Public Channel',
-                  style: GoogleFonts.inter(color: kWhite, fontSize: 13),
-                ),
-                subtitle: Text(
-                  _isPublic
-                      ? 'Anyone can find and join this channel'
-                      : 'Only invited subscribers can join',
-                  style: GoogleFonts.inter(
-                    color: kLightGrey,
-                    fontSize: 11,
-                  ),
-                ),
-                value: _isPublic,
-                activeThumbColor: kLimeGreen,
-                onChanged: (value) {
-                  setState(() => _isPublic = value);
-                },
-              ),
-            ),
+            _buildJoinModeSelector(),
+            const SizedBox(height: 8),
+            _buildSlowModeSelector(),
             const SizedBox(height: 8),
 
             // Sign Messages Toggle
@@ -569,6 +700,82 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
                 onChanged: (value) {
                   setState(() => _signMessages = value);
                 },
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            Text(
+              'Posting Permissions',
+              style: GoogleFonts.inter(
+                color: kWhite,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 10),
+            _buildPermissionSelector(
+              'Post Messages',
+              _permissions.sendMessages,
+              (value) => setState(
+                () => _permissions = XmoRoomPermissions(
+                  sendMessages: value,
+                  sendMedia: _permissions.sendMedia,
+                  startCalls: _permissions.startCalls,
+                  sendPolls: _permissions.sendPolls,
+                  sendStickers: _permissions.sendStickers,
+                ),
+              ),
+            ),
+            _buildPermissionSelector(
+              'Post Media & Files',
+              _permissions.sendMedia,
+              (value) => setState(
+                () => _permissions = XmoRoomPermissions(
+                  sendMessages: _permissions.sendMessages,
+                  sendMedia: value,
+                  startCalls: _permissions.startCalls,
+                  sendPolls: _permissions.sendPolls,
+                  sendStickers: _permissions.sendStickers,
+                ),
+              ),
+            ),
+            _buildPermissionSelector(
+              'Start Calls',
+              _permissions.startCalls,
+              (value) => setState(
+                () => _permissions = XmoRoomPermissions(
+                  sendMessages: _permissions.sendMessages,
+                  sendMedia: _permissions.sendMedia,
+                  startCalls: value,
+                  sendPolls: _permissions.sendPolls,
+                  sendStickers: _permissions.sendStickers,
+                ),
+              ),
+            ),
+            _buildPermissionSelector(
+              'Post Polls',
+              _permissions.sendPolls,
+              (value) => setState(
+                () => _permissions = XmoRoomPermissions(
+                  sendMessages: _permissions.sendMessages,
+                  sendMedia: _permissions.sendMedia,
+                  startCalls: _permissions.startCalls,
+                  sendPolls: value,
+                  sendStickers: _permissions.sendStickers,
+                ),
+              ),
+            ),
+            _buildPermissionSelector(
+              'Post Stickers',
+              _permissions.sendStickers,
+              (value) => setState(
+                () => _permissions = XmoRoomPermissions(
+                  sendMessages: _permissions.sendMessages,
+                  sendMedia: _permissions.sendMedia,
+                  startCalls: _permissions.startCalls,
+                  sendPolls: _permissions.sendPolls,
+                  sendStickers: value,
+                ),
               ),
             ),
             const SizedBox(height: 20),

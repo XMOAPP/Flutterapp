@@ -27,6 +27,8 @@ import '../services/story_service.dart';
 import '../theme.dart';
 import '../widgets/matrix_chat/fullscreen_video_player.dart';
 import '../widgets/story/story_avatar.dart';
+import 'app_lock_settings_screen.dart';
+import 'device_sessions_screen.dart';
 import 'matrix_chat/media_handler.dart';
 import 'matrix_chat/widgets/tappable_file_chip.dart';
 import 'native_share_stub.dart' if (dart.library.io) 'native_share.dart'
@@ -612,6 +614,46 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
           : ListView(
               padding: const EdgeInsets.fromLTRB(22, 10, 22, 22),
               children: [
+                _securityNavTile(
+                  icon: Icons.lock,
+                  title: 'App Lock',
+                  subtitle: 'PIN, biometrics, and automatic locking',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const AppLockSettingsScreen(),
+                      ),
+                    );
+                  },
+                ),
+                _securityNavTile(
+                  icon: Icons.devices,
+                  title: 'Devices and Sessions',
+                  subtitle: 'Review and sign out Matrix sessions',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const DeviceSessionsScreen(),
+                      ),
+                    );
+                  },
+                ),
+                _securityNavTile(
+                  icon: Icons.verified_user,
+                  title: 'Two-step verification',
+                  subtitle: 'Requires homeserver-enforced login support',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const TwoFactorStatusScreen(),
+                      ),
+                    );
+                  },
+                ),
+                const Divider(color: Color(0xFF2C2C2E), height: 28),
                 _statusRow(
                   'Encryption',
                   status?.available == true ? 'Available' : 'Unavailable',
@@ -692,6 +734,33 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     );
   }
 
+  Widget _securityNavTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      onTap: onTap,
+      leading: Icon(icon, color: kWhite, size: 20),
+      title: Text(
+        title,
+        style: GoogleFonts.inter(
+          color: kWhite,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+      ),
+      trailing: const Icon(Icons.chevron_right, color: kLightGrey),
+    );
+  }
+
   Widget _detailRow(String label, String value) {
     return Padding(
       padding: const EdgeInsets.only(top: 10),
@@ -750,6 +819,68 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     if (key == null || key.isEmpty) return 'Unavailable';
     if (key.length <= 18) return key;
     return '${key.substring(0, 9)}...${key.substring(key.length - 9)}';
+  }
+}
+
+class TwoFactorStatusScreen extends StatelessWidget {
+  const TwoFactorStatusScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: kBlack,
+      appBar: AppBar(
+        title: Text(
+          'Two-step verification',
+          style: GoogleFonts.inter(
+            color: kWhite,
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.shield_outlined, color: kWhite, size: 42),
+            const SizedBox(height: 18),
+            Text(
+              'Account 2FA is not enabled',
+              style: GoogleFonts.inter(
+                color: kWhite,
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'XMO currently uses the Matrix homeserver for account login. '
+              'Secure two-factor authentication must be enforced by that '
+              'server so it cannot be bypassed from another Matrix client.',
+              style: GoogleFonts.inter(
+                color: kLightGrey,
+                fontSize: 13,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'The email code used during registration verifies the email '
+              'address; it is not a second factor for every login. App Lock '
+              'can protect XMO on this phone while homeserver 2FA is being '
+              'deployed.',
+              style: GoogleFonts.inter(
+                color: kLightGrey,
+                fontSize: 13,
+                height: 1.45,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

@@ -91,7 +91,7 @@ class MatrixProvider extends ChangeNotifier {
 
   // ─── Init ─────────────────────────────────────────────────────────────────
 
-  Future<void> init() async {
+  Future<void> init({VoidCallback? beforeStartSync}) async {
     try {
       await _svc.init();
       _state = _svc.isLoggedIn
@@ -102,6 +102,7 @@ class MatrixProvider extends ChangeNotifier {
         await _svc.refreshProfile();
         await _syncPublicAccountDirectory();
         await _ensureSavedMessagesReady();
+        beforeStartSync?.call();
         _listenSync();
         _svc.startSync();
         await PushNotificationService().registerCurrentUser();

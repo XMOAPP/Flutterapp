@@ -13,7 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 
 object XmoCallNotificationHelper {
-    const val CHANNEL_ID = "xmo_call_alerts"
+    const val CHANNEL_ID = "xmo_call_alerts_v2"
     const val EXTRA_IS_CALL_NOTIFICATION = "xmo_is_call_notification"
     const val EXTRA_ACTION = "xmo_action"
     const val ACTION_OPEN = "com.xmo.xmo.CALL_OPEN"
@@ -27,9 +27,20 @@ object XmoCallNotificationHelper {
         if (data["xmo_push_type"] == "call") return true
 
         val eventType = (data["event_type"] ?: data["type"] ?: "").lowercase()
-        if (eventType.startsWith("m.call.")) return true
+        if (eventType.startsWith("m.call.") || isGroupCallEventType(eventType)) return true
+
+        val contentType = (data["content_type"] ?: "").lowercase()
+        if (contentType.startsWith("m.call.") || isGroupCallEventType(contentType)) return true
 
         val msgType = (data["msgtype"] ?: data["message_type"] ?: "").lowercase()
+        val groupCallType = (data["m.type"] ?: data["call_type"] ?: "").lowercase()
+        val groupCallIntent = (data["m.intent"] ?: data["call_intent"] ?: "").lowercase()
+        if ((groupCallType == "m.voice" || groupCallType == "m.video") &&
+            (groupCallIntent == "m.ring" || groupCallIntent == "m.prompt" || groupCallIntent == "m.room")
+        ) {
+            return true
+        }
+
         val hasCallId = data.containsKey("call_id") || data.containsKey("m.call.id")
         val hasCallPayload = data.containsKey("offer") || data.containsKey("answer")
         return hasCallId && hasCallPayload && !msgType.startsWith("m.")
@@ -81,6 +92,7 @@ object XmoCallNotificationHelper {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true)
+            .setOnlyAlertOnce(false)
             .setAutoCancel(false)
             .setColor(Color.rgb(34, 197, 94))
             .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))
@@ -160,7 +172,13 @@ object XmoCallNotificationHelper {
         }
 
         val manager = context.getSystemService(NotificationManager::class.java)
+        manager?.deleteNotificationChannel("xmo_call_alerts")
         manager?.createNotificationChannel(channel)
+    }
+
+    private fun isGroupCallEventType(eventType: String): Boolean {
+        return eventType == "org.matrix.msc3401.call" ||
+            eventType == "org.matrix.msc3401.call.member"
     }
 
     private fun pendingIntentFlags(): Int {

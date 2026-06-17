@@ -20,6 +20,7 @@ object XmoMessageNotificationHelper {
     private const val CHANNEL_ID = "xmo_messages"
     private const val CHANNEL_NAME = "XMO messages"
     private const val NOTIFICATION_ID_FALLBACK = 920001
+    private const val AVATAR_SIZE = 192
 
     fun showMessage(
         context: Context,
@@ -90,33 +91,107 @@ object XmoMessageNotificationHelper {
     }
 
     private fun bodyFromPayload(data: Map<String, String>, rawBody: String?): String {
+        val explicitPreview = data["preview_label"]?.takeIf { it.isDisplayableText() }
+        val previewKind = (data["preview_kind"] ?: "").lowercase()
+        if (explicitPreview != null && previewKind.isNotBlank()) {
+            return previewPrefix(previewKind) + explicitPreview
+        }
+
         val msgType = (data["msgtype"] ?: data["message_type"] ?: data["event_type"] ?: "")
             .lowercase()
         return when {
-            msgType.startsWith("m.call.") -> "Incoming call"
+            msgType.startsWith("m.call.") -> "☎ Incoming call"
             msgType.startsWith("m.room.") -> "Room updated"
-            msgType.contains("m.image") || msgType.contains("image") -> "Photo"
-            msgType.contains("m.video") || msgType.contains("video") -> "Video"
+            msgType.contains("m.image") || msgType.contains("image") -> "\uD83D\uDDBC\uFE0F Photo"
+            msgType.contains("m.video") || msgType.contains("video") -> "▶ Video"
             msgType.contains("m.audio") || msgType.contains("audio") -> {
                 val fileName = data["filename"] ?: data["content"] ?: data["body"]
                 if (fileName?.lowercase()?.startsWith("voice_") == true) {
-                    "Voice message"
+                    "🎙 Voice message"
                 } else {
-                    fileName?.takeIf { it.isDisplayableText() } ?: "Audio"
+                    "🎧 " + (fileName?.takeIf { it.isDisplayableText() } ?: "Audio")
                 }
             }
             msgType.contains("m.file") || msgType.contains("file") ->
-                data["filename"]?.takeIf { it.isDisplayableText() }
+                previewPrefix(fileKind(data)) + (data["filename"]?.takeIf { it.isDisplayableText() }
                     ?: data["content"]?.takeIf { it.isDisplayableText() }
                     ?: data["body"]?.takeIf { it.isDisplayableText() }
-                    ?: "File"
-            msgType.contains("m.location") || msgType.contains("location") -> "Location"
+                    ?: "File")
+            msgType.contains("m.location") || msgType.contains("location") -> "📍 Location"
             msgType.contains("m.room.encrypted") || msgType.contains("encrypted") ->
-                "New encrypted message"
+                "🔒 New encrypted message"
             else -> data["content"]?.takeIf { it.isDisplayableText() }
                 ?: data["body"]?.takeIf { it.isDisplayableText() }
                 ?: rawBody?.takeIf { it.isDisplayableText() }
                 ?: "Open XMO to view this message"
+        }
+    }
+
+    private fun previewPrefix(kind: String): String {
+        return when (kind.lowercase()) {
+            "image" -> "\uD83D\uDDBC\uFE0F "
+            "video" -> "▶ "
+            "voice" -> "🎙 "
+            "audio" -> "🎧 "
+            "pdf" -> "\uD83D\uDCC4 "
+            "word" -> "\uD83D\uDCDD "
+            "spreadsheet" -> "\uD83D\uDCCA "
+            "presentation" -> "\uD83D\uDCCA "
+            "apk" -> "\uD83D\uDCE6 "
+            "archive" -> "\uD83D\uDCE6 "
+            "text_file" -> "\uD83D\uDCC4 "
+            "code" -> "\uD83D\uDCBB "
+            "app" -> "\uD83D\uDCE6 "
+            "file" -> "\uD83D\uDCC4 "
+            "location" -> "📍 "
+            "encrypted" -> "🔒 "
+            else -> ""
+        }
+    }
+
+    private fun fileKind(data: Map<String, String>): String {
+        val explicitKind = data["preview_kind"]?.lowercase()
+        if (!explicitKind.isNullOrBlank()) return explicitKind
+
+        val mimeType = data["mimetype"]?.lowercase() ?: ""
+        val filename = (data["filename"] ?: data["content"] ?: data["body"] ?: "").lowercase()
+        val extension = filename.substringAfterLast('.', "")
+
+        if (mimeType.startsWith("image/") ||
+            setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "svg")
+                .contains(extension)
+        ) return "image"
+        if (mimeType.startsWith("video/") ||
+            setOf("mp4", "mkv", "mov", "avi", "webm", "3gp", "m4v").contains(extension)
+        ) return "video"
+        if (mimeType.startsWith("audio/") ||
+            setOf("mp3", "m4a", "aac", "wav", "ogg", "opus", "flac", "amr").contains(extension)
+        ) return "audio"
+
+        return when (extension) {
+            "pdf" -> "pdf"
+            "doc", "docx" -> "word"
+            "xls", "xlsx", "csv" -> "spreadsheet"
+            "ppt", "pptx" -> "presentation"
+            "apk", "aab" -> "apk"
+            "zip", "rar", "7z", "tar", "gz" -> "archive"
+            "txt", "rtf", "md" -> "text_file"
+            "json", "xml", "html", "css", "js", "ts", "dart", "java", "kt",
+            "py", "c", "cpp", "cs", "php", "sh" -> "code"
+            "exe", "msi", "dmg", "pkg", "deb", "rpm" -> "app"
+            else -> {
+                when {
+                    mimeType.contains("pdf") -> "pdf"
+                    mimeType.contains("word") ||
+                        mimeType.contains("officedocument.wordprocessingml") -> "word"
+                    mimeType.contains("spreadsheet") || mimeType.contains("excel") -> "spreadsheet"
+                    mimeType.contains("presentation") || mimeType.contains("powerpoint") ->
+                        "presentation"
+                    mimeType == "application/vnd.android.package-archive" -> "apk"
+                    mimeType.startsWith("text/") -> "text_file"
+                    else -> "file"
+                }
+            }
         }
     }
 
@@ -130,7 +205,7 @@ object XmoMessageNotificationHelper {
 
         return try {
             URL(url).openStream().use { stream ->
-                BitmapFactory.decodeStream(stream)
+                BitmapFactory.decodeStream(stream)?.let { circularBitmap(it) }
             }
         } catch (_: Exception) {
             null
@@ -138,7 +213,7 @@ object XmoMessageNotificationHelper {
     }
 
     private fun fallbackAvatarBitmap(title: String): Bitmap {
-        val size = 96
+        val size = AVATAR_SIZE
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val background = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -150,12 +225,37 @@ object XmoMessageNotificationHelper {
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(150, 243, 42)
             textAlign = Paint.Align.CENTER
-            textSize = 44f
+            textSize = 88f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
         val y = size / 2f - (textPaint.descent() + textPaint.ascent()) / 2f
         canvas.drawText(letter, size / 2f, y, textPaint)
         return bitmap
+    }
+
+    private fun circularBitmap(source: Bitmap): Bitmap {
+        val size = AVATAR_SIZE
+        val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val scale = maxOf(
+            size.toFloat() / source.width.toFloat(),
+            size.toFloat() / source.height.toFloat(),
+        )
+        val matrix = android.graphics.Matrix().apply {
+            setScale(scale, scale)
+            postTranslate(
+                (size - source.width * scale) / 2f,
+                (size - source.height * scale) / 2f,
+            )
+        }
+
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+        paint.xfermode = android.graphics.PorterDuffXfermode(
+            android.graphics.PorterDuff.Mode.SRC_IN,
+        )
+        canvas.drawBitmap(source, matrix, paint)
+        return output
     }
 
     private fun String.isDisplayableText(): Boolean {

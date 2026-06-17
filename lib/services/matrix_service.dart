@@ -47,6 +47,7 @@ class MatrixService {
   static const String _inviteLinksStateType = 'xmo.invite.links';
   static const String roomTypeStateType = 'xmo.room.type';
   static const String savedMessagesStateType = 'xmo.saved_messages';
+  static const String groupCallPushMarkerEvent = 'xmo.group_call_invite';
 
   late Client _client;
   late Box _authBox;
@@ -68,6 +69,24 @@ class MatrixService {
   String? get displayName => _profileDisplayName?.trim().isNotEmpty == true
       ? _profileDisplayName
       : _client.userID?.split(':').first.replaceFirst('@', '');
+
+  static bool isGroupCallPushMarkerContent(Map? content) {
+    if (content == null) return false;
+    final xmoEvent = content['xmo_event']?.toString();
+    final pushType = content['xmo_push_type']?.toString();
+    final callKind = content['xmo_call_kind']?.toString();
+    final groupCall = content['group_call'];
+    return xmoEvent == groupCallPushMarkerEvent ||
+        (pushType == 'call' && callKind == 'group') ||
+        groupCall == true ||
+        groupCall?.toString().toLowerCase() == 'true';
+  }
+
+  static bool isGroupCallPushMarker(Event event) {
+    return event.type == EventTypes.Message &&
+        isGroupCallPushMarkerContent(event.content);
+  }
+
   String? get avatarUrl {
     if (_profileAvatarRemoved) return null;
     if (_profileAvatarUrl?.trim().isNotEmpty == true) {
@@ -1228,10 +1247,318 @@ class MatrixService {
 
   // ─── Messaging ────────────────────────────────────────────────────────────
 
+  Future<void> sendGroupCallPushMarker({
+    required Room room,
+    required String groupCallId,
+    required bool video,
+  }) async {
+    try {
+      await room.sendEvent({
+        'msgtype': 'm.notice',
+        'body': 'Incoming ${video ? 'video' : 'voice'} call',
+        'xmo_event': groupCallPushMarkerEvent,
+        'xmo_push_type': 'call',
+        'xmo_call_kind': 'group',
+        'group_call': true,
+        'group_call_id': groupCallId,
+        'call_id': groupCallId,
+        'm.call.id': groupCallId,
+        'call_type': video ? 'video' : 'voice',
+        'm.type': video ? 'm.video' : 'm.voice',
+        'm.intent': 'm.prompt',
+      });
+    } catch (e) {
+      debugPrint('[MatrixService] Failed to send group call push marker: $e');
+    }
+  }
+
   Future<void> sendMessage(String roomId, String message) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
-    await room.sendTextEvent(message);
+    final linkPreview = await _buildLinkPreview(message);
+    if (linkPreview == null) {
+      await room.sendTextEvent(message);
+      return;
+    }
+
+    await room.sendEvent({
+      'msgtype': 'm.text',
+      'body': message,
+      'com.xmo.link_preview': linkPreview,
+    });
+  }
+
+  Future<void> sendSticker({
+    required String roomId,
+    required Uint8List bytes,
+    required String fileName,
+    required String mimeType,
+  }) async {
+    final room = _client.getRoomById(roomId);
+    if (room == null) throw Exception('Room not found: $roomId');
+
+    final preparedSticker = await _prepareMediaUpload(
+      room,
+      bytes: bytes,
+      fileName: fileName,
+      mimeType: mimeType,
+    );
+    final stickerMxc = await _client.uploadContent(
+      preparedSticker.bytes,
+      filename: fileName,
+      contentType: preparedSticker.contentType,
+    );
+
+    await room.sendEvent({
+      'body': fileName,
+      if (preparedSticker.encryptedFile == null) 'url': stickerMxc.toString(),
+      if (preparedSticker.encryptedFile != null)
+        'file': _encryptedFileContent(
+          preparedSticker.encryptedFile!,
+          stickerMxc,
+          mimeType: mimeType,
+        ),
+      'info': {
+        'mimetype': mimeType,
+        'size': bytes.length,
+      },
+    }, type: EventTypes.Sticker);
+  }
+
+  Future<void> sendPoll({
+    required String roomId,
+    required String question,
+    required List<String> options,
+  }) async {
+    final room = _client.getRoomById(roomId);
+    if (room == null) throw Exception('Room not found: $roomId');
+
+    final cleanQuestion = question.trim();
+    final answers = <Map<String, dynamic>>[];
+    for (var i = 0; i < options.length; i++) {
+      final option = options[i].trim();
+      if (option.isEmpty) continue;
+      answers.add({
+        'id': 'xmo_poll_${DateTime.now().microsecondsSinceEpoch}_$i',
+        'org.matrix.msc1767.text': option,
+        'm.text': option,
+      });
+    }
+    if (cleanQuestion.isEmpty || answers.length < 2) {
+      throw Exception('Poll needs a question and at least two options');
+    }
+
+    final pollStart = {
+      'question': {
+        'org.matrix.msc1767.text': cleanQuestion,
+        'm.text': cleanQuestion,
+      },
+      'kind': 'org.matrix.msc3381.poll.undisclosed',
+      'max_selections': 1,
+      'answers': answers,
+    };
+
+    await room.sendEvent({
+      'body': cleanQuestion,
+      'org.matrix.msc1767.text': cleanQuestion,
+      'm.text': cleanQuestion,
+      'org.matrix.msc3381.poll.start': pollStart,
+      'm.poll.start': pollStart,
+    }, type: 'm.poll.start');
+  }
+
+  Future<void> sendPollResponse({
+    required String roomId,
+    required String pollEventId,
+    required String answerId,
+  }) async {
+    final room = _client.getRoomById(roomId);
+    if (room == null) throw Exception('Room not found: $roomId');
+
+    final response = {
+      'answers': [answerId],
+    };
+
+    await room.sendEvent({
+      'm.relates_to': {
+        'rel_type': 'm.reference',
+        'event_id': pollEventId,
+      },
+      'org.matrix.msc3381.poll.response': response,
+      'm.poll.response': response,
+    }, type: 'm.poll.response');
+  }
+
+  Future<Map<String, dynamic>?> _buildLinkPreview(String message) async {
+    final match = RegExp(
+      r'((https?:\/\/|www\.)[^\s<>()]+|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|org|net|edu|gov|io|co|in|me|app|dev|ai|info|biz|xyz|site|online|store|tech|link|ly|to|tv|uk|us|ca|au|de|fr|jp|cn|ru|br|za|nl|it|es|se|no|fi|ch|be|at|dk|pl|ie|sg|ae|sa|qa|kw|om|bh|pk|bd|lk|np|id|my|th|vn|ph)(?:\/[^\s<>()]*)?)',
+      caseSensitive: false,
+    ).firstMatch(message);
+    if (match == null) return null;
+
+    var url = match.group(0) ?? '';
+    url = url.replaceAll(RegExp(r'[.,!?;:]+$'), '');
+    if (url.contains('@')) return null;
+    final normalizedUrl =
+        url.startsWith(RegExp(r'https?://', caseSensitive: false))
+            ? url
+            : 'https://$url';
+    final uri = Uri.tryParse(normalizedUrl);
+    if (uri == null || uri.host.isEmpty) return null;
+
+    final fallback = {
+      'url': normalizedUrl,
+      'host': uri.host,
+      'title':
+          uri.host.replaceFirst(RegExp(r'^www\.', caseSensitive: false), ''),
+    };
+
+    final richPreview = await _fetchRichLinkPreview(uri, fallback);
+    return richPreview ?? fallback;
+  }
+
+  Future<Map<String, dynamic>?> _fetchRichLinkPreview(
+    Uri uri,
+    Map<String, dynamic> fallback,
+  ) async {
+    if (uri.scheme != 'http' && uri.scheme != 'https') return fallback;
+
+    final client = io.HttpClient()
+      ..connectionTimeout = const Duration(seconds: 4)
+      ..userAgent = 'XMO/1.0 link preview';
+
+    try {
+      final request = await client.getUrl(uri).timeout(
+            const Duration(seconds: 4),
+          );
+      request.headers.set(
+        io.HttpHeaders.acceptHeader,
+        'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      );
+      request.followRedirects = true;
+      request.maxRedirects = 4;
+
+      final response = await request.close().timeout(
+            const Duration(seconds: 5),
+          );
+      final contentType = response.headers.contentType?.mimeType.toLowerCase();
+      if (response.statusCode < 200 ||
+          response.statusCode >= 400 ||
+          (contentType != null && !contentType.contains('html'))) {
+        return fallback;
+      }
+
+      final chunks = <int>[];
+      var total = 0;
+      await for (final chunk in response) {
+        total += chunk.length;
+        if (total > 320 * 1024) break;
+        chunks.addAll(chunk);
+      }
+
+      if (chunks.isEmpty) return fallback;
+      final html = utf8.decode(chunks, allowMalformed: true);
+      final title = _firstNonEmpty([
+            _htmlMetaContent(html, 'og:title'),
+            _htmlMetaContent(html, 'twitter:title'),
+            _htmlTitle(html),
+          ]) ??
+          fallback['title']?.toString();
+      final description = _firstNonEmpty([
+        _htmlMetaContent(html, 'og:description'),
+        _htmlMetaContent(html, 'twitter:description'),
+        _htmlMetaContent(html, 'description'),
+      ]);
+      final siteName = _firstNonEmpty([
+        _htmlMetaContent(html, 'og:site_name'),
+        fallback['host']?.toString(),
+      ]);
+      final image = _firstNonEmpty([
+        _htmlMetaContent(html, 'og:image'),
+        _htmlMetaContent(html, 'twitter:image'),
+        _htmlMetaContent(html, 'twitter:image:src'),
+      ]);
+      final imageUrl = image == null ? null : _absoluteUrl(uri, image);
+
+      return {
+        ...fallback,
+        if (title != null && title.isNotEmpty) 'title': title,
+        if (description != null && description.isNotEmpty)
+          'description': description,
+        if (siteName != null && siteName.isNotEmpty) 'site_name': siteName,
+        if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
+      };
+    } catch (e) {
+      debugPrint('[MatrixService] Rich link preview failed for $uri: $e');
+      return fallback;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  String? _htmlMetaContent(String html, String key) {
+    final escapedKey = RegExp.escape(key);
+    final patterns = [
+      RegExp(
+        '<meta\\s+[^>]*(?:property|name)=["\\\']$escapedKey["\\\'][^>]*content=["\\\']([^"\\\']+)["\\\'][^>]*>',
+        caseSensitive: false,
+      ),
+      RegExp(
+        '<meta\\s+[^>]*content=["\\\']([^"\\\']+)["\\\'][^>]*(?:property|name)=["\\\']$escapedKey["\\\'][^>]*>',
+        caseSensitive: false,
+      ),
+    ];
+    for (final pattern in patterns) {
+      final match = pattern.firstMatch(html);
+      final value = match?.group(1);
+      if (value != null && value.trim().isNotEmpty) {
+        return _cleanHtmlText(value);
+      }
+    }
+    return null;
+  }
+
+  String? _htmlTitle(String html) {
+    final match = RegExp(
+      r'<title[^>]*>(.*?)<\/title>',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(html);
+    final value = match?.group(1);
+    if (value == null || value.trim().isEmpty) return null;
+    return _cleanHtmlText(value);
+  }
+
+  String? _firstNonEmpty(List<String?> values) {
+    for (final value in values) {
+      final trimmed = value?.trim();
+      if (trimmed != null && trimmed.isNotEmpty) return trimmed;
+    }
+    return null;
+  }
+
+  String _cleanHtmlText(String value) {
+    return _decodeHtmlEntities(
+      value.replaceAll(RegExp(r'\s+'), ' ').trim(),
+    );
+  }
+
+  String _decodeHtmlEntities(String value) {
+    return value
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&apos;', "'");
+  }
+
+  String? _absoluteUrl(Uri base, String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return null;
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null) return null;
+    return base.resolveUri(uri).toString();
   }
 
   Future<void> sendAudio({

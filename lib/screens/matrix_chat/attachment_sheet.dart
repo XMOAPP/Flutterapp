@@ -9,6 +9,8 @@ void showChatAttachmentSheet({
   required VoidCallback onAudio,
   required VoidCallback onDocuments,
   required VoidCallback onContacts,
+  required VoidCallback onSticker,
+  required VoidCallback onPoll,
 }) {
   showModalBottomSheet(
     context: context,
@@ -90,6 +92,37 @@ void showChatAttachmentSheet({
                     },
                   ),
                 ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _AttachmentOptionSlot(
+                  child: AttachOption(
+                    icon: Icons.sticky_note_2,
+                    label: 'Sticker',
+                    color: Colors.white,
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      onSticker();
+                    },
+                  ),
+                ),
+                _AttachmentOptionSlot(
+                  child: AttachOption(
+                    icon: Icons.poll,
+                    label: 'Poll',
+                    color: Colors.white,
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      onPoll();
+                    },
+                  ),
+                ),
+                const _AttachmentOptionSlot(child: SizedBox.shrink()),
+                const _AttachmentOptionSlot(child: SizedBox.shrink()),
+                const _AttachmentOptionSlot(child: SizedBox.shrink()),
               ],
             ),
           ],

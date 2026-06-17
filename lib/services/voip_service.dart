@@ -16,8 +16,11 @@ import '../screens/group/group_call_screen.dart';
 import '../screens/group/incoming_group_call_screen.dart';
 import 'call_history_service.dart';
 import 'matrix_service.dart';
+import 'room_controls_service.dart';
 
-class VoipService {
+enum CallRecoveryStatus { connected, reconnecting, reconnected, failed }
+
+class VoipService with WidgetsBindingObserver {
   static final VoipService _instance = VoipService._internal();
   factory VoipService() => _instance;
   VoipService._internal();
@@ -29,6 +32,10 @@ class VoipService {
   final Map<String, int> _fullscreenIncomingGroupRoomScopes = <String, int>{};
   AudioPlayer? _ringtonePlayer;
   bool _ringtoneStarting = false;
+  bool _observingLifecycle = false;
+  bool _handlingNativeAction = false;
+  DateTime? _lastNativeActionSyncAttempt;
+  Timer? _recoveryTimeout;
 
   // ── Active call tracking ─────────────────────────────────────────────────
   CallSession? _activeSession;
@@ -48,12 +55,16 @@ class VoipService {
   final ValueNotifier<CallSession?> incomingCall = ValueNotifier(null);
   final ValueNotifier<GroupCall?> incomingGroupCall = ValueNotifier(null);
   final ValueNotifier<int> callStateVersion = ValueNotifier(0);
+  final ValueNotifier<CallRecoveryStatus> recoveryStatus =
+      ValueNotifier(CallRecoveryStatus.connected);
 
   CallSession? get activeSession => _activeSession;
   GroupCall? get activeGroupCall => _activeGroupCall;
   DateTime? get callConnectedAt => _callConnectedAt;
   DateTime? get groupCallConnectedAt => _groupCallConnectedAt;
   bool get isInCall => _activeSession != null || _activeGroupCall != null;
+  String groupCallLink(Room room) =>
+      'https://xmo.dpdns.org/call/${Uri.encodeComponent(room.id)}';
   bool get shouldOpenIncomingCallsFullscreen =>
       _fullscreenIncomingCallScopeDepth > 0;
   bool get isFullscreenCallRouteVisible => fullscreenCallRouteDepth.value > 0;
@@ -228,6 +239,10 @@ class VoipService {
     required GlobalKey<NavigatorState> navigatorKey,
   }) {
     _navigatorKey = navigatorKey;
+    if (!_observingLifecycle) {
+      WidgetsBinding.instance.addObserver(this);
+      _observingLifecycle = true;
+    }
     _voip ??= VoIP(
       matrixService.client,
       _XmoWebRTCDelegate(
@@ -235,6 +250,19 @@ class VoipService {
         onNewGroupCall: _openGroupCallScreen,
       ),
     );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_recoverActiveCall(reason: 'app resumed'));
+      return;
+    }
+    if ((state == AppLifecycleState.paused ||
+            state == AppLifecycleState.inactive) &&
+        isInCall) {
+      _setRecoveryStatus(CallRecoveryStatus.reconnecting);
+    }
   }
 
   Future<void> startCall(Room room, {required bool video}) async {
@@ -252,6 +280,7 @@ class VoipService {
       await startGroupCall(room, video: video);
       return;
     }
+    _setRecoveryStatus(CallRecoveryStatus.connected);
     unawaited(
       CallHistoryService().recordRoomCall(
         room: room,
@@ -271,6 +300,13 @@ class VoipService {
     }
     if (!_supportsRoomCall(room) || MatrixService().isDirectRoom(room)) {
       throw StateError('Group calls are only available in groups');
+    }
+    if (!RoomControlsService.canPerform(
+      room,
+      room.client.userID,
+      XmoRoomPermission.startCalls,
+    )) {
+      throw StateError('You do not have permission to start calls here');
     }
     var groupCall = voip.getGroupCallForRoom(room.id);
     if (!room.groupCallsEnabled) {
@@ -305,9 +341,17 @@ class VoipService {
     }
     if (createdGroupCall) {
       _ownedGroupCallIds.add(groupCall.groupCallId);
+      unawaited(
+        MatrixService().sendGroupCallPushMarker(
+          room: room,
+          groupCallId: groupCall.groupCallId,
+          video: video,
+        ),
+      );
     }
     _locallyClosedGroupCallIds.remove(groupCall.groupCallId);
 
+    _setRecoveryStatus(CallRecoveryStatus.connected);
     _trackGroupCall(groupCall, direction: CallHistoryDirection.outgoing);
     unawaited(
       CallHistoryService().recordGroupCall(
@@ -349,6 +393,7 @@ class VoipService {
     if (session.isGroupCall) return;
     _activeSession = session;
     _callConnectedAt = null;
+    _setRecoveryStatus(CallRecoveryStatus.connected);
     if (session.direction == CallDirection.kIncoming) {
       if (playRingtone && session.state == CallState.kRinging) {
         unawaited(_startRingtone());
@@ -366,6 +411,7 @@ class VoipService {
         if (session.type == CallType.kVoice) {
           unawaited(_routeDirectVoiceCallToEarpiece());
         }
+        _setRecoveryStatus(CallRecoveryStatus.connected);
         if (incomingCall.value == session) {
           incomingCall.value = null;
         }
@@ -385,6 +431,7 @@ class VoipService {
     _callConnectedAt = null;
     pipMode.value = false;
     incomingCall.value = null;
+    _setRecoveryStatus(CallRecoveryStatus.connected);
     _notifyCallStateChanged();
   }
 
@@ -394,8 +441,10 @@ class VoipService {
   }) {
     _activeGroupCall = groupCall;
     _activeGroupCallDirection = direction ?? _activeGroupCallDirection;
+    _setRecoveryStatus(CallRecoveryStatus.connected);
     if (_groupCallConnectedAt == null && _hasConnectedGroupPeer(groupCall)) {
       _groupCallConnectedAt = DateTime.now();
+      _setRecoveryStatus(CallRecoveryStatus.connected);
     }
     _notifyCallStateChanged();
     _activeGroupCallStateSub?.cancel();
@@ -405,6 +454,7 @@ class VoipService {
           _groupCallConnectedAt == null &&
           _hasConnectedGroupPeer(groupCall)) {
         _groupCallConnectedAt = DateTime.now();
+        _setRecoveryStatus(CallRecoveryStatus.connected);
       }
       if (state == GroupCallState.Ended) {
         if (_isActiveGroupCall(groupCall)) {
@@ -417,6 +467,7 @@ class VoipService {
           _groupCallConnectedAt == null &&
           _hasConnectedGroupPeer(groupCall)) {
         _groupCallConnectedAt = DateTime.now();
+        _setRecoveryStatus(CallRecoveryStatus.connected);
       }
     });
   }
@@ -436,6 +487,7 @@ class VoipService {
     _activeGroupCallDirection = null;
     pipMode.value = false;
     incomingGroupCall.value = null;
+    _setRecoveryStatus(CallRecoveryStatus.connected);
     _notifyCallStateChanged();
   }
 
@@ -481,40 +533,49 @@ class VoipService {
         .trim();
     if (action.isEmpty) return;
 
-    final roomId = _nativeCallRoomId(payload);
-    final deadline = DateTime.now().add(const Duration(seconds: 14));
-    while (DateTime.now().isBefore(deadline)) {
-      final session = _matchingNativeIncomingSession(roomId);
-      if (session != null) {
-        if (action == 'answer') {
-          await answerIncomingCall(session);
-        } else if (action == 'decline') {
-          await rejectIncomingCall(session);
-        } else {
-          await _pushCallScreen(session);
-        }
-        return;
-      }
-
-      final groupCall = _matchingNativeIncomingGroupCall(roomId);
-      if (groupCall != null) {
-        if (action == 'answer') {
-          await answerIncomingGroupCall(groupCall);
-        } else if (action == 'decline') {
-          rejectGroupCall(groupCall);
-        } else {
-          await _pushIncomingGroupCallScreen(groupCall);
-        }
-        return;
-      }
-
-      await Future.delayed(const Duration(milliseconds: 250));
+    if (_handlingNativeAction) {
+      debugPrint('[VoipService] Native call action already in progress');
     }
+    _handlingNativeAction = true;
+    final roomId = _nativeCallRoomId(payload);
+    final deadline = DateTime.now().add(const Duration(seconds: 75));
+    try {
+      while (DateTime.now().isBefore(deadline)) {
+        final session = _matchingNativeIncomingSession(roomId);
+        if (session != null) {
+          if (action == 'answer') {
+            await answerIncomingCall(session);
+          } else if (action == 'decline') {
+            await rejectIncomingCall(session);
+          } else {
+            await _pushCallScreen(session);
+          }
+          return;
+        }
 
-    debugPrint(
-      '[VoipService] Native call action had no matching incoming call: '
-      '$payload',
-    );
+        final groupCall = _matchingNativeIncomingGroupCall(roomId);
+        if (groupCall != null) {
+          if (action == 'answer') {
+            await answerIncomingGroupCall(groupCall);
+          } else if (action == 'decline') {
+            rejectGroupCall(groupCall);
+          } else {
+            await _pushIncomingGroupCallScreen(groupCall);
+          }
+          return;
+        }
+
+        await _refreshCallsForNativeAction(roomId);
+        await Future.delayed(const Duration(milliseconds: 250));
+      }
+
+      debugPrint(
+        '[VoipService] Native call action had no matching incoming call: '
+        '$payload',
+      );
+    } finally {
+      _handlingNativeAction = false;
+    }
   }
 
   String? _nativeCallRoomId(Map<String, String> payload) {
@@ -564,7 +625,81 @@ class VoipService {
     return null;
   }
 
+  Future<void> _refreshCallsForNativeAction(String? roomId) async {
+    final now = DateTime.now();
+    final lastAttempt = _lastNativeActionSyncAttempt;
+    if (lastAttempt != null &&
+        now.difference(lastAttempt) < const Duration(seconds: 2)) {
+      return;
+    }
+    _lastNativeActionSyncAttempt = now;
+    try {
+      final service = MatrixService();
+      if (!service.isLoggedIn) return;
+      await service.client.oneShotSync();
+      if (roomId != null && roomId.isNotEmpty) {
+        _voip?.getGroupCallForRoom(roomId);
+      }
+    } catch (e) {
+      debugPrint('[VoipService] Native call sync refresh failed: $e');
+    }
+  }
+
   // ── Navigation ───────────────────────────────────────────────────────────
+
+  void _setRecoveryStatus(CallRecoveryStatus status) {
+    if (recoveryStatus.value == status) return;
+    recoveryStatus.value = status;
+    if (status == CallRecoveryStatus.reconnecting) {
+      _recoveryTimeout?.cancel();
+      _recoveryTimeout = Timer(const Duration(seconds: 30), () {
+        if (recoveryStatus.value == CallRecoveryStatus.reconnecting) {
+          recoveryStatus.value = CallRecoveryStatus.failed;
+        }
+      });
+      return;
+    }
+    _recoveryTimeout?.cancel();
+    _recoveryTimeout = null;
+  }
+
+  Future<void> _recoverActiveCall({required String reason}) async {
+    if (!isInCall) {
+      _setRecoveryStatus(CallRecoveryStatus.connected);
+      return;
+    }
+
+    _setRecoveryStatus(CallRecoveryStatus.reconnecting);
+    try {
+      final service = MatrixService();
+      if (service.isLoggedIn) {
+        await service.client.oneShotSync();
+      }
+
+      final groupCall = _activeGroupCall;
+      if (groupCall != null && !groupCall.terminated) {
+        if (_needsGroupCallEnter(groupCall)) {
+          await _enterGroupCall(groupCall);
+        }
+        _setRecoveryStatus(CallRecoveryStatus.reconnected);
+        return;
+      }
+
+      final session = _activeSession;
+      if (session != null && session.state != CallState.kEnded) {
+        if (session.type == CallType.kVoice) {
+          await _routeDirectVoiceCallToEarpiece();
+        }
+        _setRecoveryStatus(CallRecoveryStatus.reconnected);
+        return;
+      }
+
+      _setRecoveryStatus(CallRecoveryStatus.failed);
+    } catch (e) {
+      debugPrint('[VoipService] Call recovery failed after $reason: $e');
+      _setRecoveryStatus(CallRecoveryStatus.failed);
+    }
+  }
 
   Future<void> _openCallScreen(CallSession session) async {
     if (session.isGroupCall) return;
@@ -609,6 +744,7 @@ class VoipService {
 
   Future<void> answerIncomingCall(CallSession session) async {
     unawaited(_stopRingtone());
+    _setRecoveryStatus(CallRecoveryStatus.reconnecting);
     if (_activeSession != session) {
       _trackSession(session, showIncomingBanner: false, playRingtone: false);
     }
@@ -625,6 +761,7 @@ class VoipService {
       ),
     );
     await _pushCallScreen(session);
+    _setRecoveryStatus(CallRecoveryStatus.connected);
   }
 
   Future<void> _routeDirectVoiceCallToEarpiece() async {
@@ -662,6 +799,7 @@ class VoipService {
     bool openCallScreen = true,
   }) async {
     unawaited(_stopRingtone());
+    _setRecoveryStatus(CallRecoveryStatus.reconnecting);
     if (_isActiveGroupCall(groupCall)) {
       incomingGroupCall.value = null;
       _locallyClosedGroupCallIds.remove(groupCall.groupCallId);
@@ -671,6 +809,7 @@ class VoipService {
       if (openCallScreen) {
         await _pushGroupCallScreen(groupCall);
       }
+      _setRecoveryStatus(CallRecoveryStatus.connected);
       return;
     }
     if (isInCall) {
@@ -693,6 +832,7 @@ class VoipService {
     if (openCallScreen) {
       await _pushGroupCallScreen(groupCall);
     }
+    _setRecoveryStatus(CallRecoveryStatus.connected);
   }
 
   bool _needsGroupCallEnter(GroupCall groupCall) {
@@ -703,6 +843,7 @@ class VoipService {
   Future<void> _enterGroupCall(GroupCall groupCall) async {
     try {
       await groupCall.enter();
+      _setRecoveryStatus(CallRecoveryStatus.connected);
     } catch (e) {
       if (!_isNullMediaStreamCast(e)) rethrow;
 
@@ -711,6 +852,7 @@ class VoipService {
       );
       final fallbackStream = await _createAudioOnlyGroupStream(groupCall);
       await groupCall.enter(stream: fallbackStream);
+      _setRecoveryStatus(CallRecoveryStatus.connected);
     }
   }
 

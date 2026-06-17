@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as webrtc;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
@@ -174,6 +175,18 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
     });
   }
 
+  Future<void> _copyCallLink() async {
+    await Clipboard.setData(
+      ClipboardData(text: VoipService().groupCallLink(_call.room)),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(content: Text('Call link copied')),
+      );
+  }
+
   Future<void> _enableSpeaker() async {
     try {
       await webrtc.Helper.setSpeakerphoneOn(true);
@@ -243,6 +256,14 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
                 child: _topBarButton(
                   icon: Icons.picture_in_picture_alt,
                   onTap: _minimizeToPopup,
+                ),
+              ),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: _topBarButton(
+                  icon: Icons.link,
+                  onTap: _copyCallLink,
                 ),
               ),
             ],

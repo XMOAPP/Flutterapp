@@ -55,6 +55,7 @@ class MediaMessageBubble extends StatelessWidget {
         ? (event.content['xmo_caption'] as String).trim()
         : '';
     final durationMs = isImage ? null : _videoDurationMs;
+    final mediaBorderRadius = BorderRadius.circular(isImage ? 20 : 16);
 
     return Column(
       crossAxisAlignment:
@@ -79,20 +80,24 @@ class MediaMessageBubble extends StatelessWidget {
                 event: event,
                 loadImageBytes: loadImageBytes,
                 openFullscreenImage: openFullscreenImage,
+                borderRadius: mediaBorderRadius,
               )
             else
               VideoContent(
                 event: event,
                 loadVideoThumbnail: loadVideoThumbnail,
                 playVideo: playVideo,
+                borderRadius: mediaBorderRadius,
               ),
             if (durationMs != null && durationMs > 0)
               Positioned(
                 top: 8,
                 left: 8,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.6),
                     borderRadius: BorderRadius.circular(10),
@@ -124,12 +129,15 @@ class MediaMessageBubble extends StatelessWidget {
                 isPinned: isPinned,
               ),
             ),
-            // Tick and time overlay at bottom-right inside the media
+            // Tick and time overlay at bottom-right inside the media.
             Positioned(
               bottom: 8,
               right: 8,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 6,
+                  vertical: 3,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.black.withValues(alpha: 0.6),
                   borderRadius: BorderRadius.circular(10),
@@ -168,6 +176,12 @@ class MediaMessageBubble extends StatelessWidget {
   }
 
   Widget _buildCaptionBubble(String caption) {
+    final textStyle = GoogleFonts.inter(
+      color: isMe ? kLimeGreen : kWhite,
+      fontSize: 14,
+      height: 1.25,
+    );
+
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 260),
       child: Container(
@@ -181,13 +195,9 @@ class MediaMessageBubble extends StatelessWidget {
             bottomRight: Radius.circular(isMe ? 4 : 18),
           ),
         ),
-        child: Text(
-          caption,
-          style: GoogleFonts.inter(
-            color: isMe ? kLimeGreen : kWhite,
-            fontSize: 14,
-            height: 1.25,
-          ),
+        child: _CaptionText(
+          caption: caption,
+          style: textStyle,
         ),
       ),
     );
@@ -222,6 +232,71 @@ class MediaMessageBubble extends StatelessWidget {
         ],
       ],
     );
+  }
+}
+
+class _CaptionText extends StatelessWidget {
+  final String caption;
+  final TextStyle style;
+
+  const _CaptionText({
+    required this.caption,
+    required this.style,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final segments = _captionSegments(caption);
+
+    return Wrap(
+      spacing: 0,
+      runSpacing: 0,
+      children: [
+        for (final segment in segments)
+          Text(
+            segment,
+            style: style,
+            textHeightBehavior: const TextHeightBehavior(
+              applyHeightToFirstAscent: false,
+              applyHeightToLastDescent: true,
+            ),
+          ),
+      ],
+    );
+  }
+
+  List<String> _captionSegments(String value) {
+    final result = <String>[];
+    final buffer = StringBuffer();
+
+    for (final char in value.characters) {
+      if (_isEmojiLike(char)) {
+        if (buffer.isNotEmpty) {
+          result.add(buffer.toString());
+          buffer.clear();
+        }
+        result.add(char);
+      } else {
+        buffer.write(char);
+        if (char == ' ' || char == '\n') {
+          result.add(buffer.toString());
+          buffer.clear();
+        }
+      }
+    }
+
+    if (buffer.isNotEmpty) result.add(buffer.toString());
+    return result;
+  }
+
+  bool _isEmojiLike(String value) {
+    for (final codePoint in value.runes) {
+      if ((codePoint >= 0x1F000 && codePoint <= 0x1FAFF) ||
+          (codePoint >= 0x2600 && codePoint <= 0x27BF)) {
+        return true;
+      }
+    }
+    return false;
   }
 }
 

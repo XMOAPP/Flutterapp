@@ -331,16 +331,37 @@ class PushNotificationService {
     final eventType = (message.data['event_type'] ?? message.data['type'] ?? '')
         .toString()
         .toLowerCase();
-    if (eventType.startsWith('m.call.')) return true;
+    if (eventType.startsWith('m.call.') || _isGroupCallEventType(eventType)) {
+      return true;
+    }
     final msgType =
         (message.data['msgtype'] ?? message.data['message_type'] ?? '')
             .toString()
             .toLowerCase();
+    final groupCallType =
+        (message.data['m.type'] ?? message.data['call_type'] ?? '')
+            .toString()
+            .toLowerCase();
+    final groupCallIntent =
+        (message.data['m.intent'] ?? message.data['call_intent'] ?? '')
+            .toString()
+            .toLowerCase();
+    if ((groupCallType == 'm.voice' || groupCallType == 'm.video') &&
+        (groupCallIntent == 'm.ring' ||
+            groupCallIntent == 'm.prompt' ||
+            groupCallIntent == 'm.room')) {
+      return true;
+    }
     final hasCallId = message.data.containsKey('call_id') ||
         message.data.containsKey('m.call.id');
     final hasCallPayload =
         message.data.containsKey('offer') || message.data.containsKey('answer');
     return hasCallId && hasCallPayload && !msgType.startsWith('m.');
+  }
+
+  bool _isGroupCallEventType(String eventType) {
+    return eventType == 'org.matrix.msc3401.call' ||
+        eventType == 'org.matrix.msc3401.call.member';
   }
 
   String _notificationTitle(RemoteMessage message, bool isCall) {
@@ -358,6 +379,15 @@ class PushNotificationService {
   }
 
   String _notificationBody(RemoteMessage message, bool isCall) {
+    final previewLabel = message.data['preview_label']?.toString().trim();
+    final previewKind = message.data['preview_kind']?.toString().trim();
+    if (previewLabel != null &&
+        previewLabel.isNotEmpty &&
+        previewKind != null &&
+        previewKind.isNotEmpty) {
+      return '${_previewPrefix(previewKind)}$previewLabel';
+    }
+
     final dataBody = message.data['body']?.toString().trim();
     final eventType =
         (message.data['event_type'] ?? message.data['msgtype'] ?? '')
@@ -367,9 +397,9 @@ class PushNotificationService {
         (message.data['msgtype'] ?? message.data['message_type'] ?? '')
             .toString()
             .toLowerCase();
-    if (eventType.contains('encrypted')) return 'New encrypted message';
-    if (msgType.contains('image')) return 'Photo';
-    if (msgType.contains('video')) return 'Video';
+    if (eventType.contains('encrypted')) return '🔒 New encrypted message';
+    if (msgType.contains('image')) return '🖼️ Photo';
+    if (msgType.contains('video')) return '▶ Video';
     if (msgType.contains('audio')) {
       final fileName = (message.data['filename'] ??
               message.data['content'] ??
@@ -377,11 +407,12 @@ class PushNotificationService {
           ?.toString()
           .trim();
       if (fileName != null && fileName.toLowerCase().startsWith('voice_')) {
-        return 'Voice message';
+        return '🎙 Voice message';
       }
-      return fileName != null && _isDisplayablePushText(fileName)
+      final label = fileName != null && _isDisplayablePushText(fileName)
           ? fileName
           : 'Audio';
+      return '🎧 $label';
     }
     if (msgType.contains('file')) {
       final fileName = (message.data['filename'] ??
@@ -389,11 +420,12 @@ class PushNotificationService {
               message.data['body'])
           ?.toString()
           .trim();
-      return fileName != null && _isDisplayablePushText(fileName)
+      final label = fileName != null && _isDisplayablePushText(fileName)
           ? fileName
           : 'File';
+      return '${_previewPrefix(message.data['preview_kind'] ?? 'file')}$label';
     }
-    if (msgType.contains('location')) return 'Location';
+    if (msgType.contains('location')) return '📍 Location';
     if (eventType.startsWith('m.room.')) return 'Room updated';
     final body = message.notification?.body?.trim();
     if (body != null && _isDisplayablePushText(body)) return body;
@@ -408,6 +440,43 @@ class PushNotificationService {
       return contentText;
     }
     return isCall ? 'Tap to open XMO' : 'Open XMO to view this message';
+  }
+
+  String _previewPrefix(String kind) {
+    switch (kind.toLowerCase()) {
+      case 'image':
+        return '🖼️ ';
+      case 'video':
+        return '▶ ';
+      case 'voice':
+        return '🎙 ';
+      case 'audio':
+        return '🎧 ';
+      case 'spreadsheet':
+        return '📊 ';
+      case 'location':
+        return '📍 ';
+      case 'encrypted':
+        return '🔒 ';
+      case 'pdf':
+        return '📄 ';
+      case 'word':
+        return '📝 ';
+      case 'presentation':
+        return '📊 ';
+      case 'apk':
+      case 'archive':
+      case 'app':
+        return '📦 ';
+      case 'text_file':
+        return '📄 ';
+      case 'code':
+        return '💻 ';
+      case 'file':
+        return '📄 ';
+      default:
+        return '';
+    }
   }
 
   bool _isDisplayablePushText(String text) {
