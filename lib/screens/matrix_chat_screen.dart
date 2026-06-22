@@ -6139,6 +6139,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                               : RepaintBoundary(
                                   child: ListView.builder(
                                     controller: _scrollCtrl,
+                                    // ignore: deprecated_member_use
                                     cacheExtent: 900,
                                     keyboardDismissBehavior:
                                         ScrollViewKeyboardDismissBehavior
