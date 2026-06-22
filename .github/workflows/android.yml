@@ -20,12 +20,27 @@ jobs:
           channel: stable
       - run: flutter pub get
       - run: dart format --set-exit-if-changed lib test integration_test
-      - run: flutter analyze
+      - run: flutter analyze lib test integration_test
       - run: flutter test
+
+  backend:
+    name: Auth server analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: dart pub get
+        working-directory: auth_server
+      - run: dart format --set-exit-if-changed bin lib
+        working-directory: auth_server
+      - run: dart analyze
+        working-directory: auth_server
 
   release-bundle:
     name: Signed release app bundle
-    needs: quality
+    needs: [quality, backend]
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
