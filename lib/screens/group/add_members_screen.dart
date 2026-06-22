@@ -59,7 +59,7 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
 
   Future<void> _performSearch(String query) async {
     if (!mounted) return;
-    
+
     setState(() {
       _searching = true;
       _error = null;
@@ -67,10 +67,12 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
 
     final provider = context.read<MatrixProvider>();
     final results = await provider.searchUsers(query);
-    
+
     // Filter out users already in the group
-    final currentMembers = widget.room.getParticipants().map((u) => u.id).toSet();
-    final filtered = results.where((p) => !currentMembers.contains(p.userId)).toList();
+    final currentMembers =
+        widget.room.getParticipants().map((u) => u.id).toSet();
+    final filtered =
+        results.where((p) => !currentMembers.contains(p.userId)).toList();
 
     if (filtered.isNotEmpty) {
       if (mounted) {
@@ -92,7 +94,8 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
     }
 
     try {
-      final profile = await provider.service.client.getProfileFromUserId(matrixId);
+      final profile =
+          await provider.service.client.getProfileFromUserId(matrixId);
       if (mounted && !currentMembers.contains(profile.userId)) {
         setState(() {
           _results = [profile];
@@ -127,7 +130,7 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
     if (_selectedUsers.isEmpty) return;
 
     setState(() => _adding = true);
-    
+
     int successCount = 0;
     int failCount = 0;
 
@@ -143,21 +146,24 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
 
     if (mounted) {
       setState(() => _adding = false);
-      
+
       if (successCount > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Added $successCount member${successCount > 1 ? 's' : ''}'),
+            content: Text(
+                'Added $successCount member${successCount > 1 ? 's' : ''}'),
             backgroundColor: kLimeGreen,
           ),
         );
-        Navigator.pop(context, true); // Return true to indicate members were added
+        Navigator.pop(
+            context, true); // Return true to indicate members were added
       }
-      
+
       if (failCount > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to add $failCount member${failCount > 1 ? 's' : ''}'),
+            content: Text(
+                'Failed to add $failCount member${failCount > 1 ? 's' : ''}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -237,17 +243,19 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               ),
               onChanged: _onSearchChanged,
               autofocus: true,
             ),
           ),
-          
+
           // Results
           Expanded(
             child: _searching
-                ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
+                ? const Center(
+                    child: CircularProgressIndicator(color: kLimeGreen))
                 : _error != null
                     ? Center(
                         child: Padding(
@@ -295,8 +303,9 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
 
   Widget _buildUserTile(Profile profile) {
     final isSelected = _selectedUsers.contains(profile.userId);
-    final displayName = profile.displayName ?? profile.userId.split(':').first.replaceFirst('@', '');
-    
+    final displayName = profile.displayName ??
+        profile.userId.split(':').first.replaceFirst('@', '');
+
     return ListTile(
       dense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),

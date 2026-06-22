@@ -172,7 +172,6 @@ object XmoCallNotificationHelper {
         }
 
         val manager = context.getSystemService(NotificationManager::class.java)
-        manager?.deleteNotificationChannel("xmo_call_alerts")
         manager?.createNotificationChannel(channel)
     }
 

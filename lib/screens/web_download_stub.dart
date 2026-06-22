@@ -24,8 +24,9 @@ Future<String> downloadFile(
     '${(baseDir ?? await getApplicationDocumentsDirectory()).path}/XMO Downloads',
   );
   final folder = _safeFolderName(storageCategory);
-  final directory =
-      folder == null ? rootDirectory : Directory('${rootDirectory.path}/$folder');
+  final directory = folder == null
+      ? rootDirectory
+      : Directory('${rootDirectory.path}/$folder');
   if (!await directory.exists()) {
     await directory.create(recursive: true);
   }

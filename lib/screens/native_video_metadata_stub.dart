@@ -10,6 +10,7 @@ class NativeVideoMetadata {
   });
 }
 
-Future<NativeVideoMetadata?> readNativeVideoMetadata(List<int> videoBytes) async {
+Future<NativeVideoMetadata?> readNativeVideoMetadata(
+    List<int> videoBytes) async {
   return null;
 }

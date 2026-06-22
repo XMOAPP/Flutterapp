@@ -44,26 +44,48 @@ class GroupService {
       preset: type == GroupType.public
           ? CreateRoomPreset.publicChat
           : CreateRoomPreset.privateChat,
-      initialState: [
-        // Mark as group (not channel)
-        StateEvent(
-          type: 'xmo.room.type',
-          stateKey: '',
-          content: {'is_group': true, 'is_channel': false},
-        ),
-        // Set join rules
-        StateEvent(
-          type: EventTypes.RoomJoinRules,
-          stateKey: '',
-          content: {'join_rule': matrixJoinRules},
-        ),
-        // Set history visibility
-        StateEvent(
-          type: EventTypes.HistoryVisibility,
-          stateKey: '',
-          content: {'history_visibility': matrixHistoryVisibility},
-        ),
-      ],
+      initialState: type == GroupType.private
+          ? _matrixService.privateRoomInitialState([
+              // Mark as group (not channel)
+              StateEvent(
+                type: 'xmo.room.type',
+                stateKey: '',
+                content: {'is_group': true, 'is_channel': false},
+              ),
+              // Set join rules
+              StateEvent(
+                type: EventTypes.RoomJoinRules,
+                stateKey: '',
+                content: {'join_rule': matrixJoinRules},
+              ),
+              // Set history visibility
+              StateEvent(
+                type: EventTypes.HistoryVisibility,
+                stateKey: '',
+                content: {'history_visibility': matrixHistoryVisibility},
+              ),
+            ])
+          : [
+              // Mark as group (not channel)
+              StateEvent(
+                type: 'xmo.room.type',
+                stateKey: '',
+                content: {'is_group': true, 'is_channel': false},
+              ),
+              // Set join rules
+              StateEvent(
+                type: EventTypes.RoomJoinRules,
+                stateKey: '',
+                content: {'join_rule': matrixJoinRules},
+              ),
+              // Set history visibility
+              StateEvent(
+                type: EventTypes.HistoryVisibility,
+                stateKey: '',
+                content: {'history_visibility': matrixHistoryVisibility},
+              ),
+              _matrixService.publicRoomSecurityState(),
+            ],
       powerLevelContentOverride: {
         'events_default': 0, // Everyone can send messages
         'users_default': 0, // Default user power level

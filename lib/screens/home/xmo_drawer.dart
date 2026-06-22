@@ -251,8 +251,8 @@ class DrawerHeader extends StatelessWidget {
   }
 }
 
-class NewChannelTile extends StatelessWidget {
-  const NewChannelTile({super.key});
+class NewGroupTile extends StatelessWidget {
+  const NewGroupTile({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -330,7 +330,7 @@ class NewChannelTile extends StatelessWidget {
                   children: [
                     Expanded(
                       child: RadioListTile<GroupType>(
-                        title: const Text('Private',
+                        title: const Text('Private (encrypted)',
                             style: TextStyle(color: kWhite, fontSize: 14)),
                         value: GroupType.private,
                         groupValue: groupType,
@@ -343,7 +343,7 @@ class NewChannelTile extends StatelessWidget {
                     ),
                     Expanded(
                       child: RadioListTile<GroupType>(
-                        title: const Text('Public',
+                        title: const Text('Public (not encrypted)',
                             style: TextStyle(color: kWhite, fontSize: 14)),
                         value: GroupType.public,
                         groupValue: groupType,
@@ -473,8 +473,8 @@ Future<void> _createAndOpenRoom({
   }
 }
 
-class NewGroupTile extends StatelessWidget {
-  const NewGroupTile({super.key});
+class NewChannelTile extends StatelessWidget {
+  const NewChannelTile({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -504,18 +504,29 @@ class NewGroupTile extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         backgroundColor: kDarkerGrey,
         title: Text('New Channel', style: GoogleFonts.inter(color: kWhite)),
-        content: TextField(
-          controller: nameCtrl,
-          style: const TextStyle(color: kWhite),
-          decoration: const InputDecoration(
-            hintText: 'Channel Name',
-            hintStyle: TextStyle(color: Colors.white54),
-            enabledBorder:
-                UnderlineInputBorder(borderSide: BorderSide(color: kLimeGreen)),
-            focusedBorder:
-                UnderlineInputBorder(borderSide: BorderSide(color: kLimeGreen)),
-          ),
-          autofocus: true,
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              style: const TextStyle(color: kWhite),
+              decoration: const InputDecoration(
+                hintText: 'Channel Name',
+                hintStyle: TextStyle(color: Colors.white54),
+                enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: kLimeGreen)),
+                focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: kLimeGreen)),
+              ),
+              autofocus: true,
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Public channels are not end-to-end encrypted.',
+              style: TextStyle(color: kLightGrey, fontSize: 12),
+            ),
+          ],
         ),
         actions: [
           TextButton(

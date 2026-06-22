@@ -17,7 +17,7 @@ import androidx.core.app.NotificationManagerCompat
 import java.net.URL
 
 object XmoMessageNotificationHelper {
-    private const val CHANNEL_ID = "xmo_messages"
+    private const val CHANNEL_ID = "xmo_messages_v2"
     private const val CHANNEL_NAME = "XMO messages"
     private const val NOTIFICATION_ID_FALLBACK = 920001
     private const val AVATAR_SIZE = 192
@@ -80,7 +80,7 @@ object XmoMessageNotificationHelper {
         val channel = NotificationChannel(
             CHANNEL_ID,
             CHANNEL_NAME,
-            NotificationManager.IMPORTANCE_HIGH,
+            NotificationManager.IMPORTANCE_DEFAULT,
         ).apply {
             description = "Message notifications from XMO chats"
             lockscreenVisibility = NotificationCompat.VISIBILITY_PRIVATE

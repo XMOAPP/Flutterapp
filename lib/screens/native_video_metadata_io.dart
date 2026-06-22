@@ -16,7 +16,8 @@ class NativeVideoMetadata {
   });
 }
 
-Future<NativeVideoMetadata?> readNativeVideoMetadata(List<int> videoBytes) async {
+Future<NativeVideoMetadata?> readNativeVideoMetadata(
+    List<int> videoBytes) async {
   if (videoBytes.isEmpty) return null;
 
   File? tempFile;

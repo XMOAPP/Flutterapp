@@ -149,7 +149,8 @@ class _SubscriberListScreenState extends State<SubscriberListScreen> {
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               ),
             ),
           ),
@@ -157,7 +158,8 @@ class _SubscriberListScreenState extends State<SubscriberListScreen> {
           // Subscriber List
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
+                ? const Center(
+                    child: CircularProgressIndicator(color: kLimeGreen))
                 : _filteredSubscribers.isEmpty
                     ? Center(
                         child: Text(

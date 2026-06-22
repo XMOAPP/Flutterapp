@@ -184,7 +184,9 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
         Center(
           child: GestureDetector(
             onTap: () {
-              controller.value.isPlaying ? controller.pause() : controller.play();
+              controller.value.isPlaying
+                  ? controller.pause()
+                  : controller.play();
               setState(() {});
             },
             child: AnimatedOpacity(

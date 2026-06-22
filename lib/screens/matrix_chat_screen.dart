@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -41,6 +42,11 @@ import 'matrix_chat/attachment_sheet.dart';
 import 'matrix_chat/chat_app_bar.dart';
 import 'matrix_chat/chat_input_bar.dart';
 import 'matrix_chat/chat_space_background.dart';
+import 'matrix_chat/controllers/chat_call_coordinator.dart';
+import 'matrix_chat/controllers/chat_composer_controller.dart';
+import 'matrix_chat/controllers/chat_reply_reaction_controller.dart';
+import 'matrix_chat/controllers/chat_timeline_controller.dart';
+import 'matrix_chat/controllers/chat_transfer_controller.dart';
 import 'matrix_chat/forward_message_sheet.dart';
 import 'matrix_chat/media_handler.dart';
 import 'matrix_chat/message_widgets.dart';
@@ -117,16 +123,15 @@ class PrivateReplyDraft {
 }
 
 class _MatrixChatScreenState extends State<MatrixChatScreen> {
-  final _textCtrl = TextEditingController();
-  final _textFocusNode = FocusNode();
+  final _composerController = ChatComposerController();
+  final _timelineController = ChatTimelineController();
+  final _replyReactionController =
+      ChatReplyReactionController<Event, PrivateReplyDraft>();
+  final _transferController =
+      ChatTransferController<_PendingUpload, _PendingAlbumUpload>();
+  final _callCoordinator = ChatCallCoordinator();
   final _scrollCtrl = ScrollController();
   Timeline? _timeline;
-  bool _loading = true;
-  bool _loadingHistory = false;
-  bool _historyExhausted = false;
-  bool _showJumpToLatestButton = false;
-  int _newMessagesBelowCount = 0;
-  bool _scrollToBottomScheduled = false;
   bool _uploading = false;
   bool _recording = false;
   bool _recordingPaused = false;
@@ -135,8 +140,6 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   bool? _previewIsChannel;
   StreamSubscription<EventUpdate>? _eventSub;
   late MediaHandler _mediaHandler;
-  Event? _replyToEvent; // Track which message we're replying to
-  PrivateReplyDraft? _privateReplyDraft;
   List<Event> _pinnedEvents = []; // Track pinned messages
   int? _pinnedBannerIndex;
   double _lastPinnedScrollOffset = 0;
@@ -159,11 +162,6 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   String? _highlightedEventId;
   Timer? _highlightTimer;
   bool _handledInitialHighlightedEvent = false;
-  final List<_PendingUpload> _pendingUploads = [];
-  final List<_PendingAlbumUpload> _pendingAlbumUploads = [];
-  final Set<String> _cancelledPendingUploadIds = {};
-  final Set<String> _dismissedGroupCallBannerIds = {};
-  final Map<String, DateTime> _pendingUploadProgressUiUpdates = {};
   final _transferQueue = TransferQueueService.instance;
   final _appSettingsService = AppSettingsService();
   AppSettings _appSettings = const AppSettings(
@@ -177,6 +175,42 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       _uploading ||
       _pendingUploads.any((upload) => !upload.failed && !upload.cancelled) ||
       _pendingAlbumUploads.isNotEmpty;
+
+  TextEditingController get _textCtrl => _composerController.textController;
+  FocusNode get _textFocusNode => _composerController.focusNode;
+  bool get _loading => _timelineController.loading;
+  set _loading(bool value) => _timelineController.loading = value;
+  bool get _loadingHistory => _timelineController.loadingHistory;
+  set _loadingHistory(bool value) => _timelineController.loadingHistory = value;
+  bool get _historyExhausted => _timelineController.historyExhausted;
+  set _historyExhausted(bool value) =>
+      _timelineController.historyExhausted = value;
+  bool get _showJumpToLatestButton =>
+      _timelineController.showJumpToLatestButton;
+  set _showJumpToLatestButton(bool value) =>
+      _timelineController.showJumpToLatestButton = value;
+  int get _newMessagesBelowCount => _timelineController.newMessagesBelowCount;
+  set _newMessagesBelowCount(int value) =>
+      _timelineController.newMessagesBelowCount = value;
+  bool get _scrollToBottomScheduled =>
+      _timelineController.scrollToBottomScheduled;
+  set _scrollToBottomScheduled(bool value) =>
+      _timelineController.scrollToBottomScheduled = value;
+  Event? get _replyToEvent => _replyReactionController.replyTo;
+  set _replyToEvent(Event? value) => _replyReactionController.replyTo = value;
+  PrivateReplyDraft? get _privateReplyDraft =>
+      _replyReactionController.privateReply;
+  set _privateReplyDraft(PrivateReplyDraft? value) =>
+      _replyReactionController.privateReply = value;
+  List<_PendingUpload> get _pendingUploads => _transferController.uploads;
+  List<_PendingAlbumUpload> get _pendingAlbumUploads =>
+      _transferController.albums;
+  Set<String> get _cancelledPendingUploadIds =>
+      _transferController.cancelledUploadIds;
+  Map<String, DateTime> get _pendingUploadProgressUiUpdates =>
+      _transferController.progressUiUpdates;
+  Set<String> get _dismissedGroupCallBannerIds =>
+      _callCoordinator.dismissedGroupCallBannerIds;
 
   Room? get _room => widget.room;
   String get _myUserId => widget.matrixProvider.userId ?? '';
@@ -203,10 +237,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     _privateReplyDraft = widget.initialPrivateReply;
     final initialComposerText = widget.initialComposerText;
     if (initialComposerText != null && initialComposerText.isNotEmpty) {
-      _textCtrl.text = initialComposerText;
-      _textCtrl.selection = TextSelection.collapsed(
-        offset: initialComposerText.length,
-      );
+      _composerController.setInitialText(initialComposerText);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _textFocusNode.requestFocus();
       });
@@ -300,11 +331,21 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     if (!mounted || restored.isEmpty) return;
     setState(() => _pendingUploads.addAll(restored));
 
-    final queued = restored
-        .where((upload) => !upload.failed && !upload.cancelled)
-        .toList(growable: false);
+    final queued = restored.where((upload) {
+      if (upload.cancelled) return false;
+      if (!upload.failed) return true;
+      return _transferQueue.shouldAutoRetry(upload.id);
+    }).toList(growable: false);
     if (queued.isNotEmpty) {
-      unawaited(_runPendingQueuedUploads(room.id, queued));
+      for (final upload in queued) {
+        if (upload.failed) {
+          _schedulePendingUploadRetry(room.id, upload);
+        }
+      }
+      final ready = queued.where((upload) => !upload.failed).toList();
+      if (ready.isNotEmpty) {
+        unawaited(_runPendingQueuedUploads(room.id, ready));
+      }
     }
   }
 
@@ -1462,6 +1503,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           upload.error = e.toString();
         });
         await _transferQueue.markFailed(upload.id, e);
+        _schedulePendingUploadRetry(roomId, upload);
         _showSnackBar('Failed to send media: $e');
       }
     } finally {
@@ -2001,6 +2043,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
               !_isPendingUploadCancelled(upload.id) &&
               !upload.cancelled) {
             await _transferQueue.markFailed(upload.id, e);
+            _schedulePendingUploadRetry(roomId, upload);
             if (mounted) {
               setState(() {
                 upload.failed = true;
@@ -2035,6 +2078,35 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     await _transferQueue.retry(upload.id);
     if (mounted) setState(() {});
     await _runSinglePendingMediaUpload(room.id, upload);
+  }
+
+  void _schedulePendingUploadRetry(String roomId, _PendingUpload upload) {
+    if (!_transferQueue.shouldAutoRetry(upload.id) || upload.cancelled) return;
+    final retryAt = _transferQueue.retryAtFor(upload.id);
+    if (retryAt == null) return;
+    final delay = retryAt.difference(DateTime.now());
+    unawaited(Future<void>.delayed(delay.isNegative ? Duration.zero : delay,
+        () async {
+      if (!mounted ||
+          upload.cancelled ||
+          _isPendingUploadCancelled(upload.id)) {
+        return;
+      }
+      if (!_transferQueue.shouldAutoRetry(upload.id)) return;
+      try {
+        await _transferQueue.retry(upload.id);
+        if (!mounted) return;
+        setState(() {
+          upload.failed = false;
+          upload.error = null;
+          upload.started = false;
+          upload.uploadedBytes = 0;
+        });
+        await _runSinglePendingMediaUpload(roomId, upload);
+      } catch (e) {
+        debugPrint('[TransferQueue] Automatic retry failed: $e');
+      }
+    }));
   }
 
   Future<void> _pickAndSendAudioWithPending() async {
@@ -5815,8 +5887,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     _recordingTimer?.cancel();
     _amplitudeSub?.cancel();
     unawaited(_audioRecorder.dispose());
-    _textCtrl.dispose();
-    _textFocusNode.dispose();
+    _composerController.dispose();
+    _timelineController.dispose();
     _scrollCtrl.removeListener(_handleChatScroll);
     _scrollCtrl.dispose();
     _mentionAutocomplete.dispose();
@@ -7064,6 +7136,9 @@ class _PendingAudioUploadBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final progress = _uploadProgress(upload);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final maxBubbleWidth = math.min(330.0, math.max(160.0, screenWidth * 0.78));
+    final minBubbleWidth = math.min(280.0, maxBubbleWidth);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
@@ -7077,7 +7152,10 @@ class _PendingAudioUploadBubble extends StatelessWidget {
         ),
       ),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minWidth: 280, maxWidth: 330),
+        constraints: BoxConstraints(
+          minWidth: minBubbleWidth,
+          maxWidth: maxBubbleWidth,
+        ),
         child: SizedBox(
           height: 58,
           child: Stack(
@@ -7154,9 +7232,13 @@ class _PendingFileUploadBubble extends StatelessWidget {
       mimeType: upload.mimeType,
       fileName: upload.fileName,
     );
+    final bubbleWidth = math.min(
+      280.0,
+      math.max(180.0, MediaQuery.sizeOf(context).width * 0.72),
+    );
 
     return Container(
-      width: 280,
+      width: bubbleWidth,
       padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
       decoration: const BoxDecoration(
         color: Color(0xFF1A2A1A),
@@ -7353,8 +7435,8 @@ class _PendingMediaUploadBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final size = upload.isVideo
-        ? _displayVideoSizeForRatio(_aspectRatio)
-        : _displayImageSizeForRatio(_aspectRatio);
+        ? _displayVideoSizeForRatio(context, _aspectRatio)
+        : _displayImageSizeForRatio(context, _aspectRatio);
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
@@ -7549,19 +7631,27 @@ class _PendingMediaUploadBubble extends StatelessWidget {
     );
   }
 
-  Size _displayImageSizeForRatio(double aspectRatio) {
+  Size _displayImageSizeForRatio(BuildContext context, double aspectRatio) {
+    final maxWidth = math.min(
+      292.0,
+      math.max(160.0, MediaQuery.sizeOf(context).width * 0.76),
+    );
     return _displaySizeForRatio(
       aspectRatio,
-      maxWidth: 292,
-      maxHeight: 336,
+      maxWidth: maxWidth,
+      maxHeight: math.min(336.0, math.max(120.0, maxWidth * 1.15)),
     );
   }
 
-  Size _displayVideoSizeForRatio(double aspectRatio) {
+  Size _displayVideoSizeForRatio(BuildContext context, double aspectRatio) {
+    final maxWidth = math.min(
+      292.0,
+      math.max(160.0, MediaQuery.sizeOf(context).width * 0.76),
+    );
     return _displaySizeForRatio(
       aspectRatio,
-      maxWidth: 292,
-      maxHeight: 360,
+      maxWidth: maxWidth,
+      maxHeight: math.min(360.0, math.max(140.0, maxWidth * 1.23)),
     );
   }
 
@@ -7596,7 +7686,7 @@ class _PendingMediaUploadBubble extends StatelessWidget {
 
     if (height < minReadableHeight) {
       height = minReadableHeight;
-      width = (height * ratio).clamp(140.0, maxWidth);
+      width = (height * ratio).clamp(140.0, maxWidth).toDouble();
     }
 
     return Size(width, height);

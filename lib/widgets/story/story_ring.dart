@@ -49,11 +49,11 @@ class StoryRing extends StatelessWidget {
             children: [
               CustomPaint(
                 painter: _SegmentedStoryRingPainter(
-              storyCount: storyCount,
-              viewedCount: viewedCount,
-              hasUnviewedStories: hasUnviewedStories,
-              isMyStory: isMyStory,
-            ),
+                  storyCount: storyCount,
+                  viewedCount: viewedCount,
+                  hasUnviewedStories: hasUnviewedStories,
+                  isMyStory: isMyStory,
+                ),
                 child: Container(
                   width: size,
                   height: size,
@@ -146,17 +146,18 @@ class StoryRing extends StatelessWidget {
     if (_isImageStory(story)) {
       return Consumer<MatrixProvider>(
         builder: (context, matrixProvider, _) {
-          final httpUrl = matrixProvider.service.getHttpUrl(
+          final mediaRequest = matrixProvider.service.getMediaRequest(
             story.mediaUrl,
             width: 180,
             height: 180,
           );
-          if (httpUrl == null) {
+          if (mediaRequest == null) {
             return _buildStoryTextFallback(contentSize, story);
           }
           return ClipOval(
             child: Image.network(
-              httpUrl.toString(),
+              mediaRequest.uri.toString(),
+              headers: mediaRequest.headers,
               width: contentSize,
               height: contentSize,
               fit: BoxFit.cover,

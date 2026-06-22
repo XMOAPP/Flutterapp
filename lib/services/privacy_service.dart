@@ -57,8 +57,7 @@ class XmoPrivacySettings {
       accountIsPublic: accountIsPublic ?? this.accountIsPublic,
       profileAvatarAudience:
           profileAvatarAudience ?? this.profileAvatarAudience,
-      profileAvatarUserIds:
-          profileAvatarUserIds ?? this.profileAvatarUserIds,
+      profileAvatarUserIds: profileAvatarUserIds ?? this.profileAvatarUserIds,
       storyAudience: storyAudience ?? this.storyAudience,
       storyUserIds: storyUserIds ?? this.storyUserIds,
     );

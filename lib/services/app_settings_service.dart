@@ -73,8 +73,7 @@ class AppSettings {
     String? defaultChatFilter,
   }) {
     return AppSettings(
-      notificationsEnabled:
-          notificationsEnabled ?? this.notificationsEnabled,
+      notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
       readReceiptsEnabled: readReceiptsEnabled ?? this.readReceiptsEnabled,
       typingIndicatorsEnabled:
           typingIndicatorsEnabled ?? this.typingIndicatorsEnabled,

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/matrix_service.dart';
+import '../../services/matrix_media_helper.dart';
 import '../../widgets/story/story_avatar.dart';
 import '../matrix_chat/widgets/tappable_file_chip.dart';
 import '../matrix_chat_screen.dart';
@@ -235,7 +236,7 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
     final preview = _lastMessagePreviewData(event, matrixService);
     final textStyle = unread ? _unreadSubtitleStyle : _subtitleStyle;
 
-    if (preview.thumbnailUrl == null && preview.icon == null) {
+    if (preview.thumbnailRequest == null && preview.icon == null) {
       return Text(
         preview.text,
         maxLines: 1,
@@ -246,9 +247,9 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
 
     return Row(
       children: [
-        if (preview.thumbnailUrl != null)
+        if (preview.thumbnailRequest != null)
           _PreviewThumbnail(
-            url: preview.thumbnailUrl!,
+            mediaRequest: preview.thumbnailRequest!,
             isVideo: preview.isVideo,
             fallbackIcon: preview.icon ?? Icons.image_rounded,
           )
@@ -317,7 +318,7 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
       case MessageTypes.Image:
         return _LastMessagePreview(
           text: _captionOrLabel(event, 'Photo'),
-          thumbnailUrl: _mediaThumbnailUrl(event, matrixService),
+          thumbnailRequest: _mediaThumbnailRequest(event, matrixService),
           icon: Icons.image_rounded,
           iconColor: kAudioBlue,
           accentText: true,
@@ -325,7 +326,7 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
       case MessageTypes.Video:
         return _LastMessagePreview(
           text: _captionOrLabel(event, 'Video'),
-          thumbnailUrl: _mediaThumbnailUrl(event, matrixService),
+          thumbnailRequest: _mediaThumbnailRequest(event, matrixService),
           icon: Icons.videocam_rounded,
           iconColor: kAudioBlue,
           isVideo: true,
@@ -382,7 +383,10 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
     return body.isEmpty ? fallback : body;
   }
 
-  static String? _mediaThumbnailUrl(Event event, MatrixService matrixService) {
+  static MatrixMediaRequest? _mediaThumbnailRequest(
+    Event event,
+    MatrixService matrixService,
+  ) {
     final info = event.content['info'];
     String? mxcUrl;
     if (info is Map) {
@@ -391,7 +395,7 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
     mxcUrl ??= event.content['thumbnail_url']?.toString();
     mxcUrl ??= event.content['url']?.toString();
 
-    return matrixService.getHttpUrl(mxcUrl, width: 32, height: 32)?.toString();
+    return matrixService.getMediaRequest(mxcUrl, width: 32, height: 32);
   }
 
   static int? _eventDurationMs(Event event) {
@@ -445,7 +449,7 @@ class _LastMessagePreview {
   final String text;
   final IconData? icon;
   final Color iconColor;
-  final String? thumbnailUrl;
+  final MatrixMediaRequest? thumbnailRequest;
   final bool isVideo;
   final bool accentText;
 
@@ -453,19 +457,19 @@ class _LastMessagePreview {
     required this.text,
     this.icon,
     this.iconColor = kLightGrey,
-    this.thumbnailUrl,
+    this.thumbnailRequest,
     this.isVideo = false,
     this.accentText = false,
   });
 }
 
 class _PreviewThumbnail extends StatelessWidget {
-  final String url;
+  final MatrixMediaRequest mediaRequest;
   final bool isVideo;
   final IconData fallbackIcon;
 
   const _PreviewThumbnail({
-    required this.url,
+    required this.mediaRequest,
     required this.isVideo,
     required this.fallbackIcon,
   });
@@ -481,7 +485,8 @@ class _PreviewThumbnail extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             Image.network(
-              url,
+              mediaRequest.uri.toString(),
+              headers: mediaRequest.headers,
               fit: BoxFit.cover,
               errorBuilder: (_, __, ___) => _ThumbnailFallback(
                 icon: fallbackIcon,
@@ -532,8 +537,12 @@ class _RoomMeta extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final metaWidth =
+        screenWidth < 340 ? 64.0 : (screenWidth < 380 ? 72.0 : 86.0);
+
     return SizedBox(
-      width: 72,
+      width: metaWidth,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.end,

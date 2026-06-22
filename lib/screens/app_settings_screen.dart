@@ -2104,8 +2104,8 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
       padding: const EdgeInsets.fromLTRB(4, 12, 4, 4),
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 160,
         crossAxisSpacing: 4,
         mainAxisSpacing: 4,
       ),
@@ -2527,8 +2527,8 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
         category == _StorageCategoryType.videos) {
       return GridView.builder(
         padding: const EdgeInsets.all(16),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 160,
           crossAxisSpacing: 4,
           mainAxisSpacing: 4,
         ),

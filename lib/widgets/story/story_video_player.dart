@@ -11,6 +11,7 @@ import '../../theme.dart';
 class StoryVideoPlayer extends StatefulWidget {
   final Uint8List? videoBytes;
   final String? videoUrl;
+  final Map<String, String> httpHeaders;
   final String mimeType;
   final bool looping;
   final bool paused;
@@ -28,11 +29,13 @@ class StoryVideoPlayer extends StatefulWidget {
     this.onProgress,
     this.onCompleted,
   })  : videoBytes = bytes,
-        videoUrl = null;
+        videoUrl = null,
+        httpHeaders = const <String, String>{};
 
   const StoryVideoPlayer.url({
     super.key,
     required String url,
+    this.httpHeaders = const <String, String>{},
     this.mimeType = 'video/mp4',
     this.looping = true,
     this.paused = false,
@@ -97,7 +100,10 @@ class _StoryVideoPlayerState extends State<StoryVideoPlayer> {
       final videoBytes = widget.videoBytes;
 
       if (videoUrl != null) {
-        _controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
+        _controller = VideoPlayerController.networkUrl(
+          Uri.parse(videoUrl),
+          httpHeaders: widget.httpHeaders,
+        );
       } else if (videoBytes != null) {
         final tempDir = await getTemporaryDirectory();
         final file = File(

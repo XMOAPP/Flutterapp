@@ -5,6 +5,7 @@ COPY pubspec.yaml ./
 RUN dart pub get
 
 COPY bin ./bin
+COPY lib ./lib
 RUN dart compile exe bin/server.dart -o /app/server
 
 FROM debian:bookworm-slim

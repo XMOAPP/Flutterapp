@@ -25,7 +25,7 @@ List<String> detectWalletsImpl() {
       debugPrint('xmoWallet bridge not found');
       return ['WalletConnect'];
     }
-    
+
     // Return default wallets (bridge.detectWallets() would be async)
     return ['MetaMask', 'Brave Wallet', 'Coinbase Wallet', 'WalletConnect'];
   } catch (e) {
@@ -36,16 +36,16 @@ List<String> detectWalletsImpl() {
 
 Future<String> connectWalletImpl(String walletName) async {
   final completer = Completer<String>();
-  
+
   try {
     final bridge = xmoWallet;
     if (bridge == null) {
       throw Exception('xmoWallet bridge not found');
     }
-    
+
     final walletBridge = bridge as XmoWalletBridge;
     final promise = walletBridge.connectBrowserWallet(walletName);
-    
+
     promise.toDart.then((result) {
       final account = (result as JSString).toDart;
       completer.complete(account);
@@ -55,22 +55,22 @@ Future<String> connectWalletImpl(String walletName) async {
   } catch (e) {
     completer.completeError(e.toString());
   }
-  
+
   return completer.future;
 }
 
 Future<String> signMessageImpl(String message) async {
   final completer = Completer<String>();
-  
+
   try {
     final bridge = xmoWallet;
     if (bridge == null) {
       throw Exception('xmoWallet bridge not found');
     }
-    
+
     final walletBridge = bridge as XmoWalletBridge;
     final promise = walletBridge.signMessage(message);
-    
+
     promise.toDart.then((result) {
       final signature = (result as JSString).toDart;
       completer.complete(signature);
@@ -80,7 +80,7 @@ Future<String> signMessageImpl(String message) async {
   } catch (e) {
     completer.completeError(e.toString());
   }
-  
+
   return completer.future;
 }
 

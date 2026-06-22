@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/matrix_provider.dart';
+import '../../services/matrix_media_helper.dart';
 import '../../theme.dart';
 
 class StoryAvatar extends StatelessWidget {
@@ -29,7 +30,7 @@ class StoryAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final resolvedUrl = _resolveAvatarUrl(context);
+    final mediaRequest = _resolveAvatarRequest(context);
     return Container(
       width: size,
       height: size,
@@ -39,15 +40,16 @@ class StoryAvatar extends StatelessWidget {
         border: border,
       ),
       child: ClipOval(
-        child: _buildContent(resolvedUrl),
+        child: _buildContent(mediaRequest),
       ),
     );
   }
 
-  Widget _buildContent(String? resolvedUrl) {
-    if (resolvedUrl != null) {
+  Widget _buildContent(MatrixMediaRequest? mediaRequest) {
+    if (mediaRequest != null) {
       return Image.network(
-        resolvedUrl,
+        mediaRequest.uri.toString(),
+        headers: mediaRequest.headers,
         fit: BoxFit.cover,
         errorBuilder: (_, __, ___) => _buildFallback(),
       );
@@ -55,19 +57,18 @@ class StoryAvatar extends StatelessWidget {
     return _buildFallback();
   }
 
-  String? _resolveAvatarUrl(BuildContext context) {
+  MatrixMediaRequest? _resolveAvatarRequest(BuildContext context) {
     final value = avatarUrl;
     if (value == null || value.isEmpty) return null;
     if (value.startsWith('http://') || value.startsWith('https://')) {
-      return value;
+      return MatrixMediaRequest(uri: Uri.parse(value));
     }
 
-    final httpUrl = context.read<MatrixProvider>().service.getHttpUrl(
+    return context.read<MatrixProvider>().service.getMediaRequest(
           value,
           width: size.round() * 3,
           height: size.round() * 3,
         );
-    return httpUrl?.toString();
   }
 
   Widget _buildFallback() {
@@ -92,5 +93,4 @@ class StoryAvatar extends StatelessWidget {
       ),
     );
   }
-
 }

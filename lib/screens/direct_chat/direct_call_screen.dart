@@ -850,8 +850,8 @@ class _SwipeToAnswerSliderState extends State<_SwipeToAnswerSlider>
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFF22C55E)
-                              .withValues(alpha: 0.35),
+                          color:
+                              const Color(0xFF22C55E).withValues(alpha: 0.35),
                           blurRadius: 14,
                           spreadRadius: 1,
                         ),

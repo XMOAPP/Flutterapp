@@ -210,8 +210,7 @@ class _CallHistoryTile extends StatelessWidget {
         userName: title,
         avatarUrl: avatarUrl,
         size: 46,
-        fallbackIcon:
-            entry.kind == CallHistoryKind.group ? Icons.group : null,
+        fallbackIcon: entry.kind == CallHistoryKind.group ? Icons.group : null,
       ),
       title: Row(
         children: [

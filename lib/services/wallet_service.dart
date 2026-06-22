@@ -21,7 +21,9 @@ class WalletService {
 
   /// Returns a list of wallet names available in the browser.
   List<String> detectWallets() {
-    if (!kIsWeb) return [];
+    if (!kIsWeb) {
+      return [];
+    }
     return detectWalletsImpl();
   }
 
@@ -30,8 +32,10 @@ class WalletService {
   /// Connects to a browser wallet (MetaMask, Brave, Coinbase, etc.).
   /// Returns the wallet address on success.
   Future<String> connectWallet(String walletName) async {
-    if (!kIsWeb) throw UnsupportedError('Wallet auth is only supported on Web.');
-    
+    if (!kIsWeb) {
+      throw UnsupportedError('Wallet auth is only supported on Web.');
+    }
+
     _connectedAddress = await connectWalletImpl(walletName);
     return _connectedAddress!;
   }
@@ -45,8 +49,7 @@ class WalletService {
 
     final nonce = _generateNonce();
     final timestamp = DateTime.now().toUtc().toIso8601String();
-    final message =
-        'XMO wants you to sign in with your wallet.\n\n'
+    final message = 'XMO wants you to sign in with your wallet.\n\n'
         'Username: $username\n'
         'Wallet: $_connectedAddress\n'
         'Nonce: $nonce\n'

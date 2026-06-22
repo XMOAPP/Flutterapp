@@ -535,6 +535,7 @@ class VoipService with WidgetsBindingObserver {
 
     if (_handlingNativeAction) {
       debugPrint('[VoipService] Native call action already in progress');
+      return;
     }
     _handlingNativeAction = true;
     final roomId = _nativeCallRoomId(payload);

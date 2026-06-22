@@ -24,11 +24,15 @@ class MainActivity : FlutterFragmentActivity() {
     private val mediaStoreChannel = "com.xmo.xmo/media_store"
     private val callNotificationMethodsChannel = "com.xmo.xmo/call_notifications"
     private val callNotificationEventsChannel = "com.xmo.xmo/call_notification_events"
+    private val notificationNavigationMethodsChannel = "com.xmo.xmo/notification_navigation"
+    private val notificationNavigationEventsChannel = "com.xmo.xmo/notification_navigation_events"
 
     private var initialLink: String? = null
     private var linksReceiver: BroadcastReceiver? = null
     private var initialCallAction: Map<String, String>? = null
     private var callNotificationEvents: EventChannel.EventSink? = null
+    private var initialNotificationPayload: Map<String, String>? = null
+    private var notificationNavigationEvents: EventChannel.EventSink? = null
 
     override fun onResume() {
         super.onResume()
@@ -47,6 +51,9 @@ class MainActivity : FlutterFragmentActivity() {
         initialCallAction = XmoCallNotificationHelper.extrasFromIntent(intent)
         initialCallAction?.let {
             XmoCallNotificationHelper.cancelCallNotification(applicationContext, it)
+        }
+        if (initialCallAction == null) {
+            initialNotificationPayload = notificationPayloadFromIntent(intent)
         }
     }
 
@@ -100,6 +107,33 @@ class MainActivity : FlutterFragmentActivity() {
 
                     override fun onCancel(arguments: Any?) {
                         callNotificationEvents = null
+                    }
+                },
+            )
+
+        MethodChannel(messenger, notificationNavigationMethodsChannel)
+            .setMethodCallHandler { call, result ->
+                if (call.method == "initialNotificationPayload") {
+                    result.success(initialNotificationPayload)
+                    initialNotificationPayload = null
+                } else {
+                    result.notImplemented()
+                }
+            }
+
+        EventChannel(messenger, notificationNavigationEventsChannel)
+            .setStreamHandler(
+                object : EventChannel.StreamHandler {
+                    override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+                        notificationNavigationEvents = events
+                        initialNotificationPayload?.let {
+                            events.success(it)
+                            initialNotificationPayload = null
+                        }
+                    }
+
+                    override fun onCancel(arguments: Any?) {
+                        notificationNavigationEvents = null
                     }
                 },
             )
@@ -165,7 +199,8 @@ class MainActivity : FlutterFragmentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        XmoCallNotificationHelper.extrasFromIntent(intent)?.let {
+        val callAction = XmoCallNotificationHelper.extrasFromIntent(intent)
+        callAction?.let {
             XmoCallNotificationHelper.cancelCallNotification(applicationContext, it)
             if (callNotificationEvents == null) {
                 initialCallAction = it
@@ -173,8 +208,29 @@ class MainActivity : FlutterFragmentActivity() {
                 callNotificationEvents?.success(it)
             }
         }
+        if (callAction == null) {
+            notificationPayloadFromIntent(intent)?.let {
+                if (notificationNavigationEvents == null) {
+                    initialNotificationPayload = it
+                } else {
+                    notificationNavigationEvents?.success(it)
+                }
+            }
+        }
         if (intent.action == Intent.ACTION_VIEW) {
             linksReceiver?.onReceive(applicationContext, intent)
+        }
+    }
+
+    private fun notificationPayloadFromIntent(intent: Intent?): Map<String, String>? {
+        val extras = intent?.extras ?: return null
+        val roomId = extras.getString("room_id") ?: extras.getString("roomId")
+        if (roomId.isNullOrBlank()) return null
+
+        return linkedMapOf<String, String>().apply {
+            for (key in extras.keySet()) {
+                extras.get(key)?.let { put(key, it.toString()) }
+            }
         }
     }
 

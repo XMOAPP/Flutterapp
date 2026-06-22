@@ -108,8 +108,8 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
   @override
   Widget build(BuildContext context) {
     final events = _filteredEvents;
-    final sourceName =
-        MatrixService.cleanName(MatrixService().getResolvedDisplayName(widget.sourceRoom));
+    final sourceName = MatrixService.cleanName(
+        MatrixService().getResolvedDisplayName(widget.sourceRoom));
     final count = _events.length;
 
     return IncomingCallFullscreenScope(
@@ -142,7 +142,8 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
                       userName: sourceName,
                       avatarUrl: widget.sourceRoom.avatar?.toString(),
                       size: 42,
-                      fallbackIcon: !MatrixService().isDirectRoom(widget.sourceRoom) &&
+                      fallbackIcon: !MatrixService()
+                                  .isDirectRoom(widget.sourceRoom) &&
                               widget.sourceRoom.isChannel
                           ? Icons.campaign
                           : !MatrixService().isDirectRoom(widget.sourceRoom) &&
@@ -179,7 +180,8 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
                 ),
           actions: [
             IconButton(
-              icon: Icon(_searching ? Icons.close : Icons.search, color: kWhite),
+              icon:
+                  Icon(_searching ? Icons.close : Icons.search, color: kWhite),
               onPressed: () {
                 setState(() {
                   _searching = !_searching;
@@ -229,7 +231,8 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
                                     myUserId:
                                         context.read<MatrixProvider>().userId ??
                                             '',
-                                    loadImageBytes: _mediaHandler.loadImageBytes,
+                                    loadImageBytes:
+                                        _mediaHandler.loadImageBytes,
                                     playVideo: _openVideo,
                                     downloadAndOpenFile: _openFile,
                                     shareAttachment: _shareAttachment,

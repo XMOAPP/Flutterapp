@@ -19,19 +19,23 @@ class MentionAutocomplete extends StatelessWidget {
 
   List<GroupMember> get _filteredMembers {
     if (query.isEmpty) return [];
-    
+
     final lowerQuery = query.toLowerCase();
-    return members.where((member) {
-      final displayName = member.displayName.toLowerCase();
-      final userId = member.userId.toLowerCase();
-      return displayName.contains(lowerQuery) || userId.contains(lowerQuery);
-    }).take(5).toList();
+    return members
+        .where((member) {
+          final displayName = member.displayName.toLowerCase();
+          final userId = member.userId.toLowerCase();
+          return displayName.contains(lowerQuery) ||
+              userId.contains(lowerQuery);
+        })
+        .take(5)
+        .toList();
   }
 
   @override
   Widget build(BuildContext context) {
     final filtered = _filteredMembers;
-    
+
     if (filtered.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -77,10 +81,10 @@ class MentionAutocomplete extends StatelessWidget {
 
   Widget _buildRoleBadge(MemberRole role) {
     if (role == MemberRole.member) return const SizedBox.shrink();
-    
+
     String label;
     Color color;
-    
+
     switch (role) {
       case MemberRole.owner:
         label = 'Owner';
@@ -97,7 +101,7 @@ class MentionAutocomplete extends StatelessWidget {
       default:
         return const SizedBox.shrink();
     }
-    
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(

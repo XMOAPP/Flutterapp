@@ -58,6 +58,7 @@ app.*.map.json
 *.p12
 *.jks
 key.properties
+android/key.properties
 local.properties
 
 # Local Matrix/Synapse data if copied into the Flutter repo

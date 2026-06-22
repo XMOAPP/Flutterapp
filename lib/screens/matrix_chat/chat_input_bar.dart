@@ -59,8 +59,12 @@ class ChatInputBar extends StatelessWidget {
       );
     }
 
+    final isNarrow = MediaQuery.sizeOf(context).width < 340;
+    const actionSize = 40.0;
+    final horizontalPadding = isNarrow ? 6.0 : 8.0;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: 8),
       decoration: const BoxDecoration(
         color: kDarkerGrey,
         border: Border(top: BorderSide(color: kDarkGrey, width: 0.5)),
@@ -72,9 +76,9 @@ class ChatInputBar extends StatelessWidget {
             GestureDetector(
               onTap: uploading || !enabled ? null : onShowAttachmentSheet,
               child: Container(
-                width: 40,
-                height: 40,
-                margin: const EdgeInsets.only(right: 4),
+                width: actionSize,
+                height: actionSize,
+                margin: EdgeInsets.only(right: isNarrow ? 2 : 4),
                 child: Icon(
                   Icons.add_circle_outline,
                   color: uploading || !enabled ? kMediumGrey : kLimeGreen,
@@ -144,9 +148,9 @@ class ChatInputBar extends StatelessWidget {
                           key: const ValueKey('send'),
                           onTap: uploading || !enabled ? null : onSend,
                           child: Container(
-                            width: 40,
-                            height: 40,
-                            margin: const EdgeInsets.only(left: 8),
+                            width: actionSize,
+                            height: actionSize,
+                            margin: EdgeInsets.only(left: isNarrow ? 4 : 8),
                             decoration: BoxDecoration(
                               color: uploading || !enabled
                                   ? kDarkGrey
@@ -166,9 +170,9 @@ class ChatInputBar extends StatelessWidget {
                           onTap:
                               uploading || !enabled ? null : onStartRecording,
                           child: Container(
-                            width: 40,
-                            height: 40,
-                            margin: const EdgeInsets.only(left: 8),
+                            width: actionSize,
+                            height: actionSize,
+                            margin: EdgeInsets.only(left: isNarrow ? 4 : 8),
                             decoration: BoxDecoration(
                               color: uploading || !enabled
                                   ? kDarkGrey
@@ -215,6 +219,7 @@ class _RecordingBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    final isNarrow = MediaQuery.sizeOf(context).width < 340;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -233,7 +238,7 @@ class _RecordingBar extends StatelessWidget {
             ),
             Expanded(
               child: Container(
-                height: 54,
+                constraints: const BoxConstraints(minHeight: 54),
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 decoration: BoxDecoration(
                   color: kDarkGrey,
@@ -290,14 +295,15 @@ class _RecordingBar extends StatelessWidget {
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        Text(
-                          paused ? 'Paused' : 'Recording',
-                          style: GoogleFonts.inter(
-                            color: paused ? kMediumGrey : Colors.redAccent,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
+                        if (!isNarrow)
+                          Text(
+                            paused ? 'Paused' : 'Recording',
+                            style: GoogleFonts.inter(
+                              color: paused ? kMediumGrey : Colors.redAccent,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   ],

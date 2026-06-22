@@ -49,5 +49,4 @@ class DefaultFirebaseOptions {
     storageBucket: 'xmoapp-6ef05.firebasestorage.app',
     iosBundleId: 'com.xmo.xmo',
   );
-
 }

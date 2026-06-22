@@ -1,3 +1,5 @@
+// ignore_for_file: annotate_overrides
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
@@ -8,6 +10,9 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import '../config/app_config.dart';
 import '../models/invite_link_models.dart';
+import 'matrix_media_helper.dart';
+import 'repositories/matrix_repository_contracts.dart';
+import 'repositories/matrix_sdk_repositories.dart';
 import 'transfer_queue_service.dart';
 
 enum XmoRoomKind { direct, group, channel, saved }
@@ -33,7 +38,7 @@ class _PreparedMediaUpload {
 
 /// Singleton service that wraps the Matrix Dart SDK.
 /// Matrix homeserver wrapper. Configure deployment with --dart-define.
-class MatrixService {
+class MatrixService implements MatrixRepositoryApi {
   static final MatrixService _instance = MatrixService._internal();
   factory MatrixService() => _instance;
   MatrixService._internal();
@@ -46,6 +51,7 @@ class MatrixService {
   static const String _savedMessagesRoomIdKey = 'saved_messages_room_id';
   static const String _inviteLinksStateType = 'xmo.invite.links';
   static const String roomTypeStateType = 'xmo.room.type';
+  static const String roomSecurityStateType = 'xmo.room.security';
   static const String savedMessagesStateType = 'xmo.saved_messages';
   static const String groupCallPushMarkerEvent = 'xmo.group_call_invite';
 
@@ -61,6 +67,19 @@ class MatrixService {
   String? _profileDisplayName;
   String? _profileAvatarUrl;
   bool _profileAvatarRemoved = false;
+
+  /// Repository boundaries retain the existing MatrixService API while making
+  /// feature code unit-testable with repository fakes.
+  late final MatrixSessionRepository sessionRepository =
+      MatrixSdkSessionRepository(this);
+  late final MatrixRoomRepository roomRepository =
+      MatrixSdkRoomRepository(this);
+  late final MatrixMediaRepository mediaRepository =
+      MatrixSdkMediaRepository(this);
+  late final MatrixPushRepository pushRepository =
+      MatrixSdkPushRepository(this);
+  late final MatrixCommunityRepository communityRepository =
+      MatrixSdkCommunityRepository(this);
 
   Client get client => _client;
 
@@ -606,6 +625,16 @@ class MatrixService {
     bool isDirect = false,
   }) async {
     final aliasName = isDirect ? null : _toAliasName(name);
+    final initialState = isDirect
+        ? privateRoomInitialState()
+        : <StateEvent>[
+            StateEvent(
+              type: EventTypes.HistoryVisibility,
+              stateKey: '',
+              content: {'history_visibility': 'shared'},
+            ),
+            publicRoomSecurityState(),
+          ];
     try {
       final roomId = await _client.createRoom(
         name: name,
@@ -616,15 +645,7 @@ class MatrixService {
         visibility: isDirect ? null : Visibility.public,
         roomAliasName: aliasName,
         isDirect: isDirect,
-        initialState: isDirect
-            ? null
-            : [
-                StateEvent(
-                  type: EventTypes.HistoryVisibility,
-                  stateKey: '',
-                  content: {'history_visibility': 'shared'},
-                ),
-              ],
+        initialState: initialState,
       );
       if (!isDirect) {
         cacheGroupId(roomId);
@@ -647,6 +668,7 @@ class MatrixService {
               stateKey: '',
               content: {'history_visibility': 'shared'},
             ),
+            publicRoomSecurityState(),
           ],
         );
         cacheGroupId(roomId);
@@ -662,13 +684,13 @@ class MatrixService {
       invite: [userId],
       preset: CreateRoomPreset.privateChat,
       isDirect: true,
-      initialState: [
+      initialState: privateRoomInitialState([
         StateEvent(
           type: roomTypeStateType,
           stateKey: '',
           content: {'is_direct': true, 'kind': 'direct'},
         ),
-      ],
+      ]),
     );
     await Room(id: roomId, client: _client).addToDirectChat(userId);
     return roomId;
@@ -681,6 +703,7 @@ class MatrixService {
     bool isPublic = true,
   }) async {
     final aliasName = isPublic ? _toAliasName(name) : null;
+    final initialState = _channelInitialState(isPublic);
     String roomId;
     try {
       roomId = await _client.createRoom(
@@ -695,18 +718,7 @@ class MatrixService {
           'events_default': 50,
           'users_default': 0,
         },
-        initialState: [
-          StateEvent(
-            type: roomTypeStateType,
-            stateKey: '',
-            content: {'is_channel': true},
-          ),
-          StateEvent(
-            type: EventTypes.HistoryVisibility,
-            stateKey: '',
-            content: {'history_visibility': 'shared'},
-          ),
-        ],
+        initialState: initialState,
       );
     } catch (e) {
       // If alias is taken, retry without alias — display name stays the same
@@ -721,18 +733,7 @@ class MatrixService {
             'events_default': 50,
             'users_default': 0,
           },
-          initialState: [
-            StateEvent(
-              type: roomTypeStateType,
-              stateKey: '',
-              content: {'is_channel': true},
-            ),
-            StateEvent(
-              type: EventTypes.HistoryVisibility,
-              stateKey: '',
-              content: {'history_visibility': 'shared'},
-            ),
-          ],
+          initialState: _channelInitialState(true),
         );
       } else {
         rethrow;
@@ -743,6 +744,59 @@ class MatrixService {
     // ✅ Explicitly publish to directory
     if (isPublic) _ensureDirectoryVisibility(roomId);
     return roomId;
+  }
+
+  /// State used for rooms where XMO requires end-to-end encryption at creation.
+  /// Existing rooms are intentionally not modified because enabling encryption
+  /// later changes their security model and cannot recover old plaintext events.
+  List<StateEvent> privateRoomInitialState(
+      [List<StateEvent> extra = const []]) {
+    if (!_client.encryptionEnabled) {
+      throw StateError(
+        'End-to-end encryption is unavailable on this device. '
+        'Update XMO and try again.',
+      );
+    }
+
+    return <StateEvent>[
+      StateEvent(
+        type: EventTypes.Encryption,
+        stateKey: '',
+        content: {
+          'algorithm': Client.supportedGroupEncryptionAlgorithms.first,
+        },
+      ),
+      StateEvent(
+        type: roomSecurityStateType,
+        stateKey: '',
+        content: const {'visibility': 'private', 'encrypted': true},
+      ),
+      ...extra,
+    ];
+  }
+
+  StateEvent publicRoomSecurityState() => StateEvent(
+        type: roomSecurityStateType,
+        stateKey: '',
+        content: const {'visibility': 'public', 'encrypted': false},
+      );
+
+  List<StateEvent> _channelInitialState(bool isPublic) {
+    final base = <StateEvent>[
+      StateEvent(
+        type: roomTypeStateType,
+        stateKey: '',
+        content: {'is_channel': true},
+      ),
+      StateEvent(
+        type: EventTypes.HistoryVisibility,
+        stateKey: '',
+        content: {'history_visibility': 'shared'},
+      ),
+    ];
+    return isPublic
+        ? <StateEvent>[...base, publicRoomSecurityState()]
+        : privateRoomInitialState(base);
   }
 
   /// Converts a human room name to a valid, unique Matrix alias local part.
@@ -2002,40 +2056,24 @@ class MatrixService {
   /// Returns the current access token for authenticated requests.
   String? get accessToken => _client.accessToken;
 
-  /// Resolves an mxc:// URI to an authenticated HTTP URL for display.
-  /// Uses the authenticated /_matrix/client/v1/media/ endpoints (Synapse 1.120+).
-  /// Falls back to legacy /_matrix/media/v3/ if needed.
-  Uri? getHttpUrl(String? mxcUrl, {int? width, int? height}) {
-    if (mxcUrl == null || !mxcUrl.startsWith('mxc://')) return null;
-    final parts = mxcUrl.substring(6).split('/'); // remove 'mxc://'
-    if (parts.length < 2) return null;
-    final server = parts[0];
-    final mediaId = parts.sublist(1).join('/');
-    final token = accessToken;
+  /// Resolves Matrix media without exposing the access token in its URL.
+  MatrixMediaRequest? getMediaRequest(
+    String? mxcUrl, {
+    int? width,
+    int? height,
+  }) {
+    return MatrixMediaHelper(
+      homeserverUrl: homeserverUrl,
+      accessToken: accessToken,
+    ).fromMxc(mxcUrl, width: width, height: height);
+  }
 
-    if (width != null && height != null) {
-      // Use authenticated client media endpoint for thumbnails
-      final queryParams = <String, String>{
-        'width': width.toString(),
-        'height': height.toString(),
-        'method': 'scale',
-      };
-      if (token != null) queryParams['access_token'] = token;
-      return Uri.parse(
-              '$homeserverUrl/_matrix/client/v1/media/thumbnail/$server/$mediaId')
-          .replace(queryParameters: queryParams);
-    }
-
-    // Use authenticated client media endpoint for downloads
-    if (token != null) {
-      return Uri.parse(
-        '$homeserverUrl/_matrix/client/v1/media/download/$server/$mediaId'
-        '?access_token=$token',
-      );
-    }
-    return Uri.parse(
-      '$homeserverUrl/_matrix/client/v1/media/download/$server/$mediaId',
-    );
+  /// Converts an SDK-provided media URL to an authenticated request.
+  MatrixMediaRequest getMediaRequestForUrl(Uri url) {
+    return MatrixMediaHelper(
+      homeserverUrl: homeserverUrl,
+      accessToken: accessToken,
+    ).fromUrl(url);
   }
 
   Future<Timeline?> getTimeline(String roomId) async {

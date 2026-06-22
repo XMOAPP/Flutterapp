@@ -15,18 +15,21 @@ class CategoryFilters extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     CallHistoryService().ensureLoaded();
-    return Selector3<ChatFilterProvider, MatrixProvider, StoryProvider, FilterData>(
+    return Selector3<ChatFilterProvider, MatrixProvider, StoryProvider,
+        FilterData>(
       selector: (_, filterProvider, matrixProvider, storyProvider) {
         final activeRooms = matrixProvider.rooms.where((room) {
           return room.membership == Membership.join ||
               room.membership == Membership.invite;
         }).toList();
-        
+
         // Count stories (my stories + contact stories with unviewed)
         final myUserId = matrixProvider.userId ?? '';
         final storiesCount = (storyProvider.hasMyStories ? 1 : 0) +
-            storyProvider.contactStories.where((us) => !us.allViewedBy(myUserId)).length;
-        
+            storyProvider.contactStories
+                .where((us) => !us.allViewedBy(myUserId))
+                .length;
+
         return FilterData(
           filter: filterProvider.filter,
           allCount: activeRooms.length,

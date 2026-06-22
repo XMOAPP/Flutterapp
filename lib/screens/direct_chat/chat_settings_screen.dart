@@ -83,131 +83,133 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen> {
       child: Scaffold(
         backgroundColor: kBlack,
         appBar: AppBar(
-        backgroundColor: kBlack,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: kWhite),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(
-          'Chat Settings',
-          style: GoogleFonts.inter(
-            color: kWhite,
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
+          backgroundColor: kBlack,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: kWhite),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: Text(
+            'Chat Settings',
+            style: GoogleFonts.inter(
+              color: kWhite,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
-      ),
         body: _loading
-          ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
-          : _settings == null
-              ? Center(
-                  child: Text(
-                    'Failed to load settings',
-                    style: GoogleFonts.inter(color: kLightGrey),
+            ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
+            : _settings == null
+                ? Center(
+                    child: Text(
+                      'Failed to load settings',
+                      style: GoogleFonts.inter(color: kLightGrey),
+                    ),
+                  )
+                : SingleChildScrollView(
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 16),
+
+                        // Notifications Section
+                        _buildSection(
+                          title: 'Notifications',
+                          children: [
+                            _buildSwitchTile(
+                              icon: Icons.notifications_outlined,
+                              title: 'Notifications',
+                              subtitle:
+                                  'Receive notifications for new messages',
+                              value: _settings!.notificationsEnabled,
+                              onChanged: (value) {
+                                _updateSettings(_settings!.copyWith(
+                                  notificationsEnabled: value,
+                                ));
+                              },
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        // Privacy Section
+                        _buildSection(
+                          title: 'Privacy',
+                          children: [
+                            _buildSwitchTile(
+                              icon: Icons.done_all,
+                              title: 'Read Receipts',
+                              subtitle:
+                                  'Let others know when you\'ve read messages',
+                              value: _settings!.readReceiptsEnabled,
+                              onChanged: (value) {
+                                _updateSettings(_settings!.copyWith(
+                                  readReceiptsEnabled: value,
+                                ));
+                              },
+                            ),
+                            const Divider(color: kMediumGrey, height: 1),
+                            _buildSwitchTile(
+                              icon: Icons.keyboard,
+                              title: 'Typing Indicators',
+                              subtitle: 'Show when you\'re typing',
+                              value: _settings!.typingIndicatorsEnabled,
+                              onChanged: (value) {
+                                _updateSettings(_settings!.copyWith(
+                                  typingIndicatorsEnabled: value,
+                                ));
+                              },
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        // Appearance Section
+                        _buildSection(
+                          title: 'Appearance',
+                          children: [
+                            _buildActionTile(
+                              icon: Icons.wallpaper_outlined,
+                              title: 'Chat Wallpaper',
+                              subtitle: _settings!.customWallpaper ?? 'Default',
+                              onTap: _selectWallpaper,
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        // Advanced Section
+                        _buildSection(
+                          title: 'Advanced',
+                          children: [
+                            _buildSwitchTile(
+                              icon: Icons.timer_outlined,
+                              title: 'Disappearing Messages',
+                              subtitle: 'Messages auto-delete after a set time',
+                              value: _settings!.disappearingMessagesEnabled,
+                              onChanged: (value) {
+                                _updateSettings(_settings!.copyWith(
+                                  disappearingMessagesEnabled: value,
+                                ));
+                              },
+                            ),
+                            const Divider(color: kMediumGrey, height: 1),
+                            _buildActionTile(
+                              icon: Icons.file_download_outlined,
+                              title: 'Export Chat',
+                              subtitle: 'Save chat history as text file',
+                              onTap: _exportChat,
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 80),
+                      ],
+                    ),
                   ),
-                )
-              : SingleChildScrollView(
-                  child: Column(
-                    children: [
-                      const SizedBox(height: 16),
-                      
-                      // Notifications Section
-                      _buildSection(
-                        title: 'Notifications',
-                        children: [
-                          _buildSwitchTile(
-                            icon: Icons.notifications_outlined,
-                            title: 'Notifications',
-                            subtitle: 'Receive notifications for new messages',
-                            value: _settings!.notificationsEnabled,
-                            onChanged: (value) {
-                              _updateSettings(_settings!.copyWith(
-                                notificationsEnabled: value,
-                              ));
-                            },
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Privacy Section
-                      _buildSection(
-                        title: 'Privacy',
-                        children: [
-                          _buildSwitchTile(
-                            icon: Icons.done_all,
-                            title: 'Read Receipts',
-                            subtitle: 'Let others know when you\'ve read messages',
-                            value: _settings!.readReceiptsEnabled,
-                            onChanged: (value) {
-                              _updateSettings(_settings!.copyWith(
-                                readReceiptsEnabled: value,
-                              ));
-                            },
-                          ),
-                          const Divider(color: kMediumGrey, height: 1),
-                          _buildSwitchTile(
-                            icon: Icons.keyboard,
-                            title: 'Typing Indicators',
-                            subtitle: 'Show when you\'re typing',
-                            value: _settings!.typingIndicatorsEnabled,
-                            onChanged: (value) {
-                              _updateSettings(_settings!.copyWith(
-                                typingIndicatorsEnabled: value,
-                              ));
-                            },
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Appearance Section
-                      _buildSection(
-                        title: 'Appearance',
-                        children: [
-                          _buildActionTile(
-                            icon: Icons.wallpaper_outlined,
-                            title: 'Chat Wallpaper',
-                            subtitle: _settings!.customWallpaper ?? 'Default',
-                            onTap: _selectWallpaper,
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Advanced Section
-                      _buildSection(
-                        title: 'Advanced',
-                        children: [
-                          _buildSwitchTile(
-                            icon: Icons.timer_outlined,
-                            title: 'Disappearing Messages',
-                            subtitle: 'Messages auto-delete after a set time',
-                            value: _settings!.disappearingMessagesEnabled,
-                            onChanged: (value) {
-                              _updateSettings(_settings!.copyWith(
-                                disappearingMessagesEnabled: value,
-                              ));
-                            },
-                          ),
-                          const Divider(color: kMediumGrey, height: 1),
-                          _buildActionTile(
-                            icon: Icons.file_download_outlined,
-                            title: 'Export Chat',
-                            subtitle: 'Save chat history as text file',
-                            onTap: _exportChat,
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 80),
-                    ],
-                  ),
-                ),
       ),
     );
   }
@@ -331,7 +333,8 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen> {
               ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.wallpaper, color: kLimeGreen, size: 20),
+                leading:
+                    const Icon(Icons.wallpaper, color: kLimeGreen, size: 20),
                 title: Text(
                   'Default',
                   style: GoogleFonts.inter(color: kWhite, fontSize: 14),
@@ -344,7 +347,8 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen> {
               ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.photo_library, color: kLimeGreen, size: 20),
+                leading: const Icon(Icons.photo_library,
+                    color: kLimeGreen, size: 20),
                 title: Text(
                   'Choose from Gallery',
                   style: GoogleFonts.inter(color: kWhite, fontSize: 14),
@@ -377,7 +381,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen> {
       );
 
       final chatText = await _directChatService.exportChat(widget.room.id);
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -387,7 +391,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen> {
           ),
         );
       }
-      
+
       // TODO: Save to file or share
     } catch (e) {
       if (mounted) {

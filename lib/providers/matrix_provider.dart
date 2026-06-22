@@ -1,12 +1,16 @@
-import 'package:flutter/material.dart';
 import 'dart:typed_data';
+import 'dart:async';
+import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 import '../services/call_history_service.dart';
 import '../services/matrix_service.dart';
 import '../services/privacy_service.dart';
 import '../services/push_notification_service.dart';
+import '../services/transfer_queue_service.dart';
 
 enum MatrixAuthState { uninitialized, loggedOut, loggingIn, loggedIn, error }
+
+enum MatrixConnectionStatus { offline, connecting, online, reconnecting }
 
 extension RoomXmoExtension on Room {
   /// Checks if this room is a broadcast channel.
@@ -72,7 +76,10 @@ extension RoomXmoExtension on Room {
 // ═══════════════════════════════════════════════════════════════════════════
 
 class MatrixProvider extends ChangeNotifier {
-  final MatrixService _svc = MatrixService();
+  MatrixProvider({MatrixService? service}) : _svc = service ?? MatrixService();
+
+  /// Injectable for integration tests and alternate deployment wiring.
+  final MatrixService _svc;
   MatrixService get service => _svc;
 
   MatrixAuthState _state = MatrixAuthState.uninitialized;
@@ -87,6 +94,12 @@ class MatrixProvider extends ChangeNotifier {
   String? get displayName => _svc.displayName;
   String? get avatarUrl => _svc.avatarUrl;
 
+  MatrixConnectionStatus _connectionStatus = MatrixConnectionStatus.offline;
+  MatrixConnectionStatus get connectionStatus => _connectionStatus;
+  DateTime? _lastSyncAt;
+  StreamSubscription<List<Room>>? _syncSubscription;
+  Timer? _connectionWatchdog;
+
   List<Room> get rooms => _svc.getRooms();
 
   // ─── Init ─────────────────────────────────────────────────────────────────
@@ -98,6 +111,7 @@ class MatrixProvider extends ChangeNotifier {
           ? MatrixAuthState.loggedIn
           : MatrixAuthState.loggedOut;
       await CallHistoryService().setCurrentUser(_svc.userId);
+      await TransferQueueService.instance.setCurrentUser(_svc.userId);
       if (_svc.isLoggedIn) {
         await _svc.refreshProfile();
         await _syncPublicAccountDirectory();
@@ -128,6 +142,7 @@ class MatrixProvider extends ChangeNotifier {
     try {
       await _svc.loginOrRegisterWithPhone(phone, email);
       await CallHistoryService().setCurrentUser(_svc.userId);
+      await TransferQueueService.instance.setCurrentUser(_svc.userId);
       await _svc.refreshProfile();
       await _syncPublicAccountDirectory();
       await _ensureSavedMessagesReady();
@@ -157,6 +172,7 @@ class MatrixProvider extends ChangeNotifier {
     try {
       await _svc.login(username, password);
       await CallHistoryService().setCurrentUser(_svc.userId);
+      await TransferQueueService.instance.setCurrentUser(_svc.userId);
       await _svc.refreshProfile();
       await _syncPublicAccountDirectory();
       await _ensureSavedMessagesReady();
@@ -184,6 +200,7 @@ class MatrixProvider extends ChangeNotifier {
     try {
       await _svc.register(username, password);
       await CallHistoryService().setCurrentUser(_svc.userId);
+      await TransferQueueService.instance.setCurrentUser(_svc.userId);
       await _svc.refreshProfile();
       await _syncPublicAccountDirectory();
       await _ensureSavedMessagesReady();
@@ -205,7 +222,9 @@ class MatrixProvider extends ChangeNotifier {
     await PushNotificationService().unregisterCurrentUser();
     await _svc.logout();
     await CallHistoryService().setCurrentUser(null);
+    await TransferQueueService.instance.setCurrentUser(null);
     _state = MatrixAuthState.loggedOut;
+    _connectionStatus = MatrixConnectionStatus.offline;
     notifyListeners();
   }
 
@@ -385,7 +404,17 @@ class MatrixProvider extends ChangeNotifier {
   // ─── Private ──────────────────────────────────────────────────────────────
 
   void _listenSync() {
-    _svc.onRoomsUpdate.listen((_) async {
+    _syncSubscription?.cancel();
+    _connectionWatchdog ??= Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _checkConnectionHealth(),
+    );
+    _connectionStatus = MatrixConnectionStatus.connecting;
+    _syncSubscription = _svc.onRoomsUpdate.listen((_) async {
+      _lastSyncAt = DateTime.now();
+      if (_connectionStatus != MatrixConnectionStatus.online) {
+        _connectionStatus = MatrixConnectionStatus.online;
+      }
       await _svc.acceptAllInvites();
       await _svc.repairDirectChatMappings();
       // Scan every sync cycle: retroactively discover & cache channels
@@ -393,6 +422,41 @@ class MatrixProvider extends ChangeNotifier {
       _svc.scanAndCacheChannels();
       notifyListeners();
     });
+  }
+
+  void _checkConnectionHealth() {
+    if (!isLoggedIn) return;
+    final lastSyncAt = _lastSyncAt;
+    if (lastSyncAt == null ||
+        DateTime.now().difference(lastSyncAt) > const Duration(seconds: 45)) {
+      if (_connectionStatus != MatrixConnectionStatus.reconnecting) {
+        _connectionStatus = MatrixConnectionStatus.reconnecting;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> retryConnection() async {
+    if (!isLoggedIn) return;
+    _connectionStatus = MatrixConnectionStatus.connecting;
+    notifyListeners();
+    try {
+      await _svc.client.oneShotSync();
+      _svc.startSync();
+      _lastSyncAt = DateTime.now();
+      _connectionStatus = MatrixConnectionStatus.online;
+    } catch (e) {
+      _connectionStatus = MatrixConnectionStatus.offline;
+      _error = _friendlyError(e.toString());
+    }
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _syncSubscription?.cancel();
+    _connectionWatchdog?.cancel();
+    super.dispose();
   }
 
   String _friendlyError(String raw) {

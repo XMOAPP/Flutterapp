@@ -64,7 +64,7 @@ class SharedMediaItem {
   factory SharedMediaItem.fromEvent(Event event) {
     final messageType = event.messageType;
     MediaType type;
-    
+
     if (messageType == MessageTypes.Image) {
       type = MediaType.image;
     } else if (messageType == MessageTypes.Video) {
@@ -134,11 +134,15 @@ class DirectChatSettings {
       isMuted: isMuted ?? this.isMuted,
       notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
       readReceiptsEnabled: readReceiptsEnabled ?? this.readReceiptsEnabled,
-      typingIndicatorsEnabled: typingIndicatorsEnabled ?? this.typingIndicatorsEnabled,
+      typingIndicatorsEnabled:
+          typingIndicatorsEnabled ?? this.typingIndicatorsEnabled,
       customWallpaper: customWallpaper ?? this.customWallpaper,
-      customNotificationSound: customNotificationSound ?? this.customNotificationSound,
-      disappearingMessagesEnabled: disappearingMessagesEnabled ?? this.disappearingMessagesEnabled,
-      disappearingMessagesDuration: disappearingMessagesDuration ?? this.disappearingMessagesDuration,
+      customNotificationSound:
+          customNotificationSound ?? this.customNotificationSound,
+      disappearingMessagesEnabled:
+          disappearingMessagesEnabled ?? this.disappearingMessagesEnabled,
+      disappearingMessagesDuration:
+          disappearingMessagesDuration ?? this.disappearingMessagesDuration,
     );
   }
 }

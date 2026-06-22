@@ -14,8 +14,8 @@ import '../../providers/story_provider.dart';
 import '../../services/privacy_service.dart';
 import '../../widgets/story/story_video_player.dart';
 import '../camera_capture_screen.dart';
-import '../web_video_view_stub.dart' if (dart.library.js_interop) '../web_video_view.dart'
-    as web_video;
+import '../web_video_view_stub.dart'
+    if (dart.library.js_interop) '../web_video_view.dart' as web_video;
 
 /// Story Creator Screen - Create image/video/text stories
 class StoryCreatorScreen extends StatefulWidget {
@@ -28,7 +28,7 @@ class StoryCreatorScreen extends StatefulWidget {
 class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
   final _captionController = TextEditingController();
   final _imagePicker = ImagePicker();
-  
+
   Uint8List? _selectedMedia;
   Uint8List? _selectedVideoThumbnail;
   String? _selectedMediaMimeType;
@@ -116,7 +116,9 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
   Future<XFile?> _retrieveLostPickedImage() async {
     try {
       final response = await _imagePicker.retrieveLostData();
-      if (response.isEmpty || response.files == null || response.files!.isEmpty) {
+      if (response.isEmpty ||
+          response.files == null ||
+          response.files!.isEmpty) {
         return null;
       }
       return response.files!.first;
@@ -253,15 +255,13 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
         mediaBytes: _selectedMedia,
         mediaMimeType: _selectedMediaMimeType,
         mediaFileName: _selectedMediaFileName,
-        thumbnailBytes: _mediaType == StoryMediaType.video
-            ? _selectedVideoThumbnail
-            : null,
+        thumbnailBytes:
+            _mediaType == StoryMediaType.video ? _selectedVideoThumbnail : null,
         caption: _captionController.text.trim().isNotEmpty
             ? _captionController.text.trim()
             : null,
-        textContent: _selectedMedia == null
-            ? _captionController.text.trim()
-            : null,
+        textContent:
+            _selectedMedia == null ? _captionController.text.trim() : null,
         privacy: storyPrivacy,
         customPrivacyList:
             privacySettings.storyAudience == XmoPrivacyAudience.contacts

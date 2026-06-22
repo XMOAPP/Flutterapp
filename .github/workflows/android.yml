@@ -1,0 +1,69 @@
+name: Android CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Format, analyze, and test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: xmo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: dart format --set-exit-if-changed lib test integration_test
+      - run: flutter analyze
+      - run: flutter test
+
+  release-bundle:
+    name: Signed release app bundle
+    needs: quality
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: xmo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - name: Configure signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          cat > android/key.properties <<EOF
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyPassword=$ANDROID_KEY_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          storeFile=upload-keystore.jks
+          EOF
+      - name: Build release bundle
+        env:
+          XMO_HOMESERVER_URL: ${{ vars.XMO_HOMESERVER_URL }}
+          XMO_MATRIX_SERVER_NAME: ${{ vars.XMO_MATRIX_SERVER_NAME }}
+        run: >-
+          flutter build appbundle --release
+          --dart-define=XMO_HOMESERVER_URL=$XMO_HOMESERVER_URL
+          --dart-define=XMO_MATRIX_SERVER_NAME=$XMO_MATRIX_SERVER_NAME
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xmo-release-aab
+          path: xmo/build/app/outputs/bundle/release/app-release.aab

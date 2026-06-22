@@ -45,7 +45,8 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
 
   void _onChanged(String query) {
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 400), () => _search(query.trim()));
+    _debounce =
+        Timer(const Duration(milliseconds: 400), () => _search(query.trim()));
   }
 
   Future<void> _search(String query) async {
@@ -58,11 +59,19 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
       final svc = context.read<MatrixProvider>().service;
       final results = await svc.searchPublicRooms(query);
       if (mounted) {
-        setState(() { _results = results; _searching = false; });
+        setState(() {
+          _results = results;
+          _searching = false;
+        });
         _resolveRoomTypes(results);
       }
     } catch (e) {
-      if (mounted) setState(() { _error = e.toString(); _searching = false; });
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _searching = false;
+        });
+      }
     }
   }
 
@@ -89,7 +98,8 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => MatrixChatScreen(room: joined, matrixProvider: provider),
+            builder: (_) =>
+                MatrixChatScreen(room: joined, matrixProvider: provider),
           ),
         );
       }
@@ -97,7 +107,8 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
       if (!mounted) return;
       setState(() => _joiningRoomIds.remove(roomId));
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to join: $e'), backgroundColor: Colors.red),
+        SnackBar(
+            content: Text('Failed to join: $e'), backgroundColor: Colors.red),
       );
     }
   }
@@ -147,7 +158,8 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
             contentPadding: const EdgeInsets.symmetric(vertical: 8),
             suffixIcon: _searchCtrl.text.isNotEmpty
                 ? IconButton(
-                    icon: const Icon(Icons.clear, color: Colors.white38, size: 18),
+                    icon: const Icon(Icons.clear,
+                        color: Colors.white38, size: 18),
                     onPressed: () {
                       _searchCtrl.clear();
                       _search('');
@@ -169,7 +181,8 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text(_error!, style: GoogleFonts.inter(color: Colors.red, fontSize: 13)),
+          child: Text(_error!,
+              style: GoogleFonts.inter(color: Colors.red, fontSize: 13)),
         ),
       );
     }
@@ -197,7 +210,8 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
     return ListView.separated(
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: _results.length,
-      separatorBuilder: (_, __) => Divider(color: Colors.white.withValues(alpha: 0.05), height: 1),
+      separatorBuilder: (_, __) =>
+          Divider(color: Colors.white.withValues(alpha: 0.05), height: 1),
       itemBuilder: (context, i) {
         final room = _results[i];
         final isJoined = _isJoined(room.roomId);
@@ -208,7 +222,8 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
         final memberCount = room.numJoinedMembers;
 
         return ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
           leading: StoryAvatar(
             userName: name,
             avatarUrl: room.avatarUrl?.toString(),
@@ -220,7 +235,8 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
               Flexible(
                 child: Text(
                   name,
-                  style: GoogleFonts.inter(color: kWhite, fontWeight: FontWeight.w600, fontSize: 14),
+                  style: GoogleFonts.inter(
+                      color: kWhite, fontWeight: FontWeight.w600, fontSize: 14),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -268,7 +284,8 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
               const SizedBox(height: 4),
               Row(
                 children: [
-                  const Icon(Icons.people_outline, color: kMediumGrey, size: 12),
+                  const Icon(Icons.people_outline,
+                      color: kMediumGrey, size: 12),
                   const SizedBox(width: 4),
                   Text(
                     '$memberCount member${memberCount == 1 ? '' : 's'}',
@@ -282,39 +299,52 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
               ? const SizedBox(
                   width: 22,
                   height: 22,
-                  child: CircularProgressIndicator(color: kLimeGreen, strokeWidth: 2),
+                  child: CircularProgressIndicator(
+                      color: kLimeGreen, strokeWidth: 2),
                 )
               : isJoined
                   ? TextButton(
                       onPressed: () {
                         final provider = context.read<MatrixProvider>();
-                        final joined = provider.service.getRoomById(room.roomId);
+                        final joined =
+                            provider.service.getRoomById(room.roomId);
                         if (joined != null) {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => MatrixChatScreen(room: joined, matrixProvider: provider),
+                              builder: (_) => MatrixChatScreen(
+                                  room: joined, matrixProvider: provider),
                             ),
                           );
                         }
                       },
                       style: TextButton.styleFrom(
                         backgroundColor: kDarkGrey,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 4),
                         minimumSize: Size.zero,
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
-                      child: Text('Open', style: GoogleFonts.inter(color: kLimeGreen, fontSize: 12, fontWeight: FontWeight.w600)),
+                      child: Text('Open',
+                          style: GoogleFonts.inter(
+                              color: kLimeGreen,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600)),
                     )
                   : TextButton(
                       onPressed: () => _joinRoom(room),
                       style: TextButton.styleFrom(
                         backgroundColor: kLimeGreen,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 4),
                         minimumSize: Size.zero,
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
-                      child: Text('Join', style: GoogleFonts.inter(color: kBlack, fontSize: 12, fontWeight: FontWeight.w700)),
+                      child: Text('Join',
+                          style: GoogleFonts.inter(
+                              color: kBlack,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700)),
                     ),
           onTap: isJoined ? null : () => _joinRoom(room),
         );

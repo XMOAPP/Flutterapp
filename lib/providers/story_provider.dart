@@ -20,6 +20,7 @@ class StoryProvider extends ChangeNotifier {
   Timer? _refreshTimer;
   Timer? _cleanupTimer;
   StreamSubscription<EventUpdate>? _eventSub;
+  bool _hasLoadedContactTimeline = false;
 
   // Getters
   List<Story> get myStories => _myStories;
@@ -32,9 +33,10 @@ class StoryProvider extends ChangeNotifier {
   void _init() {
     _eventSub = _storyService.onEvent.listen(_handleEventUpdate);
 
-    // Auto-refresh every 30 seconds
+    // Matrix timeline scans are expensive. New story/view events update this
+    // provider directly, so periodic work refreshes only account data.
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      refreshStories();
+      refreshStories(forceTimelineScan: false);
     });
 
     // Cleanup expired stories every 5 minutes
@@ -77,6 +79,7 @@ class StoryProvider extends ChangeNotifier {
     if (userStories == null) return;
 
     _upsertContactStories(userStories);
+    unawaited(_storyService.cacheContactStories(_contactStories));
     notifyListeners();
   }
 
@@ -155,6 +158,7 @@ class StoryProvider extends ChangeNotifier {
       userAvatarUrl: userStories.userAvatarUrl,
       stories: updatedStories,
     );
+    unawaited(_storyService.cacheContactStories(_contactStories));
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -162,20 +166,28 @@ class StoryProvider extends ChangeNotifier {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /// Refresh all stories
-  Future<void> refreshStories() async {
+  Future<void> refreshStories({bool forceTimelineScan = false}) async {
     try {
       _loading = true;
       _error = null;
       notifyListeners();
 
-      // Load my stories and contact stories in parallel
-      final results = await Future.wait([
-        _storyService.getMyStories(),
-        _storyService.getAllContactStories(),
-      ]);
+      // Show persisted event IDs/story view state immediately. We only scan
+      // every direct-room timeline for the first cache miss or an explicit
+      // pull-to-refresh style request.
+      if (_contactStories.isEmpty) {
+        _contactStories = await _storyService.loadCachedContactStories();
+      }
 
-      _myStories = results[0] as List<Story>;
-      _contactStories = results[1] as List<UserStories>;
+      _myStories = await _storyService.getMyStories(
+        includeRemoteViews: forceTimelineScan || !_hasLoadedContactTimeline,
+      );
+
+      if (forceTimelineScan || !_hasLoadedContactTimeline) {
+        _contactStories = await _storyService.getAllContactStories();
+        _hasLoadedContactTimeline = true;
+        await _storyService.cacheContactStories(_contactStories);
+      }
 
       _loading = false;
       notifyListeners();
@@ -190,7 +202,7 @@ class StoryProvider extends ChangeNotifier {
   /// Load my stories only
   Future<void> loadMyStories() async {
     try {
-      _myStories = await _storyService.getMyStories();
+      _myStories = await _storyService.getMyStories(includeRemoteViews: false);
       notifyListeners();
     } catch (e) {
       debugPrint('[StoryProvider] Failed to load my stories: $e');
@@ -201,6 +213,8 @@ class StoryProvider extends ChangeNotifier {
   Future<void> loadContactStories() async {
     try {
       _contactStories = await _storyService.getAllContactStories();
+      _hasLoadedContactTimeline = true;
+      await _storyService.cacheContactStories(_contactStories);
       notifyListeners();
     } catch (e) {
       debugPrint('[StoryProvider] Failed to load contact stories: $e');

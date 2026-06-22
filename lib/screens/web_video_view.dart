@@ -96,8 +96,7 @@ Future<Uint8List?> generateVideoThumbnail(
       canvas.width = width;
       canvas.height = height;
 
-      final ctx =
-          canvas.getContext('2d')! as web.CanvasRenderingContext2D;
+      final ctx = canvas.getContext('2d')! as web.CanvasRenderingContext2D;
       ctx.drawImage(video, 0, 0, width.toDouble(), height.toDouble());
 
       final dataUrl = canvas.toDataURL('image/jpeg', 0.92.toJS);
@@ -111,12 +110,10 @@ Future<Uint8List?> generateVideoThumbnail(
 
   try {
     final jsArray = videoBytes.toJS;
-    final blob =
-        web.Blob([jsArray].toJS, web.BlobPropertyBag(type: mimeType));
+    final blob = web.Blob([jsArray].toJS, web.BlobPropertyBag(type: mimeType));
     final blobUrl = web.URL.createObjectURL(blob);
 
-    final video =
-        web.document.createElement('video') as web.HTMLVideoElement;
+    final video = web.document.createElement('video') as web.HTMLVideoElement;
     video.src = blobUrl;
     video.muted = true;
     video.preload = 'auto';

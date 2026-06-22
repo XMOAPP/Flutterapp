@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -23,6 +24,19 @@ class ImageContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final maxMediaWidth = math.min(
+      292.0,
+      math.max(160.0, screenWidth * 0.76),
+    );
+    final maxMediaHeight = math.min(
+      336.0,
+      math.max(120.0, maxMediaWidth * 1.15),
+    );
+    final placeholderWidth = math.min(200.0, maxMediaWidth);
+    final placeholderHeight = math.min(150.0, maxMediaHeight);
+    final compactPlaceholderHeight = math.min(80.0, maxMediaHeight);
+
     return FutureBuilder<Uint8List?>(
       future: loadImageBytes(event),
       builder: (context, snapshot) {
@@ -30,8 +44,8 @@ class ImageContent extends StatelessWidget {
           return _RenderedSizeReporter(
             onSize: onRenderedSize,
             child: Container(
-              width: 200,
-              height: 150,
+              width: placeholderWidth,
+              height: placeholderHeight,
               decoration: BoxDecoration(
                 color: kDarkGrey,
                 borderRadius: borderRadius,
@@ -59,8 +73,8 @@ class ImageContent extends StatelessWidget {
           return _RenderedSizeReporter(
             onSize: onRenderedSize,
             child: Container(
-              width: 200,
-              height: 80,
+              width: placeholderWidth,
+              height: compactPlaceholderHeight,
               decoration: BoxDecoration(
                 color: kDarkGrey,
                 borderRadius: borderRadius,
@@ -87,14 +101,16 @@ class ImageContent extends StatelessWidget {
             child: ClipRRect(
               borderRadius: borderRadius,
               child: ConstrainedBox(
-                constraints:
-                    const BoxConstraints(maxWidth: 292, maxHeight: 336),
+                constraints: BoxConstraints(
+                  maxWidth: maxMediaWidth,
+                  maxHeight: maxMediaHeight,
+                ),
                 child: Image.memory(
                   bytes,
                   fit: BoxFit.cover,
                   errorBuilder: (_, __, ___) => Container(
-                    width: 200,
-                    height: 80,
+                    width: placeholderWidth,
+                    height: compactPlaceholderHeight,
                     decoration: BoxDecoration(
                       color: kDarkGrey,
                       borderRadius: borderRadius,

@@ -4,9 +4,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import 'package:mime/mime.dart';
 import '../../theme.dart';
-import '../../screens/native_share_stub.dart' if (dart.library.io) '../../screens/native_share.dart'
-    as native_share;
-import '../../screens/web_download_stub.dart' if (dart.library.js_interop) '../../screens/web_download.dart' as web_download;
+import '../../screens/native_share_stub.dart'
+    if (dart.library.io) '../../screens/native_share.dart' as native_share;
+import '../../screens/web_download_stub.dart'
+    if (dart.library.js_interop) '../../screens/web_download.dart'
+    as web_download;
 
 /// Fullscreen image viewer with zoom and download functionality
 class FullscreenImageViewer extends StatelessWidget {
@@ -193,9 +195,11 @@ class FullscreenImageViewer extends StatelessWidget {
             errorBuilder: (_, __, ___) => Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.broken_image_outlined, color: kLightGrey, size: 64),
+                const Icon(Icons.broken_image_outlined,
+                    color: kLightGrey, size: 64),
                 const SizedBox(height: 12),
-                Text('Failed to load image', style: GoogleFonts.inter(color: kLightGrey)),
+                Text('Failed to load image',
+                    style: GoogleFonts.inter(color: kLightGrey)),
               ],
             ),
           ),

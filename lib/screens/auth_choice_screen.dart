@@ -110,44 +110,61 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen>
           SafeArea(
             child: FadeTransition(
               opacity: _fadeAnim,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 28),
-                child: Column(
-                  children: [
-                    const Spacer(flex: 2),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final shortestSide = MediaQuery.sizeOf(context).shortestSide;
+                  final logoSize =
+                      (shortestSide * 0.44).clamp(120.0, 160.0).toDouble();
+                  final horizontalPadding = (constraints.maxWidth * 0.08)
+                      .clamp(20.0, 28.0)
+                      .toDouble();
+                  final buttonPadding = (constraints.maxWidth * 0.11)
+                      .clamp(24.0, 40.0)
+                      .toDouble();
 
-                    // ── Logo ───────────────────────────────────────────────
-                    Image.asset(
-                      'assets/images/logo.png',
-                      width: 160,
-                      height: 160,
-                    ),
-
-                    const SizedBox(height: 0),
-
-                    // ── Option buttons ───────────────────────────────────────
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 40),
+                  return SingleChildScrollView(
+                    padding:
+                        EdgeInsets.symmetric(horizontal: horizontalPadding),
+                    child: ConstrainedBox(
+                      constraints:
+                          BoxConstraints(minHeight: constraints.maxHeight),
                       child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          _AuthButton(
-                            title: 'Sign Up / Login',
-                            onTap: _goToSignUp,
-                            isFirst: true,
+                          // ── Logo ───────────────────────────────────────────────
+                          Image.asset(
+                            'assets/images/logo.png',
+                            width: logoSize,
+                            height: logoSize,
                           ),
-                          const SizedBox(height: 16),
-                          _AuthButton(
-                            title: 'Connect Wallet',
-                            onTap: _goToWallet,
-                            isFirst: false,
+
+                          const SizedBox(height: 0),
+
+                          // ── Option buttons ───────────────────────────────────────
+                          Padding(
+                            padding:
+                                EdgeInsets.symmetric(horizontal: buttonPadding),
+                            child: Column(
+                              children: [
+                                _AuthButton(
+                                  title: 'Sign Up / Login',
+                                  onTap: _goToSignUp,
+                                  isFirst: true,
+                                ),
+                                const SizedBox(height: 16),
+                                _AuthButton(
+                                  title: 'Connect Wallet',
+                                  onTap: _goToWallet,
+                                  isFirst: false,
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),
                     ),
-
-                    const Spacer(flex: 2),
-                  ],
-                ),
+                  );
+                },
               ),
             ),
           ),
@@ -191,7 +208,8 @@ class _AuthButtonState extends State<_AuthButton> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           width: double.infinity,
-          height: 40,
+          constraints: const BoxConstraints(minHeight: 40),
+          padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
             color: bgColor,
             borderRadius: BorderRadius.circular(30),

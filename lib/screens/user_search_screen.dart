@@ -109,8 +109,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
         _publicResults = [];
         _publicRoomChannelFlags.clear();
         _searching = false;
-        _error =
-            'No user, group, or channel found for "$query"';
+        _error = 'No user, group, or channel found for "$query"';
       });
     }
   }
@@ -418,7 +417,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                   children: [
                     Expanded(
                       child: RadioListTile<GroupType>(
-                        title: const Text('Private',
+                        title: const Text('Private (encrypted)',
                             style: TextStyle(color: kWhite, fontSize: 14)),
                         value: GroupType.private,
                         groupValue: groupType,
@@ -431,7 +430,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                     ),
                     Expanded(
                       child: RadioListTile<GroupType>(
-                        title: const Text('Public',
+                        title: const Text('Public (not encrypted)',
                             style: TextStyle(color: kWhite, fontSize: 14)),
                         value: GroupType.public,
                         groupValue: groupType,
@@ -572,15 +571,15 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
           UserSearchBar(
             controller: _searchCtrl,
             onChanged: _onSearchChanged,
-              onClear: () {
-                _searchCtrl.clear();
-                setState(() {
-                  _results = [];
-                  _publicResults = [];
-                  _publicRoomChannelFlags.clear();
-                  _error = null;
-                });
-              },
+            onClear: () {
+              _searchCtrl.clear();
+              setState(() {
+                _results = [];
+                _publicResults = [];
+                _publicRoomChannelFlags.clear();
+                _error = null;
+              });
+            },
           ),
           if (_startingChat)
             const LoadingIndicator(message: 'Starting chat...'),

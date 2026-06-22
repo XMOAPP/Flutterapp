@@ -11,18 +11,23 @@ import '../providers/group_provider.dart';
 import '../providers/story_provider.dart';
 import '../services/app_lock_service.dart';
 import '../services/call_link_service.dart';
+import '../services/crash_reporting_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/story_service.dart';
 import '../services/voip_service.dart';
 import '../services/wallet_deep_link_handler.dart';
 import 'screens/direct_chat/call_pip_overlay.dart';
 import 'screens/direct_chat/incoming_call_banner.dart';
+import 'screens/matrix_chat_screen.dart';
 import 'screens/splash_screen.dart';
 import 'widgets/app_lock_gate.dart';
+import 'widgets/connection_status_banner.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 
 final xmoNavigatorKey = GlobalKey<NavigatorState>();
+String? _lastPushRouteKey;
+DateTime? _lastPushRouteAt;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -52,6 +57,7 @@ Future<void> _bootstrapServices(MatrixProvider matrixProvider) async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+    await CrashReportingService.initialize();
   } catch (e) {
     debugPrint("Firebase init failed (expected if not configured yet): $e");
   }
@@ -67,6 +73,7 @@ Future<void> _bootstrapServices(MatrixProvider matrixProvider) async {
   try {
     await PushNotificationService().init(
       matrixService: matrixProvider.service,
+      onOpenChat: (route) => _openPushChat(matrixProvider, route),
     );
   } catch (e, stack) {
     debugPrint('[main] Push notification startup skipped: $e');
@@ -79,6 +86,55 @@ Future<void> _bootstrapServices(MatrixProvider matrixProvider) async {
     debugPrint('[main] Initial deep link handling skipped: $e');
     debugPrintStack(stackTrace: stack);
   }
+}
+
+Future<void> _openPushChat(
+  MatrixProvider matrixProvider,
+  PushNotificationRoute route,
+) async {
+  final roomId = route.roomId;
+  if (roomId == null || roomId.isEmpty || !matrixProvider.isLoggedIn) return;
+
+  final routeKey = '$roomId:${route.eventId ?? ''}';
+  final lastRouteAt = _lastPushRouteAt;
+  if (_lastPushRouteKey == routeKey &&
+      lastRouteAt != null &&
+      DateTime.now().difference(lastRouteAt) < const Duration(seconds: 2)) {
+    return;
+  }
+
+  // A notification can open XMO before the first sync has populated rooms.
+  // Refresh a few times instead of dropping the user's navigation request.
+  var room = matrixProvider.service.getRoomById(roomId);
+  for (var attempt = 0; room == null && attempt < 4; attempt++) {
+    try {
+      await matrixProvider.service.client.oneShotSync();
+    } catch (e) {
+      debugPrint('[main] Push room refresh failed: $e');
+    }
+    room = matrixProvider.service.getRoomById(roomId);
+    if (room == null) {
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+    }
+  }
+  if (room == null) {
+    debugPrint('[main] Push room not available: $roomId');
+    return;
+  }
+
+  final navigator = xmoNavigatorKey.currentState;
+  if (navigator == null) return;
+  _lastPushRouteKey = routeKey;
+  _lastPushRouteAt = DateTime.now();
+  await navigator.push(
+    MaterialPageRoute(
+      builder: (_) => MatrixChatScreen(
+        room: room,
+        matrixProvider: matrixProvider,
+        initialHighlightedEventId: route.eventId,
+      ),
+    ),
+  );
 }
 
 class XmoApp extends StatelessWidget {
@@ -113,6 +169,7 @@ class XmoApp extends StatelessWidget {
               child: Stack(
                 children: [
                   child!,
+                  const ConnectionStatusBanner(),
                   ValueListenableBuilder<bool>(
                     valueListenable: VoipService().pipMode,
                     builder: (_, isPip, __) {

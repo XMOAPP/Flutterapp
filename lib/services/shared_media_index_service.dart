@@ -60,11 +60,26 @@ class SharedMediaIndexSnapshot {
   });
 }
 
+/// A bounded history-indexing result. The caller can render cached results
+/// immediately and continue indexing later without restarting at page one.
+class SharedMediaIndexProgress {
+  final SharedMediaIndexSnapshot snapshot;
+  final int pagesIndexed;
+  final bool cancelled;
+
+  const SharedMediaIndexProgress({
+    required this.snapshot,
+    required this.pagesIndexed,
+    this.cancelled = false,
+  });
+}
+
 class SharedMediaIndexService {
   SharedMediaIndexService._();
 
   static final SharedMediaIndexService instance = SharedMediaIndexService._();
   static const String boxName = 'xmo_shared_media_index';
+  final Set<String> _cancelledHistoryRuns = <String>{};
 
   static final RegExp _linkPattern = RegExp(
     r'(?:(?:https?|ftp)://[^\s<>()]+|(?:mailto:|tel:|sms:|geo:|magnet:|matrix:)[^\s<>()]+|www\.[^\s<>()]+|(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+(?:com|org|net|edu|gov|io|co|in|me|app|dev|ai|info|biz|xyz|site|online|store|tech|link|ly|to|tv|uk|us|ca|au|de|fr|jp|cn|ru|br|za|nl|it|es|se|no|fi|ch|be|at|dk|pl|ie|sg|ae|sa|qa|kw|om|bh|pk|bd|lk|np|id|my|th|vn|ph)(?:/[^\s<>()]*)?)',
@@ -103,13 +118,24 @@ class SharedMediaIndexService {
     return _snapshotFromState(state);
   }
 
-  Future<SharedMediaIndexSnapshot> scanFullHistory({
+  /// Indexes a small, persisted slice of room history.
+  ///
+  /// The Matrix timeline owns the pagination token. This service persists the
+  /// room checkpoint and the event IDs it has already consumed, so reopening
+  /// Shared Media continues from that point instead of rescanning every loaded
+  /// event and then fetching the complete history again.
+  Future<SharedMediaIndexProgress> indexNextHistoryBatch({
     required String ownerUserId,
     required Room room,
+    required Timeline timeline,
     int pageSize = 100,
+    int maxPages = 1,
+    String? runId,
     void Function(SharedMediaIndexSnapshot snapshot)? onSnapshot,
   }) async {
-    final timeline = await room.getTimeline();
+    final normalizedMaxPages = maxPages.clamp(1, 10);
+    final normalizedRunId = runId ?? _key(ownerUserId, room.id);
+    var pagesIndexed = 0;
     var snapshot = await indexTimeline(
       ownerUserId: ownerUserId,
       room: room,
@@ -118,22 +144,81 @@ class SharedMediaIndexService {
     );
     onSnapshot?.call(snapshot);
 
-    while (timeline.canRequestHistory) {
+    while (!snapshot.historyComplete && pagesIndexed < normalizedMaxPages) {
+      if (_cancelledHistoryRuns.contains(normalizedRunId)) {
+        return SharedMediaIndexProgress(
+          snapshot: snapshot,
+          pagesIndexed: pagesIndexed,
+          cancelled: true,
+        );
+      }
+
       final beforeEventCount = timeline.events.length;
-      await timeline.requestHistory(historyCount: pageSize);
-      final loadedAny = timeline.events.length > beforeEventCount;
+      var loaded = false;
+      Object? lastError;
+      for (var attempt = 0; attempt < 3 && !loaded; attempt++) {
+        try {
+          await timeline.requestHistory(historyCount: pageSize);
+          loaded = timeline.events.length > beforeEventCount;
+        } catch (error) {
+          lastError = error;
+          if (attempt < 2) {
+            await Future<void>.delayed(
+              Duration(milliseconds: 400 * (1 << attempt)),
+            );
+          }
+        }
+      }
+      if (!loaded && lastError != null) {
+        debugPrint('[SharedMediaIndex] History batch failed: $lastError');
+        break;
+      }
+
+      pagesIndexed++;
       snapshot = await indexTimeline(
         ownerUserId: ownerUserId,
         room: room,
         timeline: timeline,
-        historyComplete: !loadedAny || !timeline.canRequestHistory,
+        historyComplete: !loaded || !timeline.canRequestHistory,
       );
       onSnapshot?.call(snapshot);
-      if (!loadedAny) break;
+      if (!loaded) break;
       await Future<void>.delayed(Duration.zero);
     }
 
-    return snapshot;
+    return SharedMediaIndexProgress(
+      snapshot: snapshot,
+      pagesIndexed: pagesIndexed,
+    );
+  }
+
+  void cancelHistoryIndex({
+    required String ownerUserId,
+    required String roomId,
+    String? runId,
+  }) {
+    _cancelledHistoryRuns.add(runId ?? _key(ownerUserId, roomId));
+  }
+
+  Future<SharedMediaIndexSnapshot> scanFullHistory({
+    required String ownerUserId,
+    required Room room,
+    int pageSize = 100,
+    void Function(SharedMediaIndexSnapshot snapshot)? onSnapshot,
+  }) async {
+    final timeline = await room.getTimeline();
+    SharedMediaIndexProgress progress;
+    do {
+      progress = await indexNextHistoryBatch(
+        ownerUserId: ownerUserId,
+        room: room,
+        timeline: timeline,
+        pageSize: pageSize,
+        maxPages: 3,
+        onSnapshot: onSnapshot,
+      );
+    } while (!progress.snapshot.historyComplete && !progress.cancelled);
+    return progress.snapshot;
   }
 
   Map<String, dynamic> _stateFromRaw(Object? raw) {
@@ -143,6 +228,8 @@ class SharedMediaIndexService {
     return <String, dynamic>{
       'media': <String, dynamic>{},
       'links': <String, dynamic>{},
+      'indexedEventIds': <String, dynamic>{},
+      'pagination': <String, dynamic>{},
       'historyComplete': false,
     };
   }
@@ -150,17 +237,23 @@ class SharedMediaIndexService {
   void _indexEvents(Map<String, dynamic> state, List<Event> events) {
     final media = _nestedMap(state, 'media');
     final links = _nestedMap(state, 'links');
+    final indexedEventIds = _nestedMap(state, 'indexedEventIds');
+    final pagination = _nestedMap(state, 'pagination');
 
     for (final event in events) {
       if (event.type != EventTypes.Message) continue;
+      final alreadyIndexed = indexedEventIds.containsKey(event.eventId);
       if (event.redacted) {
         media.remove(event.eventId);
         links.removeWhere((_, value) {
           if (value is! Map) return false;
           return value['eventId'] == event.eventId;
         });
+        indexedEventIds[event.eventId] =
+            event.originServerTs.millisecondsSinceEpoch;
         continue;
       }
+      if (alreadyIndexed) continue;
 
       final msgType = event.messageType;
       if (_isMediaMessage(msgType)) {
@@ -179,6 +272,17 @@ class SharedMediaIndexService {
           ).toJson();
         }
       }
+      indexedEventIds[event.eventId] =
+          event.originServerTs.millisecondsSinceEpoch;
+    }
+
+    if (events.isNotEmpty) {
+      final oldest = events.last;
+      pagination['oldestEventId'] = oldest.eventId;
+      pagination['oldestTimestamp'] =
+          oldest.originServerTs.millisecondsSinceEpoch;
+      pagination['pagesIndexed'] =
+          ((pagination['pagesIndexed'] as num?)?.toInt() ?? 0) + 1;
     }
   }
 

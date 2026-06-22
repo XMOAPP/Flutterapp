@@ -49,8 +49,8 @@ class SavedMessagesInfoScreen extends StatelessWidget {
               itemBuilder: (context) => [
                 _menuItem('delete_all', Icons.delete_outline, 'Delete all',
                     Colors.redAccent),
-                _menuItem('view_messages', Icons.chat_bubble, 'View as messages',
-                    kWhite),
+                _menuItem('view_messages', Icons.chat_bubble,
+                    'View as messages', kWhite),
               ],
             ),
           ],
@@ -118,8 +118,7 @@ class SavedMessagesInfoScreen extends StatelessWidget {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child:
-                Text('Delete', style: GoogleFonts.inter(color: Colors.red)),
+            child: Text('Delete', style: GoogleFonts.inter(color: Colors.red)),
           ),
         ],
       ),

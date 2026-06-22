@@ -11,9 +11,8 @@ class OtpService {
 
   Uri get _otpBaseUri {
     final value = AppConfig.otpServerUrl.trim();
-    final normalized = value.endsWith('/')
-        ? value.substring(0, value.length - 1)
-        : value;
+    final normalized =
+        value.endsWith('/') ? value.substring(0, value.length - 1) : value;
     return Uri.parse(normalized);
   }
 

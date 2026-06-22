@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
@@ -62,7 +63,10 @@ class _VideoContentState extends State<VideoContent> {
   @override
   Widget build(BuildContext context) {
     final aspectRatio = _getAspectRatio();
-    final thumbSize = _displaySizeForRatio(aspectRatio);
+    final thumbSize = _displaySizeForRatio(
+      aspectRatio,
+      MediaQuery.sizeOf(context).width,
+    );
     final thumbWidth = thumbSize.width;
     final thumbHeight = thumbSize.height;
     _reportRenderedSize(thumbSize);
@@ -146,9 +150,15 @@ class _VideoContentState extends State<VideoContent> {
     );
   }
 
-  Size _displaySizeForRatio(double aspectRatio) {
-    const maxWidth = 292.0;
-    const maxHeight = 360.0;
+  Size _displaySizeForRatio(double aspectRatio, double screenWidth) {
+    final maxWidth = math.min(
+      292.0,
+      math.max(160.0, screenWidth * 0.76),
+    );
+    final maxHeight = math.min(
+      360.0,
+      math.max(140.0, maxWidth * 1.23),
+    );
     const minReadableHeight = 96.0;
 
     final ratio =
@@ -175,7 +185,7 @@ class _VideoContentState extends State<VideoContent> {
 
     if (height < minReadableHeight) {
       height = minReadableHeight;
-      width = (height * ratio).clamp(140.0, maxWidth);
+      width = (height * ratio).clamp(140.0, maxWidth).toDouble();
     }
 
     return Size(width, height);

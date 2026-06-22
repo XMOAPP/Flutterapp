@@ -64,6 +64,8 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
   Timeline? _sharedTimeline;
   bool _loading = true;
   bool _indexingHistory = false;
+  String? _mediaIndexRunId;
+  String? _mediaIndexOwnerUserId;
 
   @override
   void initState() {
@@ -121,22 +123,17 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
         });
       }
 
-      while (!snapshot.historyComplete && timeline.canRequestHistory) {
-        final beforeEventCount = timeline.events.length;
-        await timeline.requestHistory(historyCount: 100);
-        final loadedAny = timeline.events.length > beforeEventCount;
-        snapshot = await _indexService.indexTimeline(
+      if (!snapshot.historyComplete && timeline.canRequestHistory) {
+        final runId =
+            '$ownerUserId:${widget.room.id}:${DateTime.now().microsecondsSinceEpoch}';
+        _mediaIndexOwnerUserId = ownerUserId;
+        _mediaIndexRunId = runId;
+        unawaited(_continueHistoryIndexing(
           ownerUserId: ownerUserId,
-          room: widget.room,
           timeline: timeline,
-          historyComplete: !loadedAny || !timeline.canRequestHistory,
-        );
-        _applyIndexSnapshot(snapshot);
-        if (!loadedAny) break;
-        await Future<void>.delayed(Duration.zero);
+          runId: runId,
+        ));
       }
-
-      if (mounted) setState(() => _indexingHistory = false);
     } catch (e) {
       debugPrint('[SharedMedia] Error loading media: $e');
       if (mounted) {
@@ -163,8 +160,44 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
 
   @override
   void dispose() {
+    final ownerUserId = _mediaIndexOwnerUserId;
+    if (ownerUserId != null && ownerUserId.isNotEmpty) {
+      _indexService.cancelHistoryIndex(
+        ownerUserId: ownerUserId,
+        roomId: widget.room.id,
+        runId: _mediaIndexRunId,
+      );
+    }
     _tabController.dispose();
     super.dispose();
+  }
+
+  Future<void> _continueHistoryIndexing({
+    required String ownerUserId,
+    required Timeline timeline,
+    required String runId,
+  }) async {
+    try {
+      while (mounted && _mediaIndexRunId == runId) {
+        final progress = await _indexService.indexNextHistoryBatch(
+          ownerUserId: ownerUserId,
+          room: widget.room,
+          timeline: timeline,
+          pageSize: 100,
+          maxPages: 2,
+          runId: runId,
+          onSnapshot: _applyIndexSnapshot,
+        );
+        if (progress.cancelled || progress.snapshot.historyComplete) break;
+        // Keep this cooperative: rendering and navigation stay responsive even
+        // for rooms with years of media history.
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+      }
+    } finally {
+      if (mounted && _mediaIndexRunId == runId) {
+        setState(() => _indexingHistory = false);
+      }
+    }
   }
 
   @override
@@ -351,8 +384,8 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
 
     return GridView.builder(
       padding: const EdgeInsets.all(8),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 160,
         crossAxisSpacing: 4,
         mainAxisSpacing: 4,
       ),

@@ -174,8 +174,8 @@ class _ForwardMessageSheetState extends State<_ForwardMessageSheet> {
                       ? null
                       : () {
                           final selectedRooms = widget.rooms
-                              .where((room) =>
-                                  _selectedRoomIds.contains(room.id))
+                              .where(
+                                  (room) => _selectedRoomIds.contains(room.id))
                               .toList();
                           Navigator.pop(context, selectedRooms);
                         },

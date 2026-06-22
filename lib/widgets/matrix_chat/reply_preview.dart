@@ -78,7 +78,7 @@ class ReplyPreview extends StatelessWidget {
 
   String _getMessagePreview() {
     final msgType = replyToEvent.messageType;
-    
+
     if (msgType == MessageTypes.Image) {
       return '📷 Photo';
     } else if (msgType == MessageTypes.Video) {
@@ -88,7 +88,7 @@ class ReplyPreview extends StatelessWidget {
     } else if (msgType == MessageTypes.File) {
       return '📎 File';
     }
-    
+
     return replyToEvent.body;
   }
 }

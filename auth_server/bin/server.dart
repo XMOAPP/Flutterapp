@@ -6,6 +6,11 @@ import 'package:googleapis_auth/auth_io.dart';
 import 'package:mailer/mailer.dart';
 import 'package:mailer/smtp_server.dart';
 
+import 'package:xmo_auth_server/src/endpoint_modules.dart';
+import 'package:xmo_auth_server/src/health_status.dart';
+import 'package:xmo_auth_server/src/request_guard.dart';
+import 'package:xmo_auth_server/src/structured_logger.dart';
+
 final String _gmail = Platform.environment['XMO_GMAIL'] ?? '';
 final String _gmailAppPassword =
     Platform.environment['XMO_GMAIL_APP_PASSWORD'] ?? '';
@@ -26,6 +31,11 @@ final String _firebaseProjectId =
 
 final _otpStore = <String, _OtpRecord>{};
 final _random = Random.secure();
+final _rateLimiter = RequestRateLimiter();
+const _logger = StructuredLogger();
+const _otpEndpoints = OtpEndpointModule(send: _sendOtp, verify: _verifyOtp);
+const _donationEndpoints = DonationEndpointModule(_createDonationPayment);
+const _pushEndpoints = PushGatewayEndpointModule(_handleMatrixPush);
 
 const _otpTtl = Duration(minutes: 5);
 const _maxAttempts = 5;
@@ -48,68 +58,81 @@ Future<void> main() async {
 }
 
 Future<void> _handleRequest(HttpRequest request) async {
+  final stopwatch = Stopwatch()..start();
   _setCorsHeaders(request.response);
 
-  if (request.method == 'OPTIONS') {
-    request.response.statusCode = HttpStatus.noContent;
-    await request.response.close();
-    return;
-  }
-
   try {
+    if (request.method == 'OPTIONS') {
+      request.response.statusCode = HttpStatus.noContent;
+      await request.response.close();
+      return;
+    }
+
+    if (request.method == 'POST' && !_rateLimiter.allow(request)) {
+      await _json(request, HttpStatus.tooManyRequests, {
+        'error': 'Too many requests. Please try again shortly.',
+      });
+      return;
+    }
+
     if (request.method == 'GET' && request.uri.path == '/health') {
-      await _json(request, HttpStatus.ok, {'ok': true});
+      await _json(
+        request,
+        HttpStatus.ok,
+        buildHealthStatus(
+          emailConfigured: _gmail.isNotEmpty && _gmailAppPassword.isNotEmpty,
+          donationConfigured: _thirdwebSecretKey.isNotEmpty &&
+              _donationRecipientAddress.isNotEmpty,
+          pushConfigured: _firebaseServiceAccountJson.isNotEmpty ||
+              _firebaseServiceAccountBase64.isNotEmpty ||
+              _firebaseServiceAccountFile.isNotEmpty,
+        ),
+      );
       return;
     }
 
-    if (request.method == 'POST' && _isSendPath(request.uri.path)) {
-      await _sendOtp(request);
+    if (request.method == 'POST' &&
+        _otpEndpoints.handlesSend(request.uri.path)) {
+      await _otpEndpoints.send(request);
       return;
     }
 
-    if (request.method == 'POST' && _isVerifyPath(request.uri.path)) {
-      await _verifyOtp(request);
+    if (request.method == 'POST' &&
+        _otpEndpoints.handlesVerify(request.uri.path)) {
+      await _otpEndpoints.verify(request);
       return;
     }
 
-    if (request.method == 'POST' && _isDonationPath(request.uri.path)) {
-      await _createDonationPayment(request);
+    if (request.method == 'POST' &&
+        _donationEndpoints.handles(request.uri.path)) {
+      await _donationEndpoints.create(request);
       return;
     }
 
-    if (request.method == 'POST' && _isPushPath(request.uri.path)) {
-      await _handleMatrixPush(request);
+    if (request.method == 'POST' && _pushEndpoints.handles(request.uri.path)) {
+      await _pushEndpoints.forward(request);
       return;
     }
 
     await _json(request, HttpStatus.notFound, {'error': 'Not found'});
+  } on _BadRequestException catch (error) {
+    await _json(request, HttpStatus.badRequest, {'error': error.message});
   } catch (e, st) {
-    stderr.writeln('Request failed: $e\n$st');
+    _logger.error('request_failed', e, st);
     await _json(
       request,
       HttpStatus.internalServerError,
       {'error': 'Internal server error'},
     );
+  } finally {
+    stopwatch.stop();
+    _logger.request(
+      request: request,
+      statusCode: request.response.statusCode,
+      elapsed: stopwatch.elapsed,
+    );
   }
 }
-
-bool _isSendPath(String path) =>
-    path == '/' || path == '/send' || path == '/auth/otp/send';
-
-bool _isVerifyPath(String path) =>
-    path == '/verify' || path == '/auth/otp/verify';
-
-bool _isDonationPath(String path) =>
-    path == '/donations/create' ||
-    path == '/auth/donations/create' ||
-    path == '/auth/otp/donations/create';
-
-bool _isPushPath(String path) =>
-    path == '/push' ||
-    path == '/auth/otp/push' ||
-    path == '/_matrix/push/v1/notify' ||
-    path == '/auth/push/_matrix/push/v1/notify' ||
-    path == '/auth/otp/_matrix/push/v1/notify';
 
 Future<void> _sendOtp(HttpRequest request) async {
   final body = await _readJson(request);
@@ -903,9 +926,22 @@ Future<_ThirdwebResponse> _postThirdwebPayment({
 }
 
 Future<Map<String, dynamic>> _readJson(HttpRequest request) async {
+  const maxRequestBytes = 1024 * 1024;
+  final contentLength = request.contentLength;
+  if (contentLength > maxRequestBytes) {
+    throw const _BadRequestException('Request body is too large');
+  }
   final content = await utf8.decoder.bind(request).join();
   if (content.trim().isEmpty) return {};
-  return jsonDecode(content) as Map<String, dynamic>;
+  try {
+    final decoded = jsonDecode(content);
+    if (decoded is! Map) {
+      throw const _BadRequestException('JSON object expected');
+    }
+    return decoded.map((key, value) => MapEntry(key.toString(), value));
+  } on FormatException {
+    throw const _BadRequestException('Invalid JSON request body');
+  }
 }
 
 Map<String, dynamic> _decodeJsonMap(String body) {
@@ -1002,6 +1038,11 @@ class _OtpRecord {
     required this.code,
     required this.expiresAt,
   });
+}
+
+class _BadRequestException implements Exception {
+  const _BadRequestException(this.message);
+  final String message;
 }
 
 class _ThirdwebResponse {

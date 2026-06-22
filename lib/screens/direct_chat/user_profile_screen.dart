@@ -214,7 +214,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Unable to start ${video ? 'video' : 'voice'} call: $e'),
+          content:
+              Text('Unable to start ${video ? 'video' : 'voice'} call: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -364,32 +365,32 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           ],
         ),
         body: _loading
-          ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
-          : _profile == null
-              ? Center(
-                  child: Text(
-                    'Failed to load profile',
-                    style: GoogleFonts.inter(color: kLightGrey),
+            ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
+            : _profile == null
+                ? Center(
+                    child: Text(
+                      'Failed to load profile',
+                      style: GoogleFonts.inter(color: kLightGrey),
+                    ),
+                  )
+                : SingleChildScrollView(
+                    child: Column(
+                      children: [
+                        // Profile Header
+                        _buildProfileHeader(),
+                        const SizedBox(height: 24),
+
+                        // Actions
+                        _buildActionsSection(),
+                        const SizedBox(height: 8),
+
+                        // Shared Media
+                        _buildSharedMediaSection(),
+
+                        const SizedBox(height: 80),
+                      ],
+                    ),
                   ),
-                )
-              : SingleChildScrollView(
-                  child: Column(
-                    children: [
-                      // Profile Header
-                      _buildProfileHeader(),
-                      const SizedBox(height: 24),
-
-                      // Actions
-                      _buildActionsSection(),
-                      const SizedBox(height: 8),
-
-                      // Shared Media
-                      _buildSharedMediaSection(),
-
-                      const SizedBox(height: 80),
-                    ],
-                  ),
-                ),
       ),
     );
   }
@@ -428,9 +429,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         children: [
           Expanded(
             child: _buildActionButton(
-              icon: _isMuted
-                  ? Icons.notifications_off
-                  : Icons.notifications,
+              icon: _isMuted ? Icons.notifications_off : Icons.notifications,
               label: _isMuted ? 'Unmute' : 'Mute',
               onTap: _toggleMute,
             ),
@@ -452,13 +451,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             ),
           ),
           const SizedBox(width: 8),
-            Expanded(
-              child: _buildActionButton(
-                icon: Icons.message,
-                label: 'Message',
-                onTap: () => Navigator.pop(context),
-              ),
+          Expanded(
+            child: _buildActionButton(
+              icon: Icons.message,
+              label: 'Message',
+              onTap: () => Navigator.pop(context),
             ),
+          ),
         ],
       ),
     );

@@ -43,7 +43,7 @@ class MessageBubble extends StatelessWidget {
   String _formatTime(DateTime dt) {
     final hour = dt.hour;
     final minute = dt.minute.toString().padLeft(2, '0');
-    
+
     // Convert to 12-hour format with AM/PM
     if (hour == 0) {
       return '12:$minute AM';

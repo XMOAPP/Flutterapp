@@ -24,7 +24,7 @@ class SearchInChatScreen extends StatefulWidget {
 class _SearchInChatScreenState extends State<SearchInChatScreen> {
   final _searchController = TextEditingController();
   late DirectChatService _directChatService;
-  
+
   List<Event> _results = [];
   bool _searching = false;
   bool _hasSearched = false;
@@ -46,13 +46,13 @@ class _SearchInChatScreenState extends State<SearchInChatScreen> {
     }
 
     setState(() => _searching = true);
-    
+
     try {
       final results = await _directChatService.searchMessages(
         widget.room.id,
         query,
       );
-      
+
       if (mounted) {
         setState(() {
           _results = results;
@@ -89,107 +89,107 @@ class _SearchInChatScreenState extends State<SearchInChatScreen> {
       child: Scaffold(
         backgroundColor: kBlack,
         appBar: AppBar(
-        backgroundColor: kBlack,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: kWhite),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: TextField(
-          controller: _searchController,
-          autofocus: true,
-          style: GoogleFonts.inter(color: kWhite, fontSize: 16),
-          decoration: InputDecoration(
-            hintText: 'Search messages...',
-            hintStyle: GoogleFonts.inter(color: kLightGrey),
-            border: InputBorder.none,
-            suffixIcon: _searchController.text.isNotEmpty
-                ? IconButton(
-                    icon: const Icon(Icons.clear, color: kLightGrey),
-                    onPressed: () {
-                      _searchController.clear();
-                      _search('');
-                    },
-                  )
-                : null,
+          backgroundColor: kBlack,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: kWhite),
+            onPressed: () => Navigator.pop(context),
           ),
-          onChanged: (value) {
-            setState(() {}); // Update UI for clear button
-          },
-          onSubmitted: _search,
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search, color: kLimeGreen),
-            onPressed: () => _search(_searchController.text),
-          ),
-        ],
-      ),
-        body: _searching
-          ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
-          : !_hasSearched
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.search,
-                        color: kMediumGrey,
-                        size: 64,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Search for messages',
-                        style: GoogleFonts.inter(
-                          color: kLightGrey,
-                          fontSize: 16,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Enter a search term above',
-                        style: GoogleFonts.inter(
-                          color: kLightGrey,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              : _results.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.search_off,
-                            color: kMediumGrey,
-                            size: 64,
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'No results found',
-                            style: GoogleFonts.inter(
-                              color: kLightGrey,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Try a different search term',
-                            style: GoogleFonts.inter(
-                              color: kLightGrey,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
+          title: TextField(
+            controller: _searchController,
+            autofocus: true,
+            style: GoogleFonts.inter(color: kWhite, fontSize: 16),
+            decoration: InputDecoration(
+              hintText: 'Search messages...',
+              hintStyle: GoogleFonts.inter(color: kLightGrey),
+              border: InputBorder.none,
+              suffixIcon: _searchController.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear, color: kLightGrey),
+                      onPressed: () {
+                        _searchController.clear();
+                        _search('');
+                      },
                     )
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: _results.length,
-                      itemBuilder: (_, i) => _buildResultTile(_results[i]),
+                  : null,
+            ),
+            onChanged: (value) {
+              setState(() {}); // Update UI for clear button
+            },
+            onSubmitted: _search,
+          ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.search, color: kLimeGreen),
+              onPressed: () => _search(_searchController.text),
+            ),
+          ],
+        ),
+        body: _searching
+            ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
+            : !_hasSearched
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.search,
+                          color: kMediumGrey,
+                          size: 64,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Search for messages',
+                          style: GoogleFonts.inter(
+                            color: kLightGrey,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Enter a search term above',
+                          style: GoogleFonts.inter(
+                            color: kLightGrey,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ),
+                  )
+                : _results.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.search_off,
+                              color: kMediumGrey,
+                              size: 64,
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'No results found',
+                              style: GoogleFonts.inter(
+                                color: kLightGrey,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Try a different search term',
+                              style: GoogleFonts.inter(
+                                color: kLightGrey,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: _results.length,
+                        itemBuilder: (_, i) => _buildResultTile(_results[i]),
+                      ),
       ),
     );
   }
@@ -198,7 +198,7 @@ class _SearchInChatScreenState extends State<SearchInChatScreen> {
     final senderName = MatrixService.cleanName(event.senderId);
     final time = _formatTime(event.originServerTs);
     final query = _searchController.text.toLowerCase();
-    
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -249,10 +249,10 @@ class _SearchInChatScreenState extends State<SearchInChatScreen> {
     final lowerText = text.toLowerCase();
     final lowerQuery = query.toLowerCase();
     final spans = <TextSpan>[];
-    
+
     int start = 0;
     int index = lowerText.indexOf(lowerQuery);
-    
+
     while (index != -1) {
       // Add text before match
       if (index > start) {
@@ -261,7 +261,7 @@ class _SearchInChatScreenState extends State<SearchInChatScreen> {
           style: GoogleFonts.inter(color: kWhite),
         ));
       }
-      
+
       // Add highlighted match
       spans.add(TextSpan(
         text: text.substring(index, index + query.length),
@@ -271,11 +271,11 @@ class _SearchInChatScreenState extends State<SearchInChatScreen> {
           fontWeight: FontWeight.bold,
         ),
       ));
-      
+
       start = index + query.length;
       index = lowerText.indexOf(lowerQuery, start);
     }
-    
+
     // Add remaining text
     if (start < text.length) {
       spans.add(TextSpan(

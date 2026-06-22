@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -157,7 +158,10 @@ class TextOrFileMessageBubble extends StatelessWidget {
           // File message
           else if (isFile)
             SizedBox(
-              width: 238,
+              width: math.min(
+                238.0,
+                math.max(180.0, MediaQuery.sizeOf(context).width * 0.66),
+              ),
               child: Stack(
                 children: [
                   Padding(

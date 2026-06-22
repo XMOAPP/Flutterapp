@@ -15,6 +15,7 @@ class TransferJob {
   final String id;
   final TransferDirection direction;
   final TransferKind kind;
+  final String ownerUserId;
   final String roomId;
   final String fileName;
   final String mimeType;
@@ -28,11 +29,13 @@ class TransferJob {
   final DateTime createdAt;
   final DateTime updatedAt;
   final String? error;
+  final DateTime? nextRetryAt;
 
   const TransferJob({
     required this.id,
     required this.direction,
     required this.kind,
+    required this.ownerUserId,
     required this.roomId,
     required this.fileName,
     required this.mimeType,
@@ -46,6 +49,7 @@ class TransferJob {
     this.attempts = 0,
     this.maxAttempts = 3,
     this.error,
+    this.nextRetryAt,
   });
 
   double? get progress {
@@ -61,9 +65,15 @@ class TransferJob {
       status == TransferStatus.running ||
       status == TransferStatus.paused;
 
+  bool get shouldAutoRetry =>
+      status == TransferStatus.failed &&
+      attempts < maxAttempts &&
+      nextRetryAt != null;
+
   TransferJob copyWith({
     TransferDirection? direction,
     TransferKind? kind,
+    String? ownerUserId,
     String? roomId,
     String? fileName,
     String? mimeType,
@@ -77,12 +87,15 @@ class TransferJob {
     DateTime? createdAt,
     DateTime? updatedAt,
     String? error,
+    DateTime? nextRetryAt,
     bool clearError = false,
+    bool clearNextRetryAt = false,
   }) {
     return TransferJob(
       id: id,
       direction: direction ?? this.direction,
       kind: kind ?? this.kind,
+      ownerUserId: ownerUserId ?? this.ownerUserId,
       roomId: roomId ?? this.roomId,
       fileName: fileName ?? this.fileName,
       mimeType: mimeType ?? this.mimeType,
@@ -96,6 +109,7 @@ class TransferJob {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
       error: clearError ? null : error ?? this.error,
+      nextRetryAt: clearNextRetryAt ? null : nextRetryAt ?? this.nextRetryAt,
     );
   }
 
@@ -104,6 +118,7 @@ class TransferJob {
       'id': id,
       'direction': direction.name,
       'kind': kind.name,
+      'ownerUserId': ownerUserId,
       'roomId': roomId,
       'fileName': fileName,
       'mimeType': mimeType,
@@ -117,6 +132,7 @@ class TransferJob {
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
       'error': error,
+      'nextRetryAt': nextRetryAt?.toIso8601String(),
     };
   }
 
@@ -135,6 +151,7 @@ class TransferJob {
         TransferDirection.upload,
       ),
       kind: enumByName(TransferKind.values, json['kind'], TransferKind.file),
+      ownerUserId: json['ownerUserId'] as String? ?? 'legacy',
       roomId: json['roomId'] as String,
       fileName: json['fileName'] as String,
       mimeType: json['mimeType'] as String,
@@ -154,6 +171,7 @@ class TransferJob {
       updatedAt: DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
           DateTime.now(),
       error: json['error'] as String?,
+      nextRetryAt: DateTime.tryParse(json['nextRetryAt'] as String? ?? ''),
     );
   }
 }
@@ -165,6 +183,7 @@ class TransferQueueService {
   static const String boxName = 'xmo_transfer_queue';
 
   Box? _box;
+  String? _ownerUserId;
   final Map<String, TransferJob> _jobs = {};
   final Set<String> _cancelledIds = {};
   final _controller = StreamController<List<TransferJob>>.broadcast();
@@ -180,11 +199,25 @@ class TransferQueueService {
     _loadPersistedJobs();
   }
 
+  /// Jobs are private to the Matrix account that created them. A device can
+  /// legitimately hold several account databases over time, so a global queue
+  /// must never resume another user's pending upload.
+  Future<void> setCurrentUser(String? userId) async {
+    await init();
+    final normalized = userId?.trim();
+    if (_ownerUserId == normalized) return;
+    _ownerUserId = normalized;
+    _loadPersistedJobs();
+  }
+
   List<TransferJob> jobsForRoom(String roomId) {
     return _jobs.values
-        .where((job) => job.roomId == roomId)
+        .where((job) =>
+            job.roomId == roomId && job.ownerUserId == _activeOwnerUserId)
         .toList(growable: false);
   }
+
+  String get _activeOwnerUserId => _ownerUserId ?? 'legacy';
 
   Future<TransferJob> createUploadJob({
     required String roomId,
@@ -212,6 +245,7 @@ class TransferQueueService {
       id: jobId,
       direction: TransferDirection.upload,
       kind: kind,
+      ownerUserId: _activeOwnerUserId,
       roomId: roomId,
       fileName: fileName,
       mimeType: mimeType,
@@ -241,6 +275,7 @@ class TransferQueueService {
       id: jobId,
       direction: TransferDirection.download,
       kind: kind,
+      ownerUserId: _activeOwnerUserId,
       roomId: roomId,
       fileName: fileName,
       mimeType: mimeType,
@@ -276,6 +311,7 @@ class TransferQueueService {
         attempts: job.attempts + 1,
         uploadedBytes: job.uploadedBytes,
         clearError: true,
+        clearNextRetryAt: true,
       ),
     );
   }
@@ -312,9 +348,14 @@ class TransferQueueService {
   Future<void> markFailed(String id, Object error) async {
     final job = _jobs[id];
     if (job == null) return;
+    final nextAttempt = job.attempts;
+    final retryAt = nextAttempt < job.maxAttempts
+        ? DateTime.now().add(_retryDelay(nextAttempt - 1))
+        : null;
     await _save(job.copyWith(
       status: TransferStatus.failed,
       error: _shortError(error),
+      nextRetryAt: retryAt,
     ));
   }
 
@@ -322,7 +363,10 @@ class TransferQueueService {
     _cancelledIds.add(id);
     final job = _jobs[id];
     if (job == null) return;
-    await _save(job.copyWith(status: TransferStatus.cancelled));
+    await _save(job.copyWith(
+      status: TransferStatus.cancelled,
+      clearNextRetryAt: true,
+    ));
   }
 
   bool isCancelled(String id) => _cancelledIds.contains(id);
@@ -335,12 +379,13 @@ class TransferQueueService {
       status: TransferStatus.queued,
       uploadedBytes: 0,
       clearError: true,
+      clearNextRetryAt: true,
     ));
   }
 
   Future<void> remove(String id) async {
     final job = _jobs.remove(id);
-    await _box?.delete(id);
+    await _box?.delete(_storageKey(id, job?.ownerUserId));
     if (job != null) await _deletePayloadFiles(job);
     _emit();
   }
@@ -351,7 +396,7 @@ class TransferQueueService {
   }) async {
     _jobs[job.id] = job;
     if (persistImmediately) {
-      await _box?.put(job.id, job.toJson());
+      await _box?.put(_storageKey(job.id, job.ownerUserId), job.toJson());
     }
     _emit();
   }
@@ -363,6 +408,7 @@ class TransferQueueService {
       if (raw is Map) {
         try {
           final job = TransferJob.fromJson(raw);
+          if (job.ownerUserId != _activeOwnerUserId) continue;
           if (job.status == TransferStatus.running ||
               job.status == TransferStatus.paused) {
             _jobs[job.id] = job.copyWith(status: TransferStatus.queued);
@@ -376,6 +422,22 @@ class TransferQueueService {
     }
     _emit();
   }
+
+  DateTime? retryAtFor(String id) => _jobs[id]?.nextRetryAt;
+
+  bool shouldAutoRetry(String id) {
+    final job = _jobs[id];
+    return job?.shouldAutoRetry == true;
+  }
+
+  Duration _retryDelay(int attempts) {
+    // 2s, 4s, 8s, capped to keep an app restart from creating a long stall.
+    final seconds = 2 * (1 << attempts.clamp(0, 2));
+    return Duration(seconds: seconds.clamp(2, 8));
+  }
+
+  String _storageKey(String id, String? ownerUserId) =>
+      '${ownerUserId ?? 'legacy'}::$id';
 
   Future<io.Directory> _queueDir() async {
     final root = await getTemporaryDirectory();

@@ -127,45 +127,54 @@ class StoriesView extends StatelessWidget {
               ),
               SliverPadding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                sliver: SliverGrid(
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    childAspectRatio: 0.65,
-                    crossAxisSpacing: 8,
-                    mainAxisSpacing: 8,
-                  ),
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      if (hasMyStories && index == 0) {
-                        // My stories grid item
-                        return _buildStoryGridItem(
-                          context: context,
-                          userStories: UserStories(
-                            userId: myUserId,
-                            userName: matrixProvider.displayName ?? 'Your',
-                            userAvatarUrl: matrixProvider.avatarUrl,
-                            stories: storyProvider.myStories,
-                          ),
-                          isMyStory: true,
-                          onTap: () => _openMyStory(
-                              context, storyProvider, contactStories),
-                        );
-                      }
+                sliver: SliverLayoutBuilder(
+                  builder: (context, constraints) {
+                    final crossAxisCount =
+                        (constraints.crossAxisExtent / 120).floor().clamp(3, 4);
+                    return SliverGrid(
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        childAspectRatio: 0.65,
+                        crossAxisSpacing: 8,
+                        mainAxisSpacing: 8,
+                      ),
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          if (hasMyStories && index == 0) {
+                            // My stories grid item
+                            return _buildStoryGridItem(
+                              context: context,
+                              userStories: UserStories(
+                                userId: myUserId,
+                                userName: matrixProvider.displayName ?? 'Your',
+                                userAvatarUrl: matrixProvider.avatarUrl,
+                                stories: storyProvider.myStories,
+                              ),
+                              isMyStory: true,
+                              onTap: () => _openMyStory(
+                                  context, storyProvider, contactStories),
+                            );
+                          }
 
-                      final contactIndex = hasMyStories ? index - 1 : index;
-                      if (contactIndex >= contactStories.length) return null;
+                          final contactIndex = hasMyStories ? index - 1 : index;
+                          if (contactIndex >= contactStories.length) {
+                            return null;
+                          }
 
-                      final userStories = contactStories[contactIndex];
-                      return _buildStoryGridItem(
-                        context: context,
-                        userStories: userStories,
-                        isMyStory: false,
-                        onTap: () => _openStoryViewer(
-                            context, contactIndex, contactStories),
-                      );
-                    },
-                    childCount: (hasMyStories ? 1 : 0) + contactStories.length,
-                  ),
+                          final userStories = contactStories[contactIndex];
+                          return _buildStoryGridItem(
+                            context: context,
+                            userStories: userStories,
+                            isMyStory: false,
+                            onTap: () => _openStoryViewer(
+                                context, contactIndex, contactStories),
+                          );
+                        },
+                        childCount:
+                            (hasMyStories ? 1 : 0) + contactStories.length,
+                      ),
+                    );
+                  },
                 ),
               ),
             ] else
@@ -367,15 +376,16 @@ class StoriesView extends StatelessWidget {
       return Consumer<MatrixProvider>(
         builder: (context, matrixProvider, _) {
           // Convert MXC URL to HTTP URL with thumbnail size
-          final httpUrl = matrixProvider.service.getHttpUrl(
+          final mediaRequest = matrixProvider.service.getMediaRequest(
             story.mediaUrl,
             width: 400,
             height: 600,
           );
 
-          if (httpUrl != null) {
+          if (mediaRequest != null) {
             return Image.network(
-              httpUrl.toString(),
+              mediaRequest.uri.toString(),
+              headers: mediaRequest.headers,
               fit: BoxFit.cover,
               errorBuilder: (_, __, ___) => _buildTextPreview(story),
               loadingBuilder: (context, child, loadingProgress) {

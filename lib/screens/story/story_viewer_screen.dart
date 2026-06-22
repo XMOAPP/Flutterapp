@@ -552,12 +552,14 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   Widget _buildStoryContent(Story story) {
     if (_isVideoStory(story)) {
       final matrixProvider = context.read<MatrixProvider>();
-      final httpUrl = matrixProvider.service.getHttpUrl(story.mediaUrl);
+      final mediaRequest =
+          matrixProvider.service.getMediaRequest(story.mediaUrl);
 
-      if (httpUrl != null) {
+      if (mediaRequest != null) {
         return StoryVideoPlayer.url(
           key: ValueKey('${story.id}:${story.mediaUrl}'),
-          url: httpUrl.toString(),
+          url: mediaRequest.uri.toString(),
+          httpHeaders: mediaRequest.headers,
           mimeType: story.mediaMimeType ?? 'video/mp4',
           looping: false,
           paused: _isPaused,
@@ -579,12 +581,14 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     if (_isImageStory(story)) {
       // Convert MXC URL to HTTP URL
       final matrixProvider = context.read<MatrixProvider>();
-      final httpUrl = matrixProvider.service.getHttpUrl(story.mediaUrl);
+      final mediaRequest =
+          matrixProvider.service.getMediaRequest(story.mediaUrl);
 
-      if (httpUrl != null) {
+      if (mediaRequest != null) {
         return Center(
           child: Image.network(
-            httpUrl.toString(),
+            mediaRequest.uri.toString(),
+            headers: mediaRequest.headers,
             fit: BoxFit.contain,
             loadingBuilder: (context, child, loadingProgress) {
               if (loadingProgress == null) return child;

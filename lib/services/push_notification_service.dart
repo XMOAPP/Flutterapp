@@ -13,6 +13,45 @@ import 'app_settings_service.dart';
 import 'matrix_service.dart';
 import 'voip_service.dart';
 
+/// The normalized routing information carried by an XMO push notification.
+/// Matrix gateways have historically used both snake_case and camelCase keys,
+/// so this keeps every notification entry point on the same contract.
+class PushNotificationRoute {
+  const PushNotificationRoute(this.data);
+
+  final Map<String, String> data;
+
+  String? get roomId => _firstValue(const ['room_id', 'roomId', 'room']);
+  String? get eventId => _firstValue(const ['event_id', 'eventId']);
+  String? get callId =>
+      _firstValue(const ['call_id', 'm.call.id', 'group_call_id']);
+  String? get callType => _firstValue(const ['call_type', 'm.type']);
+  String? get sender =>
+      _firstValue(const ['sender_display_name', 'sender', 'room_name']);
+
+  bool get isCall {
+    if (data['xmo_push_type']?.toLowerCase() == 'call') return true;
+    final eventType = (data['event_type'] ?? data['type'] ?? '').toLowerCase();
+    if (eventType.startsWith('m.call.') ||
+        eventType == 'org.matrix.msc3401.call' ||
+        eventType == 'org.matrix.msc3401.call.member') {
+      return true;
+    }
+    return callId != null &&
+        (data['group_call'] == 'true' ||
+            data.containsKey('offer') ||
+            data.containsKey('answer'));
+  }
+
+  String? _firstValue(List<String> keys) {
+    for (final key in keys) {
+      final value = data[key]?.trim();
+      if (value != null && value.isNotEmpty) return value;
+    }
+    return null;
+  }
+}
+
 @pragma('vm:entry-point')
 Future<void> xmoFirebaseMessagingBackgroundHandler(
     RemoteMessage message) async {
@@ -32,17 +71,17 @@ class PushNotificationService {
   PushNotificationService._internal();
 
   static const _messagesChannel = AndroidNotificationChannel(
-    'xmo_messages',
+    'xmo_messages_v2',
     'XMO messages',
     description: 'Message notifications from XMO chats',
-    importance: Importance.high,
+    importance: Importance.defaultImportance,
   );
 
   static const _callsChannel = AndroidNotificationChannel(
-    'xmo_call_alerts',
+    'xmo_call_alerts_v2',
     'XMO calls',
     description: 'Incoming voice and video call notifications from XMO',
-    importance: Importance.max,
+    importance: Importance.high,
   );
 
   final FirebaseMessaging _messaging = FirebaseMessaging.instance;
@@ -54,15 +93,27 @@ class PushNotificationService {
   static const EventChannel _nativeCallEvents = EventChannel(
     'com.xmo.xmo/call_notification_events',
   );
+  static const MethodChannel _nativeNotificationMethods = MethodChannel(
+    'com.xmo.xmo/notification_navigation',
+  );
+  static const EventChannel _nativeNotificationEvents = EventChannel(
+    'com.xmo.xmo/notification_navigation_events',
+  );
 
   MatrixService? _matrixService;
   bool _initialized = false;
   bool _localNotificationsReady = false;
   StreamSubscription? _nativeCallActionsSub;
+  StreamSubscription? _nativeNotificationActionsSub;
   String? _registeredToken;
+  Future<void> Function(PushNotificationRoute route)? _onOpenChat;
 
-  Future<void> init({required MatrixService matrixService}) async {
+  Future<void> init({
+    required MatrixService matrixService,
+    Future<void> Function(PushNotificationRoute route)? onOpenChat,
+  }) async {
     _matrixService = matrixService;
+    _onOpenChat = onOpenChat ?? _onOpenChat;
     if (_initialized) {
       await registerCurrentUser();
       return;
@@ -89,6 +140,8 @@ class PushNotificationService {
         registerCurrentUser();
       });
       await _initNativeCallActions();
+      await _initNativeNotificationNavigation();
+      await _handleInitialNotificationLaunch();
 
       await registerCurrentUser();
     } catch (e) {
@@ -129,6 +182,82 @@ class PushNotificationService {
     );
     debugPrint('[PushNotificationService] Native call action: $normalized');
     await VoipService().handleNativeCallNotificationAction(normalized);
+  }
+
+  Future<void> _initNativeNotificationNavigation() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    if (_nativeNotificationActionsSub != null) return;
+
+    try {
+      final initial = await _nativeNotificationMethods.invokeMethod<dynamic>(
+        'initialNotificationPayload',
+      );
+      if (initial is Map) {
+        unawaited(_routePayload(_normalizePayload(initial)));
+      }
+    } catch (e) {
+      debugPrint(
+        '[PushNotificationService] Native notification navigation init failed: $e',
+      );
+    }
+
+    _nativeNotificationActionsSub =
+        _nativeNotificationEvents.receiveBroadcastStream().listen((event) {
+      if (event is Map) {
+        unawaited(_routePayload(_normalizePayload(event)));
+      }
+    }, onError: (Object e) {
+      debugPrint(
+        '[PushNotificationService] Native notification navigation stream failed: $e',
+      );
+    });
+  }
+
+  Future<void> _handleInitialNotificationLaunch() async {
+    final remote = await _messaging.getInitialMessage();
+    if (remote != null) {
+      unawaited(_routePayload(PushNotificationRoute(remote.data.map(
+        (key, value) => MapEntry(key, value.toString()),
+      ))));
+    }
+
+    final launchDetails =
+        await _localNotifications.getNotificationAppLaunchDetails();
+    final response = launchDetails?.notificationResponse;
+    if (launchDetails?.didNotificationLaunchApp == true &&
+        response?.payload != null) {
+      _handleNotificationResponse(response!);
+    }
+  }
+
+  PushNotificationRoute _normalizePayload(Map<dynamic, dynamic> payload) {
+    return PushNotificationRoute(payload.map(
+      (key, value) => MapEntry(key.toString(), value?.toString() ?? ''),
+    ));
+  }
+
+  Future<void> _routePayload(
+    PushNotificationRoute route, {
+    String action = 'open',
+  }) async {
+    if (route.isCall) {
+      final payload = <String, String>{...route.data, 'xmo_action': action};
+      await VoipService().handleNativeCallNotificationAction(payload);
+      return;
+    }
+
+    final roomId = route.roomId;
+    if (roomId == null || roomId.isEmpty) {
+      debugPrint(
+          '[PushNotificationService] Notification has no room id: ${route.data}');
+      return;
+    }
+    final handler = _onOpenChat;
+    if (handler == null) {
+      debugPrint('[PushNotificationService] Chat navigation is not ready yet.');
+      return;
+    }
+    await handler(route);
   }
 
   Future<void> registerCurrentUser() async {
@@ -296,12 +425,27 @@ class PushNotificationService {
           isCall ? _callsChannel.name : _messagesChannel.name,
           channelDescription:
               isCall ? _callsChannel.description : _messagesChannel.description,
-          importance: isCall ? Importance.max : Importance.high,
-          priority: isCall ? Priority.max : Priority.high,
+          importance: isCall ? Importance.high : Importance.defaultImportance,
+          priority: isCall ? Priority.high : Priority.defaultPriority,
           category: isCall
               ? AndroidNotificationCategory.call
               : AndroidNotificationCategory.message,
           visibility: NotificationVisibility.public,
+          actions: isCall
+              ? const <AndroidNotificationAction>[
+                  AndroidNotificationAction(
+                    'decline',
+                    'Decline',
+                    cancelNotification: true,
+                  ),
+                  AndroidNotificationAction(
+                    'answer',
+                    'Answer',
+                    showsUserInterface: true,
+                    cancelNotification: true,
+                  ),
+                ]
+              : null,
         ),
         iOS: const DarwinNotificationDetails(
           presentAlert: true,
@@ -317,6 +461,9 @@ class PushNotificationService {
     debugPrint(
       '[PushNotificationService] Notification opened: ${message.data}',
     );
+    unawaited(_routePayload(PushNotificationRoute(message.data.map(
+      (key, value) => MapEntry(key, value.toString()),
+    ))));
   }
 
   void _handleNotificationResponse(NotificationResponse response) {
@@ -324,6 +471,22 @@ class PushNotificationService {
       '[PushNotificationService] Local notification opened: '
       '${response.payload}',
     );
+    final rawPayload = response.payload;
+    if (rawPayload == null || rawPayload.isEmpty) return;
+    try {
+      final decoded = jsonDecode(rawPayload);
+      if (decoded is! Map) return;
+      unawaited(
+        _routePayload(
+          _normalizePayload(decoded),
+          action: (response.actionId?.isEmpty ?? true)
+              ? 'open'
+              : response.actionId!,
+        ),
+      );
+    } catch (e) {
+      debugPrint('[PushNotificationService] Invalid notification payload: $e');
+    }
   }
 
   bool _looksLikeCall(RemoteMessage message) {

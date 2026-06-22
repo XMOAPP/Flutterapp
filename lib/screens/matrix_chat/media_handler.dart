@@ -77,23 +77,10 @@ class MediaHandler {
 
   /// Creates authenticated download callback for Matrix media
   Future<Uint8List> Function(Uri) authenticatedDownload() {
-    final token = matrixProvider.service.accessToken;
     return (Uri url) async {
-      var newUrl = url;
-      final path = url.path;
-      if (path.contains('/_matrix/media/')) {
-        final newPath = path.replaceFirst(
-            '/_matrix/media/v3/', '/_matrix/client/v1/media/');
-        final queryParams = Map<String, String>.from(url.queryParameters);
-        if (token != null) queryParams['access_token'] = token;
-        newUrl = url.replace(path: newPath, queryParameters: queryParams);
-      } else if (token != null) {
-        final queryParams = Map<String, String>.from(url.queryParameters);
-        queryParams['access_token'] = token;
-        newUrl = url.replace(queryParameters: queryParams);
-      }
-      debugPrint('[MediaDownload] Fetching: $newUrl');
-      final response = await http.get(newUrl);
+      final request = matrixProvider.service.getMediaRequestForUrl(url);
+      debugPrint('[MediaDownload] Fetching: ${request.uri}');
+      final response = await http.get(request.uri, headers: request.headers);
       if (response.statusCode != 200) {
         throw Exception(
             'Media download failed: ${response.statusCode} ${response.reasonPhrase}');
@@ -111,10 +98,9 @@ class MediaHandler {
     void Function(int downloadedBytes, int totalBytes)? onProgress,
     bool Function()? isCancelled,
   }) {
-    final token = matrixProvider.service.accessToken;
     return (Uri url) async {
-      final newUrl = _authenticatedMediaUrl(url, token);
-      debugPrint('[MediaDownload] Streaming: $newUrl');
+      final mediaRequest = matrixProvider.service.getMediaRequestForUrl(url);
+      debugPrint('[MediaDownload] Streaming: ${mediaRequest.uri}');
       final client = http.Client();
       Timer? cancelTimer;
       try {
@@ -124,7 +110,8 @@ class MediaHandler {
           }
         });
         _throwIfDownloadCancelled(isCancelled);
-        final request = http.Request('GET', newUrl);
+        final request = http.Request('GET', mediaRequest.uri)
+          ..headers.addAll(mediaRequest.headers);
         final response = await client.send(request);
         _throwIfDownloadCancelled(isCancelled);
 
@@ -159,23 +146,6 @@ class MediaHandler {
         client.close();
       }
     };
-  }
-
-  Uri _authenticatedMediaUrl(Uri url, String? token) {
-    var newUrl = url;
-    final path = url.path;
-    if (path.contains('/_matrix/media/')) {
-      final newPath =
-          path.replaceFirst('/_matrix/media/v3/', '/_matrix/client/v1/media/');
-      final queryParams = Map<String, String>.from(url.queryParameters);
-      if (token != null) queryParams['access_token'] = token;
-      newUrl = url.replace(path: newPath, queryParameters: queryParams);
-    } else if (token != null) {
-      final queryParams = Map<String, String>.from(url.queryParameters);
-      queryParams['access_token'] = token;
-      newUrl = url.replace(queryParameters: queryParams);
-    }
-    return newUrl;
   }
 
   void _throwIfDownloadCancelled(bool Function()? isCancelled) {
@@ -247,38 +217,18 @@ class MediaHandler {
         return null;
       }
 
-      // Parse MXC URL: mxc://server/mediaId
-      final uri = Uri.parse(mxcUrl);
-      final serverName = uri.host;
-      final mediaId = uri.pathSegments.isNotEmpty ? uri.pathSegments.last : '';
-
-      if (serverName.isEmpty || mediaId.isEmpty) {
-        debugPrint('[PartialVideo] Invalid MXC URL format');
-        return null;
-      }
-
-      // Build download URL
-      final token = matrixProvider.service.accessToken;
-      final baseUrl =
-          matrixProvider.service.client.homeserver?.toString() ?? '';
-      final downloadPath =
-          '/_matrix/client/v1/media/download/$serverName/$mediaId';
-
-      var downloadUrl = Uri.parse('$baseUrl$downloadPath');
-      if (token != null) {
-        downloadUrl = downloadUrl.replace(
-          queryParameters: {'access_token': token},
-        );
-      }
+      final mediaRequest = matrixProvider.service.getMediaRequest(mxcUrl);
+      if (mediaRequest == null) return null;
 
       debugPrint(
-          '[PartialVideo] Requesting first $maxBytes bytes from: $downloadUrl');
+          '[PartialVideo] Requesting first $maxBytes bytes from: ${mediaRequest.uri}');
 
       // Make HTTP request with Range header to get only first chunk
       final response = await http.get(
-        downloadUrl,
+        mediaRequest.uri,
         headers: {
           'Range': 'bytes=0-${maxBytes - 1}', // Request first 2 MB
+          ...mediaRequest.headers,
         },
       );
 
@@ -329,9 +279,13 @@ class MediaHandler {
           final thumbMxcUrl = info['thumbnail_url'] as String?;
           if (thumbMxcUrl != null && thumbMxcUrl.startsWith('mxc://')) {
             try {
-              final httpUrl = matrixProvider.service.getHttpUrl(thumbMxcUrl);
-              if (httpUrl != null) {
-                final response = await http.get(httpUrl);
+              final mediaRequest =
+                  matrixProvider.service.getMediaRequest(thumbMxcUrl);
+              if (mediaRequest != null) {
+                final response = await http.get(
+                  mediaRequest.uri,
+                  headers: mediaRequest.headers,
+                );
                 if (response.statusCode == 200 &&
                     response.bodyBytes.isNotEmpty) {
                   debugPrint(

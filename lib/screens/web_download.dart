@@ -17,8 +17,7 @@ Future<String> downloadFile(
   final blob = web.Blob([jsArray].toJS);
   final url = web.URL.createObjectURL(blob);
 
-  final anchor =
-      web.document.createElement('a') as web.HTMLAnchorElement;
+  final anchor = web.document.createElement('a') as web.HTMLAnchorElement;
   anchor.href = url;
   anchor.download = fileName;
   anchor.style.display = 'none';

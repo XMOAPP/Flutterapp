@@ -183,6 +183,11 @@ class _LoginScreenState extends State<LoginScreen>
 
   @override
   Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+    final isLandscape = mediaQuery.orientation == Orientation.landscape;
+    final horizontalPadding =
+        (mediaQuery.size.width * 0.08).clamp(20.0, 28.0).toDouble();
+
     return Scaffold(
       backgroundColor: kBlack,
       body: FadeTransition(
@@ -191,23 +196,24 @@ class _LoginScreenState extends State<LoginScreen>
           child: SingleChildScrollView(
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             padding: EdgeInsets.fromLTRB(
-              28,
+              horizontalPadding,
               16,
-              28,
-              16 + MediaQuery.viewInsetsOf(context).bottom,
+              horizontalPadding,
+              16 + mediaQuery.viewInsets.bottom,
             ),
             child: Form(
               key: _formKey,
               child: ConstrainedBox(
                 constraints: BoxConstraints(
-                  minHeight: MediaQuery.sizeOf(context).height -
-                      MediaQuery.paddingOf(context).vertical -
-                      32,
+                  minHeight:
+                      mediaQuery.size.height - mediaQuery.padding.vertical - 32,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    SizedBox(height: _isRegisterMode ? 12 : 80),
+                    SizedBox(
+                      height: _isRegisterMode ? 12 : (isLandscape ? 20 : 80),
+                    ),
                     _buildTitle(),
                     const SizedBox(height: 20),
                     UsernameField(

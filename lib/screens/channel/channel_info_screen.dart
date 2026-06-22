@@ -376,16 +376,16 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
                   width: itemWidth,
                   icon: Icons.settings,
                   label: 'Settings',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          ChannelSettingsScreen(room: widget.room),
-                    ),
-                  ).then((_) => _loadChannelData());
-                },
-              ),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            ChannelSettingsScreen(room: widget.room),
+                      ),
+                    ).then((_) => _loadChannelData());
+                  },
+                ),
               if (_isAdmin)
                 _buildActionButton(
                   width: itemWidth,

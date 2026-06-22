@@ -1,6 +1,7 @@
 // ignore_for_file: experimental_member_use
 
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -175,6 +176,14 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
     final inactive = widget.isMe
         ? kLimeGreen.withValues(alpha: 0.25)
         : Colors.white.withValues(alpha: 0.22);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final maxBubbleWidth = math.min(
+      330.0,
+      math.max(160.0, screenWidth * 0.78),
+    );
+    final minBubbleWidth = math.min(280.0, maxBubbleWidth);
+    final textScale = MediaQuery.textScalerOf(context).scale(1);
+    final bubbleHeight = 58.0 + math.max(0.0, textScale - 1.0) * 12.0;
 
     return StreamBuilder<Duration>(
       stream: _player.positionStream,
@@ -193,9 +202,12 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
               );
 
         return ConstrainedBox(
-          constraints: const BoxConstraints(minWidth: 280, maxWidth: 330),
+          constraints: BoxConstraints(
+            minWidth: minBubbleWidth,
+            maxWidth: maxBubbleWidth,
+          ),
           child: SizedBox(
-            height: 58,
+            height: bubbleHeight,
             child: Stack(
               children: [
                 Align(

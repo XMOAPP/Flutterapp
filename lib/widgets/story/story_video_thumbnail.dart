@@ -9,7 +9,8 @@ import '../../models/story_models.dart';
 import '../../providers/matrix_provider.dart';
 import '../../theme.dart';
 import '../../screens/web_video_view_stub.dart'
-    if (dart.library.js_interop) '../../screens/web_video_view.dart' as web_video;
+    if (dart.library.js_interop) '../../screens/web_video_view.dart'
+    as web_video;
 
 class StoryVideoThumbnail extends StatefulWidget {
   final Story story;
@@ -54,11 +55,12 @@ class _StoryVideoThumbnailState extends State<StoryVideoThumbnail> {
     final thumbnailUrl = widget.story.thumbnailUrl;
 
     if (!_uploadedThumbnailFailed && thumbnailUrl != null) {
-      final httpUrl = matrixProvider.service.getHttpUrl(thumbnailUrl);
-      if (httpUrl != null) {
+      final mediaRequest = matrixProvider.service.getMediaRequest(thumbnailUrl);
+      if (mediaRequest != null) {
         return _withPlayOverlay(
           Image.network(
-            httpUrl.toString(),
+            mediaRequest.uri.toString(),
+            headers: mediaRequest.headers,
             fit: widget.fit,
             errorBuilder: (_, __, ___) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -77,7 +79,8 @@ class _StoryVideoThumbnailState extends State<StoryVideoThumbnail> {
       }
     }
 
-    final cacheKey = widget.story.thumbnailUrl ?? widget.story.mediaUrl ?? widget.story.id;
+    final cacheKey =
+        widget.story.thumbnailUrl ?? widget.story.mediaUrl ?? widget.story.id;
     final cached = _generatedCache[cacheKey];
     if (cached != null) {
       return _withPlayOverlay(
@@ -114,11 +117,14 @@ class _StoryVideoThumbnailState extends State<StoryVideoThumbnail> {
     if (mediaUrl == null) return null;
 
     final matrixProvider = context.read<MatrixProvider>();
-    final httpUrl = matrixProvider.service.getHttpUrl(mediaUrl);
-    if (httpUrl == null) return null;
+    final mediaRequest = matrixProvider.service.getMediaRequest(mediaUrl);
+    if (mediaRequest == null) return null;
 
     try {
-      final response = await http.get(httpUrl);
+      final response = await http.get(
+        mediaRequest.uri,
+        headers: mediaRequest.headers,
+      );
       if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
         final webThumb = await web_video.generateVideoThumbnail(
           response.bodyBytes,
@@ -135,7 +141,8 @@ class _StoryVideoThumbnailState extends State<StoryVideoThumbnail> {
 
     try {
       final bytes = await VideoThumbnail.thumbnailData(
-        video: httpUrl.toString(),
+        video: mediaRequest.uri.toString(),
+        headers: mediaRequest.headers,
         imageFormat: ImageFormat.JPEG,
         maxWidth: 720,
         timeMs: 1000,

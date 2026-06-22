@@ -14,7 +14,8 @@ Future<void> shareFile(
   }
 
   final directory = await getTemporaryDirectory();
-  final resolvedMimeType = mimeType ?? lookupMimeType(fileName, headerBytes: bytes);
+  final resolvedMimeType =
+      mimeType ?? lookupMimeType(fileName, headerBytes: bytes);
   final safeName = _safeFileName(
     _ensureFileExtension(fileName, resolvedMimeType),
   );
@@ -25,7 +26,8 @@ Future<void> shareFile(
   await channel.invokeMethod<void>('shareFile', {
     'filePath': file.path,
     'fileName': safeName,
-    'mimeType': resolvedMimeType ?? lookupMimeType(safeName, headerBytes: bytes),
+    'mimeType':
+        resolvedMimeType ?? lookupMimeType(safeName, headerBytes: bytes),
   });
 }
 
@@ -39,7 +41,8 @@ Future<void> openFile(
   }
 
   final directory = await getTemporaryDirectory();
-  final resolvedMimeType = mimeType ?? lookupMimeType(fileName, headerBytes: bytes);
+  final resolvedMimeType =
+      mimeType ?? lookupMimeType(fileName, headerBytes: bytes);
   final safeName = _safeFileName(
     _ensureFileExtension(fileName, resolvedMimeType),
   );
@@ -50,7 +53,9 @@ Future<void> openFile(
   await channel.invokeMethod<void>('openFile', {
     'filePath': file.path,
     'fileName': safeName,
-    'mimeType': resolvedMimeType ?? lookupMimeType(safeName, headerBytes: bytes) ?? '*/*',
+    'mimeType': resolvedMimeType ??
+        lookupMimeType(safeName, headerBytes: bytes) ??
+        '*/*',
   });
 }
 
@@ -58,8 +63,7 @@ String _ensureFileExtension(String fileName, String? mimeType) {
   final trimmed = fileName.trim();
   final fallbackBase = trimmed.isEmpty ? 'xmo_file' : trimmed;
   final dotIndex = fallbackBase.lastIndexOf('.');
-  final hasUsableExtension =
-      dotIndex > 0 && dotIndex < fallbackBase.length - 1;
+  final hasUsableExtension = dotIndex > 0 && dotIndex < fallbackBase.length - 1;
   if (hasUsableExtension) return fallbackBase;
 
   final extension = _fileExtensionForMime(mimeType);

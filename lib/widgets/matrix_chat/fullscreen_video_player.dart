@@ -7,10 +7,14 @@ import 'package:matrix/matrix.dart';
 import 'package:mime/mime.dart';
 import 'package:video_player/video_player.dart';
 import '../../theme.dart';
-import '../../screens/web_download_stub.dart' if (dart.library.js_interop) '../../screens/web_download.dart' as web_download;
-import '../../screens/web_video_view_stub.dart' if (dart.library.js_interop) '../../screens/web_video_view.dart' as web_video;
-import '../../screens/native_share_stub.dart' if (dart.library.io) '../../screens/native_share.dart'
-    as native_share;
+import '../../screens/web_download_stub.dart'
+    if (dart.library.js_interop) '../../screens/web_download.dart'
+    as web_download;
+import '../../screens/web_video_view_stub.dart'
+    if (dart.library.js_interop) '../../screens/web_video_view.dart'
+    as web_video;
+import '../../screens/native_share_stub.dart'
+    if (dart.library.io) '../../screens/native_share.dart' as native_share;
 import 'native_video_controller_stub.dart'
     if (dart.library.io) 'native_video_controller_io.dart';
 
@@ -137,8 +141,9 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-              kIsWeb ? 'Downloaded: ${video.fileName}' : 'Downloaded successfully'),
+          content: Text(kIsWeb
+              ? 'Downloaded: ${video.fileName}'
+              : 'Downloaded successfully'),
           backgroundColor: kLimeGreen,
           duration: const Duration(seconds: 2),
         ),
@@ -257,7 +262,8 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
   }
 
   String _videoFileName(String mimeType) {
-    final title = widget.title.trim().isEmpty ? 'xmo_video' : widget.title.trim();
+    final title =
+        widget.title.trim().isEmpty ? 'xmo_video' : widget.title.trim();
     final dotIndex = title.lastIndexOf('.');
     if (dotIndex > 0 && dotIndex < title.length - 1) return title;
 
@@ -318,8 +324,7 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
                         const SizedBox(width: 12),
                         Text(
                           'Download',
-                          style:
-                              GoogleFonts.inter(color: kWhite, fontSize: 14),
+                          style: GoogleFonts.inter(color: kWhite, fontSize: 14),
                         ),
                       ],
                     ),
@@ -332,8 +337,7 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
                         const SizedBox(width: 12),
                         Text(
                           'Share',
-                          style:
-                              GoogleFonts.inter(color: kWhite, fontSize: 14),
+                          style: GoogleFonts.inter(color: kWhite, fontSize: 14),
                         ),
                       ],
                     ),
@@ -577,9 +581,7 @@ class _NativeVideoControlsState extends State<_NativeVideoControls> {
               const Spacer(),
               IconButton(
                 icon: Icon(
-                  _muted
-                      ? Icons.volume_off_rounded
-                      : Icons.volume_up_rounded,
+                  _muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
                   color: kWhite,
                   size: 22,
                 ),

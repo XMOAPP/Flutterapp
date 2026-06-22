@@ -45,12 +45,12 @@ class OnlineStatusIndicator extends StatelessWidget {
 
   String _getStatusText() {
     if (isOnline) return 'Online';
-    
+
     if (lastSeen == null) return 'Offline';
-    
+
     final now = DateTime.now();
     final difference = now.difference(lastSeen!);
-    
+
     if (difference.inMinutes < 1) {
       return 'Last seen just now';
     } else if (difference.inHours < 1) {

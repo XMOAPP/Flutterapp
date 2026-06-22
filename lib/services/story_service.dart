@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:hive/hive.dart';
 import 'package:matrix/matrix.dart';
 import '../models/story_models.dart';
 import 'matrix_service.dart';
@@ -19,7 +20,91 @@ class StoryService {
   static const String storyUpdateEventType = 'xmo.story.update';
   static const String storyViewEventType = 'xmo.story.view';
   static const String viewedStoriesAccountDataKey = 'xmo.user.viewed_stories';
+  static const String _storyCacheBoxName = 'xmo_story_timeline_cache';
   static const Duration _storyDuration = Duration(hours: 24);
+
+  Future<Box> _storyCacheBox() async {
+    if (Hive.isBoxOpen(_storyCacheBoxName)) {
+      return Hive.box(_storyCacheBoxName);
+    }
+    return Hive.openBox(_storyCacheBoxName);
+  }
+
+  String? get _storyCacheKey {
+    final userId = _client.userID;
+    if (userId == null || userId.isEmpty) return null;
+    return 'contact_stories::$userId';
+  }
+
+  /// Restores the last known story update events and local viewed state. This
+  /// is deliberately local: network timeline scanning happens only for an
+  /// initial cache miss or an explicit refresh, while new Matrix events keep
+  /// the cache current.
+  Future<List<UserStories>> loadCachedContactStories() async {
+    final key = _storyCacheKey;
+    if (key == null) return const [];
+    try {
+      final raw = (await _storyCacheBox()).get(key);
+      if (raw is! List) return const [];
+      final stories = raw
+          .whereType<Map>()
+          .map((item) => _userStoriesFromJson(
+                item.map((key, value) => MapEntry(key.toString(), value)),
+              ))
+          .where((item) => item.hasActiveStories)
+          .toList();
+      stories.sort((a, b) {
+        final aLatest = a.latestStory?.createdAt ?? DateTime(0);
+        final bLatest = b.latestStory?.createdAt ?? DateTime(0);
+        return bLatest.compareTo(aLatest);
+      });
+      return stories;
+    } catch (e) {
+      debugPrint('[StoryService] Failed to restore story cache: $e');
+      return const [];
+    }
+  }
+
+  Future<void> cacheContactStories(List<UserStories> stories) async {
+    final key = _storyCacheKey;
+    if (key == null) return;
+    try {
+      await (await _storyCacheBox()).put(
+        key,
+        stories
+            .where((item) => item.hasActiveStories)
+            .map(_userStoriesToJson)
+            .toList(),
+      );
+    } catch (e) {
+      debugPrint('[StoryService] Failed to persist story cache: $e');
+    }
+  }
+
+  Map<String, dynamic> _userStoriesToJson(UserStories stories) => {
+        'userId': stories.userId,
+        'userName': stories.userName,
+        'userAvatarUrl': stories.userAvatarUrl,
+        // Story IDs and viewedBy are retained by Story.toJson().
+        'stories': stories.stories.map((story) => story.toJson()).toList(),
+      };
+
+  UserStories _userStoriesFromJson(Map<String, dynamic> json) {
+    final rawStories = json['stories'];
+    return UserStories(
+      userId: json['userId'] as String? ?? '',
+      userName: json['userName'] as String? ?? '',
+      userAvatarUrl: json['userAvatarUrl'] as String?,
+      stories: rawStories is List
+          ? rawStories
+              .whereType<Map>()
+              .map((story) => Story.fromJson(
+                    story.map((key, value) => MapEntry(key.toString(), value)),
+                  ))
+              .toList()
+          : const [],
+    );
+  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // CREATE STORY
@@ -146,8 +231,8 @@ class StoryService {
       // Send event to each direct chat room
       for (final room in directRooms) {
         try {
-          final viewerId =
-              _matrixService.getDirectPeerUserId(room) ?? room.directChatMatrixID;
+          final viewerId = _matrixService.getDirectPeerUserId(room) ??
+              room.directChatMatrixID;
           if (viewerId == null || viewerId == myUserId) continue;
 
           final visibleStories = stories
@@ -189,7 +274,7 @@ class StoryService {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /// Get my stories
-  Future<List<Story>> getMyStories() async {
+  Future<List<Story>> getMyStories({bool includeRemoteViews = true}) async {
     try {
       final myUserId = _client.userID;
       if (myUserId == null) return [];
@@ -206,7 +291,9 @@ class StoryService {
           .toList();
 
       final enrichedStories = await _applyOwnProfileToStories(stories);
-      return await _applyRemoteViewsToOwnedStories(enrichedStories);
+      return includeRemoteViews
+          ? await _applyRemoteViewsToOwnedStories(enrichedStories)
+          : enrichedStories;
     } catch (e) {
       debugPrint('[StoryService] Failed to get my stories: $e');
       return [];
@@ -327,10 +414,9 @@ class StoryService {
     final updatedStories = stories.map((story) {
       return story.copyWith(
         privacy: privacy,
-        customPrivacyList:
-            settings.storyAudience == XmoPrivacyAudience.contacts
-                ? const []
-                : settings.storyUserIds,
+        customPrivacyList: settings.storyAudience == XmoPrivacyAudience.contacts
+            ? const []
+            : settings.storyUserIds,
       );
     }).toList();
 

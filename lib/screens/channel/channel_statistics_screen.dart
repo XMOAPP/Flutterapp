@@ -14,7 +14,8 @@ class ChannelStatisticsScreen extends StatefulWidget {
   const ChannelStatisticsScreen({super.key, required this.room});
 
   @override
-  State<ChannelStatisticsScreen> createState() => _ChannelStatisticsScreenState();
+  State<ChannelStatisticsScreen> createState() =>
+      _ChannelStatisticsScreenState();
 }
 
 class _ChannelStatisticsScreenState extends State<ChannelStatisticsScreen> {
@@ -173,11 +174,14 @@ class _ChannelStatisticsScreenState extends State<ChannelStatisticsScreen> {
             ],
           ),
           const SizedBox(height: 14),
-          _buildActivityRow('Last 24 hours', '${_statistics!.postsLast24h} posts'),
+          _buildActivityRow(
+              'Last 24 hours', '${_statistics!.postsLast24h} posts'),
           const SizedBox(height: 12),
-          _buildActivityRow('Last 7 days', '${_statistics!.postsLast7days} posts'),
+          _buildActivityRow(
+              'Last 7 days', '${_statistics!.postsLast7days} posts'),
           const SizedBox(height: 12),
-          _buildActivityRow('Average views', '${_statistics!.averageViews} per post'),
+          _buildActivityRow(
+              'Average views', '${_statistics!.averageViews} per post'),
         ],
       ),
     );
@@ -185,7 +189,8 @@ class _ChannelStatisticsScreenState extends State<ChannelStatisticsScreen> {
 
   Widget _buildChannelInfoSection() {
     final createdDate = _statistics!.createdAt;
-    final formattedDate = '${createdDate.day}/${createdDate.month}/${createdDate.year}';
+    final formattedDate =
+        '${createdDate.day}/${createdDate.month}/${createdDate.year}';
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -213,7 +218,8 @@ class _ChannelStatisticsScreenState extends State<ChannelStatisticsScreen> {
           const SizedBox(height: 14),
           _buildInfoRow('Created on', formattedDate),
           const SizedBox(height: 12),
-          _buildInfoRow('Channel type', widget.room.joinRules == JoinRules.public ? 'Public' : 'Private'),
+          _buildInfoRow('Channel type',
+              widget.room.joinRules == JoinRules.public ? 'Public' : 'Private'),
         ],
       ),
     );
