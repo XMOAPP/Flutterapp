@@ -278,6 +278,8 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
     Event event,
     MatrixService matrixService,
   ) {
+    final isStoryReply = _isStoryReplyEvent(event);
+
     if (event.redacted) {
       return const _LastMessagePreview(
         text: 'Deleted message',
@@ -304,7 +306,15 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
 
     if (event.type != EventTypes.Message) {
       return _LastMessagePreview(
-        text: event.body.trim().isEmpty ? 'Message' : event.body.trim(),
+        text: _previewBody(event, fallback: 'Message'),
+      );
+    }
+
+    if (isStoryReply) {
+      return _LastMessagePreview(
+        text: _storyReplyPreviewBody(event),
+        icon: Icons.auto_stories_rounded,
+        iconColor: kLightGrey,
       );
     }
 
@@ -313,7 +323,7 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
       case MessageTypes.Notice:
       case MessageTypes.Emote:
         return _LastMessagePreview(
-          text: event.body.trim().isEmpty ? 'Message' : event.body.trim(),
+          text: _previewBody(event, fallback: 'Message'),
         );
       case MessageTypes.Image:
         return _LastMessagePreview(
@@ -357,9 +367,49 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
         );
       default:
         return _LastMessagePreview(
-          text: event.body.trim().isEmpty ? 'Message' : event.body.trim(),
+          text: _previewBody(event, fallback: 'Message'),
         );
     }
+  }
+
+  static const String _storyReplyContentKey = 'com.xmo.story_reply';
+
+  static bool _isStoryReplyEvent(Event event) {
+    return event.content[_storyReplyContentKey] is Map ||
+        event.body.startsWith('Replied to your story\n');
+  }
+
+  static String _storyReplyPreviewBody(Event event) {
+    final body = _previewBody(event, fallback: '');
+    if (body.isEmpty) return 'Story replied';
+    return 'Story replied: $body';
+  }
+
+  static String _previewBody(Event event, {required String fallback}) {
+    final body = _stripStoryReplyFallback(event.body.trim());
+    final stripped = _stripReplyFallback(body).trim();
+    return stripped.isEmpty ? fallback : stripped;
+  }
+
+  static String _stripStoryReplyFallback(String body) {
+    const prefix = 'Replied to your story\n';
+    if (!body.startsWith(prefix)) return body;
+    return body.substring(prefix.length).trim();
+  }
+
+  static String _stripReplyFallback(String body) {
+    final lines = body.replaceAll('\r\n', '\n').split('\n');
+    if (lines.isEmpty || !lines.first.startsWith('> ')) return body;
+
+    var index = 0;
+    while (index < lines.length && lines[index].startsWith('> ')) {
+      index++;
+    }
+    while (index < lines.length && lines[index].trim().isEmpty) {
+      index++;
+    }
+
+    return lines.skip(index).join('\n').trim();
   }
 
   static String _captionOrLabel(Event event, String label) {

@@ -9,6 +9,7 @@ import '../../screens/native_share_stub.dart'
 import '../../screens/web_download_stub.dart'
     if (dart.library.js_interop) '../../screens/web_download.dart'
     as web_download;
+import '../../screens/matrix_chat/media_handler.dart';
 import '../../theme.dart';
 
 class AlbumMediaViewer extends StatefulWidget {
@@ -252,8 +253,10 @@ class _AlbumImagePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cachedBytes = MediaHandler.getCachedImageBytes(event.eventId);
     return FutureBuilder<Uint8List?>(
-      future: loadImageBytes(event),
+      initialData: cachedBytes,
+      future: cachedBytes == null ? loadImageBytes(event) : null,
       builder: (context, snapshot) {
         final bytes = snapshot.data;
         if (bytes == null || bytes.isEmpty) {
@@ -293,8 +296,10 @@ class _AlbumVideoPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cachedBytes = MediaHandler.getCachedThumbnail(event.eventId);
     return FutureBuilder<Uint8List?>(
-      future: loadVideoThumbnail(event),
+      initialData: cachedBytes,
+      future: cachedBytes == null ? loadVideoThumbnail(event) : null,
       builder: (context, snapshot) {
         final bytes = snapshot.data;
         return GestureDetector(

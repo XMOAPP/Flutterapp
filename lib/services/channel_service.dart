@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 import '../models/channel_models.dart';
 import 'matrix_service.dart';
+import 'room_controls_service.dart';
 
 /// Service for managing channel-specific features
 /// Channels are broadcast-only rooms where only admins can post
@@ -64,13 +65,14 @@ class ChannelService {
       // Avatar update handled separately via setAvatar
     }
 
-    // Update join rules
-    final newJoinRule = settings.isPublic ? 'public' : 'invite';
-    await room.client.setRoomStateWithKey(
-      roomId,
-      EventTypes.RoomJoinRules,
-      '',
-      {'join_rule': newJoinRule},
+    // Update join rules and public-directory visibility.
+    await RoomControlsService.setChannelJoinMode(
+      room,
+      settings.isPublic ? XmoJoinMode.public : XmoJoinMode.invite,
+    );
+    await RoomControlsService.setChannelDirectoryVisibility(
+      room,
+      settings.isPublic ? XmoJoinMode.public : XmoJoinMode.invite,
     );
 
     // Update sign messages setting

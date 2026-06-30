@@ -35,7 +35,11 @@ jobs:
         working-directory: auth_server
       - run: dart format --set-exit-if-changed bin lib
         working-directory: auth_server
-      - run: dart analyze
+      - name: Analyze auth server
+        run: |
+          set -euo pipefail
+          DART_BIN="$(dirname "$(which flutter)")/cache/dart-sdk/bin/dart"
+          "$DART_BIN" analyze
         working-directory: auth_server
 
   release-bundle:
@@ -56,8 +60,12 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
           test -n "$ANDROID_KEYSTORE_BASE64"
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/upload-keystore.jks
           cat > android/key.properties <<EOF
           storePassword=$ANDROID_KEYSTORE_PASSWORD
           keyPassword=$ANDROID_KEY_PASSWORD
@@ -68,10 +76,13 @@ jobs:
         env:
           XMO_HOMESERVER_URL: ${{ vars.XMO_HOMESERVER_URL }}
           XMO_MATRIX_SERVER_NAME: ${{ vars.XMO_MATRIX_SERVER_NAME }}
-        run: >-
-          flutter build appbundle --release
-          --dart-define=XMO_HOMESERVER_URL=$XMO_HOMESERVER_URL
-          --dart-define=XMO_MATRIX_SERVER_NAME=$XMO_MATRIX_SERVER_NAME
+        run: |
+          set -euo pipefail
+          test -n "$XMO_HOMESERVER_URL"
+          test -n "$XMO_MATRIX_SERVER_NAME"
+          flutter build appbundle --release \
+            --dart-define=XMO_HOMESERVER_URL="$XMO_HOMESERVER_URL" \
+            --dart-define=XMO_MATRIX_SERVER_NAME="$XMO_MATRIX_SERVER_NAME"
       - uses: actions/upload-artifact@v4
         with:
           name: xmo-release-aab

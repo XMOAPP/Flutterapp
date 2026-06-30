@@ -36,6 +36,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _searchingPublic = false;
   String? _publicSearchError;
   Timer? _debounce;
+  int _publicSearchRequestId = 0;
+  int _publicRoomTypeRequestId = 0;
 
   @override
   void initState() {
@@ -74,6 +76,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _stopSearch() {
     _debounce?.cancel();
+    _publicSearchRequestId++;
+    _publicRoomTypeRequestId++;
     setState(() {
       _isSearching = false;
       _publicResults = [];
@@ -89,6 +93,8 @@ class _HomeScreenState extends State<HomeScreen> {
     context.read<ChatFilterProvider>().setSearchQuery(value);
     _debounce?.cancel();
     if (value.trim().isEmpty) {
+      _publicSearchRequestId++;
+      _publicRoomTypeRequestId++;
       setState(() {
         _publicResults = [];
         _searchingPublic = false;
@@ -102,6 +108,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _fetchPublicRooms(String query) async {
     if (!mounted) return;
+    final requestId = ++_publicSearchRequestId;
     setState(() {
       _publicSearchError = null;
     });
@@ -109,6 +116,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final svc = context.read<MatrixProvider>().service;
       final results = await svc.searchPublicRooms(query);
       debugPrint('[PublicSearch] Got ${results.length} results for "$query"');
+      if (!mounted || requestId != _publicSearchRequestId) return;
       if (mounted) {
         setState(() {
           _publicResults = results;
@@ -118,6 +126,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e) {
       debugPrint('[PublicSearch] ERROR: $e');
+      if (!mounted || requestId != _publicSearchRequestId) return;
       if (mounted) {
         setState(() {
           _searchingPublic = false;
@@ -129,13 +138,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _resolvePublicRoomTypes(List<PublicRoomsChunk> rooms) async {
     final provider = context.read<MatrixProvider>();
+    final requestId = ++_publicRoomTypeRequestId;
     for (final room in rooms) {
       if (_publicRoomChannelFlags.containsKey(room.roomId)) continue;
       final isChannel = await provider.service.isPublicRoomChannel(
         room.roomId,
         forceRefresh: true,
       );
-      if (!mounted) return;
+      if (!mounted || requestId != _publicRoomTypeRequestId) return;
       setState(() => _publicRoomChannelFlags[room.roomId] = isChannel);
     }
   }
@@ -369,7 +379,10 @@ class _HomeScreenState extends State<HomeScreen> {
               context,
               MaterialPageRoute(
                 builder: (_) => MatrixChatScreen(
-                    previewChannel: chunk, matrixProvider: provider),
+                  previewChannel: chunk,
+                  previewIsChannelHint: isChannel,
+                  matrixProvider: provider,
+                ),
               ));
         }
       },

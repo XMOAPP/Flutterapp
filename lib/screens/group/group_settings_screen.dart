@@ -69,19 +69,24 @@ class _SettingsDropdown<T> extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 28),
           DropdownButtonHideUnderline(
-            child: DropdownButton<T>(
-              value: value,
-              dropdownColor: const Color(0xFF2C2C2E),
-              iconEnabledColor: kLightGrey,
-              style: GoogleFonts.inter(
-                color: kWhite,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+            child: SizedBox(
+              width: compact ? 150 : 190,
+              child: DropdownButton<T>(
+                value: value,
+                isExpanded: true,
+                alignment: Alignment.centerRight,
+                dropdownColor: const Color(0xFF2C2C2E),
+                iconEnabledColor: kLightGrey,
+                style: GoogleFonts.inter(
+                  color: kWhite,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+                items: items,
+                onChanged: onChanged,
               ),
-              items: items,
-              onChanged: onChanged,
             ),
           ),
         ],
@@ -101,6 +106,9 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
   String? _selectedAvatarName;
   String? _avatarUrl;
   bool _removeAvatar = false;
+  List<User> _joinRequests = const [];
+  bool _loadingJoinRequests = false;
+  final Set<String> _joinRequestActions = {};
 
   String get _resolvedRoomName =>
       MatrixService().getResolvedDisplayName(widget.room);
@@ -114,6 +122,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
     _slowModeSeconds = RoomControlsService.slowModeSecondsFor(widget.room);
     _permissions = XmoRoomPermissions.fromRoom(widget.room);
     _avatarUrl = _resolveRoomAvatarUrl();
+    _loadJoinRequests();
   }
 
   @override
@@ -204,6 +213,76 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
     }
   }
 
+  Future<void> _loadJoinRequests() async {
+    if (!mounted) return;
+    setState(() => _loadingJoinRequests = true);
+    try {
+      final requests = await widget.room.requestParticipants(
+        const [Membership.knock],
+      );
+      if (!mounted) return;
+      setState(() {
+        _joinRequests = requests;
+        _loadingJoinRequests = false;
+      });
+    } catch (e) {
+      debugPrint('[GroupSettings] Error loading join requests: $e');
+      if (!mounted) return;
+      setState(() => _loadingJoinRequests = false);
+    }
+  }
+
+  Future<void> _approveJoinRequest(User user) async {
+    await _handleJoinRequestAction(
+      user,
+      actionLabel: 'approved',
+      action: () => widget.room.invite(user.id),
+    );
+  }
+
+  Future<void> _declineJoinRequest(User user) async {
+    await _handleJoinRequestAction(
+      user,
+      actionLabel: 'declined',
+      action: () => widget.room.kick(user.id),
+    );
+  }
+
+  Future<void> _handleJoinRequestAction(
+    User user, {
+    required String actionLabel,
+    required Future<void> Function() action,
+  }) async {
+    if (_joinRequestActions.contains(user.id)) return;
+    setState(() => _joinRequestActions.add(user.id));
+    try {
+      await action();
+      if (!mounted) return;
+      setState(() {
+        _joinRequests =
+            _joinRequests.where((item) => item.id != user.id).toList();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${user.calcDisplayname()} $actionLabel'),
+          backgroundColor: kLimeGreen,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to $actionLabel request: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _joinRequestActions.remove(user.id));
+      }
+    }
+  }
+
   Future<void> _saveSettings() async {
     setState(() => _loading = true);
     try {
@@ -234,6 +313,11 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
       }
 
       await RoomControlsService.setJoinMode(widget.room, _joinMode);
+      final directoryVisibilitySaved =
+          await RoomControlsService.setRoomDirectoryVisibility(
+        widget.room,
+        _joinMode,
+      );
       await RoomControlsService.setSlowModeSeconds(
         widget.room,
         _slowModeSeconds,
@@ -251,9 +335,14 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
       if (mounted) {
         context.read<MatrixProvider>().refreshRooms();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Settings saved successfully'),
-            backgroundColor: kLimeGreen,
+          SnackBar(
+            content: Text(
+              directoryVisibilitySaved
+                  ? 'Settings saved successfully'
+                  : 'Settings saved. Server did not allow public directory listing.',
+            ),
+            backgroundColor:
+                directoryVisibilitySaved ? kLimeGreen : Colors.orangeAccent,
           ),
         );
         Navigator.pop(context, true);
@@ -394,21 +483,21 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
 
   Widget _buildJoinModeSelector() {
     return _SettingsDropdown<XmoJoinMode>(
-      title: 'Who can join',
+      title: 'Group visibility',
       subtitle: _joinModeSubtitle,
       value: _joinMode,
       items: const [
         DropdownMenuItem(
           value: XmoJoinMode.public,
-          child: Text('Anyone'),
+          child: Text('Public'),
         ),
         DropdownMenuItem(
           value: XmoJoinMode.invite,
-          child: Text('Invite only'),
+          child: Text('Private'),
         ),
         DropdownMenuItem(
           value: XmoJoinMode.request,
-          child: Text('Approve requests'),
+          child: Text('Private - approve requests'),
         ),
       ],
       onChanged: (value) {
@@ -423,10 +512,131 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
       case XmoJoinMode.public:
         return 'Anyone can find and join this group';
       case XmoJoinMode.request:
-        return 'New members must request approval';
+        return 'Invite-link members need admin approval';
       case XmoJoinMode.invite:
-        return 'Only invited members can join';
+        return 'Only invited members can find and join';
     }
+  }
+
+  Widget _buildJoinRequestsSection() {
+    if (_joinMode != XmoJoinMode.request && _joinRequests.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1D1F),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Join requests',
+                  style: GoogleFonts.inter(
+                    color: kWhite,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Refresh',
+                onPressed: _loadingJoinRequests ? null : _loadJoinRequests,
+                icon: _loadingJoinRequests
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          color: kLimeGreen,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Icon(Icons.refresh, color: kLightGrey, size: 20),
+              ),
+            ],
+          ),
+          if (_joinRequests.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                _loadingJoinRequests
+                    ? 'Checking for pending requests...'
+                    : 'No pending join requests',
+                style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+              ),
+            )
+          else
+            ..._joinRequests.map(_buildJoinRequestTile),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildJoinRequestTile(User user) {
+    final busy = _joinRequestActions.contains(user.id);
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        children: [
+          StoryAvatar(
+            userName: user.calcDisplayname(),
+            avatarUrl: user.avatarUrl?.toString(),
+            size: 38,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  user.calcDisplayname(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    color: kWhite,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  user.id,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          if (busy)
+            const SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                color: kLimeGreen,
+                strokeWidth: 2,
+              ),
+            )
+          else ...[
+            IconButton(
+              tooltip: 'Decline',
+              onPressed: () => _declineJoinRequest(user),
+              icon: const Icon(Icons.close, color: Colors.redAccent, size: 20),
+            ),
+            IconButton(
+              tooltip: 'Approve',
+              onPressed: () => _approveJoinRequest(user),
+              icon: const Icon(Icons.check, color: kLimeGreen, size: 20),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   Widget _buildSlowModeSelector() {
@@ -660,6 +870,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
             const SizedBox(height: 12),
 
             _buildJoinModeSelector(),
+            _buildJoinRequestsSection(),
             const SizedBox(height: 8),
             _buildSlowModeSelector(),
             const SizedBox(height: 20),

@@ -75,6 +75,7 @@ class XmoRoomPermissions {
 class RoomControlsService {
   static const slowModeStateType = 'xmo.room.slow_mode';
   static const permissionsStateType = 'xmo.room.permissions';
+  static const channelPostingPower = 75;
 
   static const sendMessagesKey = 'send_messages';
   static const sendMediaKey = 'send_media';
@@ -114,6 +115,35 @@ class RoomControlsService {
       '',
       {'join_rule': joinRuleFor(mode)},
     );
+  }
+
+  static Future<void> setChannelJoinMode(Room room, XmoJoinMode mode) async {
+    await setJoinMode(room, mode);
+  }
+
+  static Future<bool> setChannelDirectoryVisibility(
+    Room room,
+    XmoJoinMode mode,
+  ) =>
+      setRoomDirectoryVisibility(room, mode);
+
+  static Future<bool> setRoomDirectoryVisibility(
+    Room room,
+    XmoJoinMode mode,
+  ) async {
+    final directoryVisibility = switch (mode) {
+      XmoJoinMode.public => Visibility.public,
+      XmoJoinMode.invite || XmoJoinMode.request => Visibility.private,
+    };
+    try {
+      await room.client.setRoomVisibilityOnDirectory(
+        room.id,
+        visibility: directoryVisibility,
+      );
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   static int slowModeSecondsFor(Room room) {
@@ -162,6 +192,9 @@ class RoomControlsService {
 
   static int requiredPowerFor(Room room, XmoRoomPermission permission) {
     final permissions = XmoRoomPermissions.fromRoom(room);
+    if (_roomLooksLikeChannel(room)) {
+      return _channelRequiredPowerFor(permissions, permission);
+    }
     switch (permission) {
       case XmoRoomPermission.sendMessages:
         return permissions.sendMessages;
@@ -174,6 +207,22 @@ class RoomControlsService {
       case XmoRoomPermission.sendStickers:
         return permissions.sendStickers;
     }
+  }
+
+  static int _channelRequiredPowerFor(
+    XmoRoomPermissions permissions,
+    XmoRoomPermission permission,
+  ) {
+    final configuredPower = switch (permission) {
+      XmoRoomPermission.sendMessages => permissions.sendMessages,
+      XmoRoomPermission.sendMedia => permissions.sendMedia,
+      XmoRoomPermission.startCalls => permissions.startCalls,
+      XmoRoomPermission.sendPolls => permissions.sendPolls,
+      XmoRoomPermission.sendStickers => permissions.sendStickers,
+    };
+    return configuredPower < channelPostingPower
+        ? channelPostingPower
+        : configuredPower;
   }
 
   static bool canBypassSlowMode(Room room, String? userId) {
@@ -231,6 +280,19 @@ class RoomControlsService {
       'events_default',
       fallback: 0,
     );
+  }
+
+  static bool _roomLooksLikeChannel(Room room) {
+    final typeContent = room.getState('xmo.room.type')?.content;
+    if (typeContent?['is_channel'] == true) return true;
+
+    final powerLevels = room.getState(EventTypes.RoomPowerLevels)?.content;
+    final eventsDefault = powerLevels?['events_default'];
+    final usersDefault = powerLevels?['users_default'];
+    return eventsDefault is num &&
+        eventsDefault.toInt() >= 50 &&
+        (usersDefault == null ||
+            (usersDefault is num && usersDefault.toInt() == 0));
   }
 
   static int _intFromContent(

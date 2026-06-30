@@ -4,35 +4,53 @@ import 'dart:io';
 class StructuredLogger {
   const StructuredLogger();
 
+  void error(String message, Object error, StackTrace stackTrace) {
+    logError(message, error, stackTrace);
+  }
+
   void request({
     required HttpRequest request,
     required int statusCode,
     required Duration elapsed,
   }) {
-    stdout.writeln(jsonEncode({
-      'timestamp': DateTime.now().toUtc().toIso8601String(),
-      'level': statusCode >= 500 ? 'error' : 'info',
-      'event': 'http_request',
+    logInfo('request', {
       'method': request.method,
       'path': request.uri.path,
-      'status': statusCode,
-      'elapsed_ms': elapsed.inMilliseconds,
-      'remote': _remote(request),
-    }));
+      'statusCode': statusCode,
+      'elapsedMs': elapsed.inMilliseconds,
+    });
   }
+}
 
-  void error(String event, Object error, StackTrace stackTrace) {
-    stderr.writeln(jsonEncode({
-      'timestamp': DateTime.now().toUtc().toIso8601String(),
-      'level': 'error',
-      'event': event,
-      'error': error.toString(),
-      'stack': stackTrace.toString(),
-    }));
-  }
+void logInfo(String message, [Map<String, Object?> context = const {}]) {
+  _log('info', message, context);
+}
 
-  String _remote(HttpRequest request) =>
-      request.headers.value('x-forwarded-for') ??
-      request.connectionInfo?.remoteAddress.address ??
-      'unknown';
+void logWarning(String message, [Map<String, Object?> context = const {}]) {
+  _log('warning', message, context);
+}
+
+void logError(
+  String message,
+  Object error,
+  StackTrace stackTrace, [
+  Map<String, Object?> context = const {},
+]) {
+  _log('error', message, {
+    ...context,
+    'error': error.toString(),
+    'stack': stackTrace.toString(),
+  });
+}
+
+void _log(String level, String message, Map<String, Object?> context) {
+  final entry = <String, Object?>{
+    'time': DateTime.now().toUtc().toIso8601String(),
+    'level': level,
+    'message': message,
+    if (context.isNotEmpty) 'context': context,
+  };
+
+  // ignore: avoid_print
+  print(jsonEncode(entry));
 }

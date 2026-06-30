@@ -97,6 +97,13 @@ class MatrixProvider extends ChangeNotifier {
   MatrixConnectionStatus _connectionStatus = MatrixConnectionStatus.offline;
   MatrixConnectionStatus get connectionStatus => _connectionStatus;
   DateTime? _lastSyncAt;
+  DateTime? get lastSyncAt => _lastSyncAt;
+  int get pendingTransferCount => TransferQueueService.instance.jobs
+      .where((job) =>
+          job.status == TransferStatus.queued ||
+          job.status == TransferStatus.running ||
+          job.status == TransferStatus.failed)
+      .length;
   StreamSubscription<List<Room>>? _syncSubscription;
   Timer? _connectionWatchdog;
 
@@ -288,8 +295,12 @@ class MatrixProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> sendMessage(String roomId, String text) async {
-    await _svc.sendMessage(roomId, text);
+  Future<void> sendMessage(
+    String roomId,
+    String text, {
+    Map<String, dynamic> extraContent = const {},
+  }) async {
+    await _svc.sendMessage(roomId, text, extraContent: extraContent);
   }
 
   Future<Room> getOrCreateSavedMessagesRoom() async {

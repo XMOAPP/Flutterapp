@@ -105,11 +105,18 @@ class SharedMediaIndexService {
     required Room room,
     required Timeline timeline,
     bool historyComplete = false,
+    List<Event>? eventsToIndex,
+    bool countHistoryPage = false,
   }) async {
     final box = await _box();
     final key = _key(ownerUserId, room.id);
     final state = _stateFromRaw(box.get(key));
-    _indexEvents(state, timeline.events);
+    _indexEvents(
+      state,
+      eventsToIndex ?? timeline.events,
+      countHistoryPage: countHistoryPage,
+      loadedEventCount: timeline.events.length,
+    );
     if (historyComplete) {
       state['historyComplete'] = true;
     }
@@ -154,12 +161,17 @@ class SharedMediaIndexService {
       }
 
       final beforeEventCount = timeline.events.length;
+      var fetchedEvents = const <Event>[];
       var loaded = false;
       Object? lastError;
       for (var attempt = 0; attempt < 3 && !loaded; attempt++) {
         try {
           await timeline.requestHistory(historyCount: pageSize);
           loaded = timeline.events.length > beforeEventCount;
+          if (loaded) {
+            fetchedEvents =
+                timeline.events.skip(beforeEventCount).toList(growable: false);
+          }
         } catch (error) {
           lastError = error;
           if (attempt < 2) {
@@ -180,6 +192,8 @@ class SharedMediaIndexService {
         room: room,
         timeline: timeline,
         historyComplete: !loaded || !timeline.canRequestHistory,
+        eventsToIndex: fetchedEvents,
+        countHistoryPage: true,
       );
       onSnapshot?.call(snapshot);
       if (!loaded) break;
@@ -234,7 +248,12 @@ class SharedMediaIndexService {
     };
   }
 
-  void _indexEvents(Map<String, dynamic> state, List<Event> events) {
+  void _indexEvents(
+    Map<String, dynamic> state,
+    List<Event> events, {
+    bool countHistoryPage = false,
+    int? loadedEventCount,
+  }) {
     final media = _nestedMap(state, 'media');
     final links = _nestedMap(state, 'links');
     final indexedEventIds = _nestedMap(state, 'indexedEventIds');
@@ -277,12 +296,21 @@ class SharedMediaIndexService {
     }
 
     if (events.isNotEmpty) {
+      final newest = events.first;
       final oldest = events.last;
+      pagination['latestEventId'] = newest.eventId;
+      pagination['latestTimestamp'] =
+          newest.originServerTs.millisecondsSinceEpoch;
       pagination['oldestEventId'] = oldest.eventId;
       pagination['oldestTimestamp'] =
           oldest.originServerTs.millisecondsSinceEpoch;
-      pagination['pagesIndexed'] =
-          ((pagination['pagesIndexed'] as num?)?.toInt() ?? 0) + 1;
+      pagination['lastIndexedBatchSize'] = events.length;
+      pagination['loadedEventCount'] = loadedEventCount ?? events.length;
+      pagination['checkpointVersion'] = 2;
+      if (countHistoryPage) {
+        pagination['pagesIndexed'] =
+            ((pagination['pagesIndexed'] as num?)?.toInt() ?? 0) + 1;
+      }
     }
   }
 

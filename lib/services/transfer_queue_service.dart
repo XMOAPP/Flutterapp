@@ -186,6 +186,9 @@ class TransferQueueService {
   String? _ownerUserId;
   final Map<String, TransferJob> _jobs = {};
   final Set<String> _cancelledIds = {};
+  final Set<String> _runningIds = {};
+  final Map<String, int> _lastPersistedProgressBytes = {};
+  final Map<String, DateTime> _lastPersistedProgressAt = {};
   final _controller = StreamController<List<TransferJob>>.broadcast();
 
   Stream<List<TransferJob>> get stream => _controller.stream;
@@ -301,10 +304,12 @@ class TransferQueueService {
     return file.readAsBytes();
   }
 
-  Future<void> markRunning(String id) async {
+  Future<bool> markRunning(String id) async {
     final job = _jobs[id];
-    if (job == null) return;
+    if (job == null) return false;
+    if (_runningIds.contains(id)) return false;
     _cancelledIds.remove(id);
+    _runningIds.add(id);
     await _save(
       job.copyWith(
         status: TransferStatus.running,
@@ -314,6 +319,7 @@ class TransferQueueService {
         clearNextRetryAt: true,
       ),
     );
+    return true;
   }
 
   Future<void> updateProgress(
@@ -324,19 +330,39 @@ class TransferQueueService {
     final job = _jobs[id];
     if (job == null) return;
     final effectiveTotalBytes = totalBytes > 0 ? totalBytes : job.totalBytes;
+    final previousPersistedBytes = _lastPersistedProgressBytes[id] ?? 0;
+    final lastPersistedAt = _lastPersistedProgressAt[id];
+    final now = DateTime.now();
+    final isComplete =
+        effectiveTotalBytes > 0 && uploadedBytes >= effectiveTotalBytes;
+    final progressedEnough =
+        (uploadedBytes - previousPersistedBytes).abs() >= 256 * 1024;
+    final waitedLongEnough = lastPersistedAt == null ||
+        now.difference(lastPersistedAt) >= const Duration(seconds: 1);
+    final shouldPersist = job.status != TransferStatus.running ||
+        isComplete ||
+        progressedEnough ||
+        waitedLongEnough;
+    if (shouldPersist) {
+      _lastPersistedProgressBytes[id] = uploadedBytes;
+      _lastPersistedProgressAt[id] = now;
+    }
     await _save(
       job.copyWith(
         uploadedBytes: uploadedBytes,
         totalBytes: effectiveTotalBytes,
         status: TransferStatus.running,
       ),
-      persistImmediately: false,
+      persistImmediately: shouldPersist,
     );
   }
 
   Future<void> markCompleted(String id) async {
     final job = _jobs[id];
     if (job == null) return;
+    _runningIds.remove(id);
+    _lastPersistedProgressBytes.remove(id);
+    _lastPersistedProgressAt.remove(id);
     await _save(job.copyWith(
       status: TransferStatus.completed,
       uploadedBytes: job.totalBytes,
@@ -348,6 +374,9 @@ class TransferQueueService {
   Future<void> markFailed(String id, Object error) async {
     final job = _jobs[id];
     if (job == null) return;
+    _runningIds.remove(id);
+    _lastPersistedProgressBytes.remove(id);
+    _lastPersistedProgressAt.remove(id);
     final nextAttempt = job.attempts;
     final retryAt = nextAttempt < job.maxAttempts
         ? DateTime.now().add(_retryDelay(nextAttempt - 1))
@@ -361,6 +390,9 @@ class TransferQueueService {
 
   Future<void> cancel(String id) async {
     _cancelledIds.add(id);
+    _runningIds.remove(id);
+    _lastPersistedProgressBytes.remove(id);
+    _lastPersistedProgressAt.remove(id);
     final job = _jobs[id];
     if (job == null) return;
     await _save(job.copyWith(
@@ -375,6 +407,7 @@ class TransferQueueService {
     final job = _jobs[id];
     if (job == null || !job.canRetry) return;
     _cancelledIds.remove(id);
+    _runningIds.remove(id);
     await _save(job.copyWith(
       status: TransferStatus.queued,
       uploadedBytes: 0,
@@ -384,6 +417,9 @@ class TransferQueueService {
   }
 
   Future<void> remove(String id) async {
+    _runningIds.remove(id);
+    _lastPersistedProgressBytes.remove(id);
+    _lastPersistedProgressAt.remove(id);
     final job = _jobs.remove(id);
     await _box?.delete(_storageKey(id, job?.ownerUserId));
     if (job != null) await _deletePayloadFiles(job);
@@ -403,6 +439,9 @@ class TransferQueueService {
 
   void _loadPersistedJobs() {
     _jobs.clear();
+    _runningIds.clear();
+    _lastPersistedProgressBytes.clear();
+    _lastPersistedProgressAt.clear();
     for (final key in _box?.keys ?? const []) {
       final raw = _box?.get(key);
       if (raw is Map) {

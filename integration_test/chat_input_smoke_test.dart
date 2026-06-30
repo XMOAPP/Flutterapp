@@ -32,6 +32,9 @@ void main() {
     );
 
     await tester.enterText(find.byType(TextField), 'device smoke test');
+    await tester.pump();
+    expect(find.byKey(const ValueKey('send')), findsOneWidget);
+
     final sendButton = tester.widget<GestureDetector>(
       find.byKey(const ValueKey('send')),
     );

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../providers/matrix_provider.dart';
+import '../services/matrix_media_helper.dart';
 import '../theme.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -31,23 +34,27 @@ class AvatarWidget extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          _buildAvatar(),
+          _buildAvatar(context),
           if (showOnlineDot) _buildOnlineDot(),
         ],
       ),
     );
   }
 
-  Widget _buildAvatar() {
+  Widget _buildAvatar(BuildContext context) {
     // If there's an image URL, use cached network image
-    if (imageUrl != null) {
+    final mediaRequest = _resolveImageRequest(context);
+    if (mediaRequest != null) {
       return Container(
         width: size,
         height: size,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           image: DecorationImage(
-            image: NetworkImage(imageUrl!),
+            image: NetworkImage(
+              mediaRequest.uri.toString(),
+              headers: mediaRequest.headers,
+            ),
             fit: BoxFit.cover,
           ),
         ),
@@ -72,6 +79,45 @@ class AvatarWidget extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+
+  MatrixMediaRequest? _resolveImageRequest(BuildContext context) {
+    final value = imageUrl;
+    if (value == null || value.isEmpty) return null;
+
+    MatrixProvider? provider;
+    try {
+      provider = context.read<MatrixProvider>();
+    } catch (_) {
+      provider = null;
+    }
+
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+      final uri = Uri.tryParse(value);
+      if (uri == null) return null;
+      return provider?.service.getMediaRequestForUrl(uri) ??
+          MatrixMediaRequest(uri: _withoutAccessToken(uri));
+    }
+
+    return provider?.service.getMediaRequest(
+      value,
+      width: size.round() * 3,
+      height: size.round() * 3,
+    );
+  }
+
+  Uri _withoutAccessToken(Uri uri) {
+    final query = Map<String, String>.from(uri.queryParameters)
+      ..remove('access_token');
+    return Uri(
+      scheme: uri.scheme,
+      userInfo: uri.userInfo,
+      host: uri.host,
+      port: uri.hasPort ? uri.port : null,
+      path: uri.path,
+      queryParameters: query.isEmpty ? null : query,
+      fragment: uri.fragment.isEmpty ? null : uri.fragment,
     );
   }
 

@@ -61,6 +61,16 @@ class _VideoContentState extends State<VideoContent> {
   }
 
   @override
+  void didUpdateWidget(covariant VideoContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.event.eventId != widget.event.eventId ||
+        oldWidget.loadVideoThumbnail != widget.loadVideoThumbnail) {
+      _thumbnailFuture = widget.loadVideoThumbnail(widget.event);
+      _lastReportedSize = null;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final aspectRatio = _getAspectRatio();
     final thumbSize = _displaySizeForRatio(

@@ -15,11 +15,13 @@ import 'story_viewers_screen.dart';
 class StoryViewerScreen extends StatefulWidget {
   final int initialUserIndex; // -1 for my story
   final List<String> allUserStories; // List of user IDs with stories
+  final String? initialStoryId;
 
   const StoryViewerScreen({
     super.key,
     required this.initialUserIndex,
     required this.allUserStories,
+    this.initialStoryId,
   });
 
   @override
@@ -34,7 +36,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   final TextEditingController _replyController = TextEditingController();
   final FocusNode _replyFocusNode = FocusNode();
   Timer? _progressTimer;
-  double _progress = 0.0;
+  final ValueNotifier<double> _progress = ValueNotifier<double>(0.0);
   bool _isPaused = false;
   String? _activeVideoStoryId;
   bool _sendingStoryReply = false;
@@ -65,6 +67,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   @override
   void dispose() {
     _progressTimer?.cancel();
+    _progress.dispose();
     _replyFocusNode.removeListener(_handleReplyFocusChanged);
     _replyFocusNode.dispose();
     _replyController.dispose();
@@ -88,6 +91,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
       setState(() {
         _currentUserStories =
             storyProvider.myStories.where((s) => !s.isExpired).toList();
+        _applyInitialStoryIndex();
       });
     } else if (_currentUserIndex >= 0 &&
         _currentUserIndex < widget.allUserStories.length) {
@@ -99,6 +103,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
       );
       setState(() {
         _currentUserStories = userStories.activeStories;
+        _applyInitialStoryIndex();
       });
     }
 
@@ -110,7 +115,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
 
   void _startStoryProgress() {
     _progressTimer?.cancel();
-    _progress = 0.0;
+    _progress.value = 0.0;
     _activeVideoStoryId = null;
 
     if (_currentStoryIndex >= _currentUserStories.length) return;
@@ -129,10 +134,11 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     _progressTimer = Timer.periodic(interval, (timer) {
       if (_isPaused || !mounted) return;
 
-      if (_progress + increment >= 1.0) {
+      final nextProgress = _progress.value + increment;
+      if (nextProgress >= 1.0) {
         _nextStory();
       } else {
-        setState(() => _progress += increment);
+        _progress.value = nextProgress;
       }
     });
   }
@@ -150,7 +156,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
       // Next story from same user
       setState(() {
         _currentStoryIndex++;
-        _progress = 0.0;
+        _progress.value = 0.0;
       });
       _markCurrentStoryAsViewed();
       _startStoryProgress();
@@ -165,7 +171,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
       // Previous story from same user
       setState(() {
         _currentStoryIndex--;
-        _progress = 0.0;
+        _progress.value = 0.0;
       });
       _startStoryProgress();
     } else {
@@ -179,7 +185,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
       setState(() {
         _currentUserIndex++;
         _currentStoryIndex = 0;
-        _progress = 0.0;
+        _progress.value = 0.0;
       });
       _loadCurrentUserStories();
     } else {
@@ -193,7 +199,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
       setState(() {
         _currentUserIndex--;
         _currentStoryIndex = 0;
-        _progress = 0.0;
+        _progress.value = 0.0;
       });
       _loadCurrentUserStories();
     } else {
@@ -315,9 +321,17 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
 
     await _sendStoryDirectMessage(
       story,
-      'Replied to your story\n$text',
+      text,
       successMessage: 'Reply sent',
     );
+  }
+
+  void _applyInitialStoryIndex() {
+    final initialStoryId = widget.initialStoryId;
+    if (initialStoryId == null || initialStoryId.isEmpty) return;
+    final index =
+        _currentUserStories.indexWhere((story) => story.id == initialStoryId);
+    if (index != -1) _currentStoryIndex = index;
   }
 
   Future<void> _sendStoryReaction(Story story, String emoji) async {
@@ -347,7 +361,24 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
         throw Exception('Unable to open direct chat');
       }
 
-      await matrixProvider.sendMessage(roomId, body);
+      await matrixProvider.sendMessage(
+        roomId,
+        body,
+        extraContent: {
+          'com.xmo.story_reply': {
+            'story_id': story.id,
+            'story_owner_id': story.userId,
+            'story_owner_name': story.userName,
+            'media_type': story.mediaType.name,
+            'media_url': story.mediaUrl,
+            'thumbnail_url': story.thumbnailUrl,
+            'text_content': story.textContent,
+            'caption': story.caption,
+            'created_at': story.createdAt.millisecondsSinceEpoch,
+            'expires_at': story.expiresAt.millisecondsSinceEpoch,
+          },
+        },
+      );
       _replyController.clear();
       _replyFocusNode.unfocus();
 
@@ -566,8 +597,10 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
           enableTapToPause: false,
           onProgress: (progress) {
             if (!mounted || _activeVideoStoryId != story.id) return;
-            if ((progress - _progress).abs() < 0.01 && progress < 1) return;
-            setState(() => _progress = progress);
+            if ((progress - _progress.value).abs() < 0.01 && progress < 1) {
+              return;
+            }
+            _progress.value = progress;
           },
           onCompleted: () {
             if (!mounted || _activeVideoStoryId != story.id) return;
@@ -650,33 +683,38 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   }
 
   Widget _buildProgressBars() {
-    return Row(
-      children: List.generate(_currentUserStories.length, (index) {
-        return Expanded(
-          child: Container(
-            height: 2,
-            margin: const EdgeInsets.symmetric(horizontal: 2),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.3),
-              borderRadius: BorderRadius.circular(1),
-            ),
-            child: FractionallySizedBox(
-              alignment: Alignment.centerLeft,
-              widthFactor: index == _currentStoryIndex
-                  ? _progress
-                  : index < _currentStoryIndex
-                      ? 1.0
-                      : 0.0,
+    return ValueListenableBuilder<double>(
+      valueListenable: _progress,
+      builder: (context, progress, _) {
+        return Row(
+          children: List.generate(_currentUserStories.length, (index) {
+            return Expanded(
               child: Container(
+                height: 2,
+                margin: const EdgeInsets.symmetric(horizontal: 2),
                 decoration: BoxDecoration(
-                  color: kWhite,
+                  color: Colors.white.withValues(alpha: 0.3),
                   borderRadius: BorderRadius.circular(1),
                 ),
+                child: FractionallySizedBox(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: index == _currentStoryIndex
+                      ? progress
+                      : index < _currentStoryIndex
+                          ? 1.0
+                          : 0.0,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: kWhite,
+                      borderRadius: BorderRadius.circular(1),
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
+            );
+          }),
         );
-      }),
+      },
     );
   }
 

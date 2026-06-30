@@ -257,9 +257,9 @@ class NewGroupTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: const Icon(Icons.campaign, color: kLimeGreen, size: 22),
+      leading: const Icon(Icons.group_add, color: kLimeGreen, size: 22),
       title: Text(
-        'New Channel',
+        'New Group',
         style: GoogleFonts.inter(
           color: kLimeGreen,
           fontSize: 15,
@@ -380,6 +380,17 @@ class NewGroupTile extends StatelessWidget {
                     setDialogState(() => joinRule = value!);
                   },
                 ),
+                RadioListTile<JoinRule>(
+                  title: const Text('Approve Requests',
+                      style: TextStyle(color: kWhite, fontSize: 14)),
+                  value: JoinRule.knock,
+                  groupValue: joinRule,
+                  activeColor: kLimeGreen,
+                  contentPadding: EdgeInsets.zero,
+                  onChanged: (value) {
+                    setDialogState(() => joinRule = value!);
+                  },
+                ),
               ],
             ),
           ),
@@ -479,9 +490,9 @@ class NewChannelTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: const Icon(Icons.group_add, color: kLimeGreen, size: 22),
+      leading: const Icon(Icons.campaign, color: kLimeGreen, size: 22),
       title: Text(
-        'New Group',
+        'New Channel',
         style: GoogleFonts.inter(
           color: kLimeGreen,
           fontSize: 15,
@@ -499,60 +510,94 @@ class NewChannelTile extends StatelessWidget {
 
   void _showCreateChannelDialog(BuildContext context) {
     final nameCtrl = TextEditingController();
+    var isPublic = true;
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: kDarkerGrey,
-        title: Text('New Channel', style: GoogleFonts.inter(color: kWhite)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: nameCtrl,
-              style: const TextStyle(color: kWhite),
-              decoration: const InputDecoration(
-                hintText: 'Channel Name',
-                hintStyle: TextStyle(color: Colors.white54),
-                enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: kLimeGreen)),
-                focusedBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: kLimeGreen)),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: kDarkerGrey,
+          title: Text('New Channel', style: GoogleFonts.inter(color: kWhite)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                style: const TextStyle(color: kWhite),
+                decoration: const InputDecoration(
+                  hintText: 'Channel Name',
+                  hintStyle: TextStyle(color: Colors.white54),
+                  enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: kLimeGreen)),
+                  focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: kLimeGreen)),
+                ),
+                autofocus: true,
               ),
-              autofocus: true,
+              const SizedBox(height: 12),
+              RadioListTile<bool>(
+                value: true,
+                groupValue: isPublic,
+                activeColor: kLimeGreen,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Public', style: TextStyle(color: kWhite)),
+                subtitle: const Text(
+                  'Anyone can find and join this channel',
+                  style: TextStyle(color: kLightGrey, fontSize: 12),
+                ),
+                onChanged: (value) {
+                  if (value == null) return;
+                  setDialogState(() => isPublic = value);
+                },
+              ),
+              RadioListTile<bool>(
+                value: false,
+                groupValue: isPublic,
+                activeColor: kLimeGreen,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Private', style: TextStyle(color: kWhite)),
+                subtitle: const Text(
+                  'Only invited subscribers can join',
+                  style: TextStyle(color: kLightGrey, fontSize: 12),
+                ),
+                onChanged: (value) {
+                  if (value == null) return;
+                  setDialogState(() => isPublic = value);
+                },
+              ),
+              if (isPublic)
+                const Text(
+                  'Public channels are not end-to-end encrypted.',
+                  style: TextStyle(color: kLightGrey, fontSize: 12),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child:
+                  const Text('Cancel', style: TextStyle(color: Colors.white54)),
             ),
-            const SizedBox(height: 12),
-            const Text(
-              'Public channels are not end-to-end encrypted.',
-              style: TextStyle(color: kLightGrey, fontSize: 12),
+            TextButton(
+              onPressed: () async {
+                final name = nameCtrl.text.trim();
+                if (name.isEmpty) return;
+                Navigator.pop(ctx);
+                final provider = context.read<MatrixProvider>();
+                await _createAndOpenRoom(
+                  context: context,
+                  provider: provider,
+                  createRoom: () => provider.service.createChannel(
+                    name: name,
+                    isPublic: isPublic,
+                  ),
+                  errorPrefix: 'Failed to create channel',
+                );
+              },
+              child: const Text('Create', style: TextStyle(color: kLimeGreen)),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child:
-                const Text('Cancel', style: TextStyle(color: Colors.white54)),
-          ),
-          TextButton(
-            onPressed: () async {
-              final name = nameCtrl.text.trim();
-              if (name.isEmpty) return;
-              Navigator.pop(ctx);
-              final provider = context.read<MatrixProvider>();
-              await _createAndOpenRoom(
-                context: context,
-                provider: provider,
-                createRoom: () => provider.service.createChannel(
-                  name: name,
-                  isPublic: true,
-                ),
-                errorPrefix: 'Failed to create channel',
-              );
-            },
-            child: const Text('Create', style: TextStyle(color: kLimeGreen)),
-          ),
-        ],
       ),
     );
   }

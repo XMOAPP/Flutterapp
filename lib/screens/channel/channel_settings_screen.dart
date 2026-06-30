@@ -70,19 +70,24 @@ class _SettingsDropdown<T> extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 28),
           DropdownButtonHideUnderline(
-            child: DropdownButton<T>(
-              value: value,
-              dropdownColor: const Color(0xFF2C2C2E),
-              iconEnabledColor: kLightGrey,
-              style: GoogleFonts.inter(
-                color: kWhite,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+            child: SizedBox(
+              width: compact ? 150 : 190,
+              child: DropdownButton<T>(
+                value: value,
+                isExpanded: true,
+                alignment: Alignment.centerRight,
+                dropdownColor: const Color(0xFF2C2C2E),
+                iconEnabledColor: kLightGrey,
+                style: GoogleFonts.inter(
+                  color: kWhite,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+                items: items,
+                onChanged: onChanged,
               ),
-              items: items,
-              onChanged: onChanged,
             ),
           ),
         ],
@@ -92,23 +97,27 @@ class _SettingsDropdown<T> extends StatelessWidget {
 }
 
 class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
+  static const _adminOnlyChannelPermissions = XmoRoomPermissions(
+    sendMessages: RoomControlsService.channelPostingPower,
+    sendMedia: RoomControlsService.channelPostingPower,
+    startCalls: RoomControlsService.channelPostingPower,
+    sendPolls: RoomControlsService.channelPostingPower,
+    sendStickers: RoomControlsService.channelPostingPower,
+  );
+
   final _nameCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   bool _loading = false;
   XmoJoinMode _joinMode = XmoJoinMode.invite;
   int _slowModeSeconds = 0;
-  XmoRoomPermissions _permissions = const XmoRoomPermissions(
-    sendMessages: 50,
-    sendMedia: 50,
-    startCalls: 50,
-    sendPolls: 50,
-    sendStickers: 50,
-  );
   bool _signMessages = true;
   Uint8List? _selectedAvatarBytes;
   String? _selectedAvatarName;
   String? _avatarUrl;
   bool _removeAvatar = false;
+  List<User> _joinRequests = const [];
+  bool _loadingJoinRequests = false;
+  final Set<String> _joinRequestActions = {};
   late ChannelService _channelService;
 
   String get _resolvedRoomName =>
@@ -121,6 +130,7 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
     _channelService = ChannelService(matrixProvider.service);
     _avatarUrl = _resolveRoomAvatarUrl();
     _loadSettings();
+    _loadJoinRequests();
   }
 
   Future<void> _loadSettings() async {
@@ -128,7 +138,6 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
     _descCtrl.text = widget.room.topic;
     _joinMode = RoomControlsService.joinModeFor(widget.room);
     _slowModeSeconds = RoomControlsService.slowModeSecondsFor(widget.room);
-    _permissions = XmoRoomPermissions.fromRoom(widget.room);
 
     try {
       final settings = await _channelService.getChannelSettings(widget.room.id);
@@ -148,6 +157,76 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
     _nameCtrl.dispose();
     _descCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadJoinRequests() async {
+    if (!mounted) return;
+    setState(() => _loadingJoinRequests = true);
+    try {
+      final requests = await widget.room.requestParticipants(
+        const [Membership.knock],
+      );
+      if (!mounted) return;
+      setState(() {
+        _joinRequests = requests;
+        _loadingJoinRequests = false;
+      });
+    } catch (e) {
+      debugPrint('[ChannelSettings] Error loading join requests: $e');
+      if (!mounted) return;
+      setState(() => _loadingJoinRequests = false);
+    }
+  }
+
+  Future<void> _approveJoinRequest(User user) async {
+    await _handleJoinRequestAction(
+      user,
+      actionLabel: 'approved',
+      action: () => widget.room.invite(user.id),
+    );
+  }
+
+  Future<void> _declineJoinRequest(User user) async {
+    await _handleJoinRequestAction(
+      user,
+      actionLabel: 'declined',
+      action: () => widget.room.kick(user.id),
+    );
+  }
+
+  Future<void> _handleJoinRequestAction(
+    User user, {
+    required String actionLabel,
+    required Future<void> Function() action,
+  }) async {
+    if (_joinRequestActions.contains(user.id)) return;
+    setState(() => _joinRequestActions.add(user.id));
+    try {
+      await action();
+      if (!mounted) return;
+      setState(() {
+        _joinRequests =
+            _joinRequests.where((item) => item.id != user.id).toList();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${user.calcDisplayname()} $actionLabel'),
+          backgroundColor: kLimeGreen,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to $actionLabel request: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _joinRequestActions.remove(user.id));
+      }
+    }
   }
 
   Future<void> _pickAvatar() async {
@@ -260,12 +339,20 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
         await widget.room.setAvatar(matrixFile);
       }
 
-      await RoomControlsService.setJoinMode(widget.room, _joinMode);
+      await RoomControlsService.setChannelJoinMode(widget.room, _joinMode);
+      final directoryVisibilitySaved =
+          await RoomControlsService.setChannelDirectoryVisibility(
+        widget.room,
+        _joinMode,
+      );
       await RoomControlsService.setSlowModeSeconds(
         widget.room,
         _slowModeSeconds,
       );
-      await RoomControlsService.setPermissions(widget.room, _permissions);
+      await RoomControlsService.setPermissions(
+        widget.room,
+        _adminOnlyChannelPermissions,
+      );
 
       await widget.room.client.setRoomStateWithKey(
         widget.room.id,
@@ -285,9 +372,14 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
       if (mounted) {
         context.read<MatrixProvider>().refreshRooms();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Settings saved successfully'),
-            backgroundColor: kLimeGreen,
+          SnackBar(
+            content: Text(
+              directoryVisibilitySaved
+                  ? 'Settings saved successfully'
+                  : 'Settings saved. Server did not allow public directory listing.',
+            ),
+            backgroundColor:
+                directoryVisibilitySaved ? kLimeGreen : Colors.orangeAccent,
           ),
         );
         Navigator.pop(context, true);
@@ -402,21 +494,21 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
 
   Widget _buildJoinModeSelector() {
     return _SettingsDropdown<XmoJoinMode>(
-      title: 'Who can join',
+      title: 'Channel visibility',
       subtitle: _joinModeSubtitle,
       value: _joinMode,
       items: const [
         DropdownMenuItem(
           value: XmoJoinMode.public,
-          child: Text('Anyone'),
+          child: Text('Public'),
         ),
         DropdownMenuItem(
           value: XmoJoinMode.invite,
-          child: Text('Invite only'),
+          child: Text('Private'),
         ),
         DropdownMenuItem(
           value: XmoJoinMode.request,
-          child: Text('Approve requests'),
+          child: Text('Private - approve requests'),
         ),
       ],
       onChanged: (value) {
@@ -431,10 +523,131 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
       case XmoJoinMode.public:
         return 'Anyone can find and join this channel';
       case XmoJoinMode.request:
-        return 'New subscribers must request approval';
+        return 'Invite-link subscribers need admin approval';
       case XmoJoinMode.invite:
-        return 'Only invited subscribers can join';
+        return 'Only invited subscribers can find and join';
     }
+  }
+
+  Widget _buildJoinRequestsSection() {
+    if (_joinMode != XmoJoinMode.request && _joinRequests.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1D1F),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Join requests',
+                  style: GoogleFonts.inter(
+                    color: kWhite,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Refresh',
+                onPressed: _loadingJoinRequests ? null : _loadJoinRequests,
+                icon: _loadingJoinRequests
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          color: kLimeGreen,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Icon(Icons.refresh, color: kLightGrey, size: 20),
+              ),
+            ],
+          ),
+          if (_joinRequests.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                _loadingJoinRequests
+                    ? 'Checking for pending requests...'
+                    : 'No pending join requests',
+                style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+              ),
+            )
+          else
+            ..._joinRequests.map(_buildJoinRequestTile),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildJoinRequestTile(User user) {
+    final busy = _joinRequestActions.contains(user.id);
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        children: [
+          StoryAvatar(
+            size: 38,
+            avatarUrl: user.avatarUrl?.toString(),
+            userName: user.calcDisplayname(),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  user.calcDisplayname(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    color: kWhite,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  user.id,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          if (busy)
+            const SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                color: kLimeGreen,
+                strokeWidth: 2,
+              ),
+            )
+          else ...[
+            IconButton(
+              tooltip: 'Decline',
+              onPressed: () => _declineJoinRequest(user),
+              icon: const Icon(Icons.close, color: Colors.redAccent, size: 20),
+            ),
+            IconButton(
+              tooltip: 'Approve',
+              onPressed: () => _approveJoinRequest(user),
+              icon: const Icon(Icons.check, color: kLimeGreen, size: 20),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   Widget _buildSlowModeSelector() {
@@ -455,29 +668,6 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
       onChanged: (value) {
         if (value == null) return;
         setState(() => _slowModeSeconds = value);
-      },
-    );
-  }
-
-  Widget _buildPermissionSelector(
-    String title,
-    int value,
-    ValueChanged<int> onChanged,
-  ) {
-    return _SettingsDropdown<int>(
-      title: title,
-      subtitle: RoomControlsService.roleLabelForPower(value),
-      value: value,
-      compact: true,
-      items: const [
-        DropdownMenuItem(value: 0, child: Text('All subscribers')),
-        DropdownMenuItem(value: 50, child: Text('Moderators')),
-        DropdownMenuItem(value: 75, child: Text('Admins')),
-        DropdownMenuItem(value: 100, child: Text('Owner')),
-      ],
-      onChanged: (value) {
-        if (value == null) return;
-        onChanged(value);
       },
     );
   }
@@ -668,6 +858,7 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
             const SizedBox(height: 12),
 
             _buildJoinModeSelector(),
+            _buildJoinRequestsSection(),
             const SizedBox(height: 8),
             _buildSlowModeSelector(),
             const SizedBox(height: 8),
@@ -700,82 +891,6 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
                 onChanged: (value) {
                   setState(() => _signMessages = value);
                 },
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            Text(
-              'Posting Permissions',
-              style: GoogleFonts.inter(
-                color: kWhite,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 10),
-            _buildPermissionSelector(
-              'Post Messages',
-              _permissions.sendMessages,
-              (value) => setState(
-                () => _permissions = XmoRoomPermissions(
-                  sendMessages: value,
-                  sendMedia: _permissions.sendMedia,
-                  startCalls: _permissions.startCalls,
-                  sendPolls: _permissions.sendPolls,
-                  sendStickers: _permissions.sendStickers,
-                ),
-              ),
-            ),
-            _buildPermissionSelector(
-              'Post Media & Files',
-              _permissions.sendMedia,
-              (value) => setState(
-                () => _permissions = XmoRoomPermissions(
-                  sendMessages: _permissions.sendMessages,
-                  sendMedia: value,
-                  startCalls: _permissions.startCalls,
-                  sendPolls: _permissions.sendPolls,
-                  sendStickers: _permissions.sendStickers,
-                ),
-              ),
-            ),
-            _buildPermissionSelector(
-              'Start Calls',
-              _permissions.startCalls,
-              (value) => setState(
-                () => _permissions = XmoRoomPermissions(
-                  sendMessages: _permissions.sendMessages,
-                  sendMedia: _permissions.sendMedia,
-                  startCalls: value,
-                  sendPolls: _permissions.sendPolls,
-                  sendStickers: _permissions.sendStickers,
-                ),
-              ),
-            ),
-            _buildPermissionSelector(
-              'Post Polls',
-              _permissions.sendPolls,
-              (value) => setState(
-                () => _permissions = XmoRoomPermissions(
-                  sendMessages: _permissions.sendMessages,
-                  sendMedia: _permissions.sendMedia,
-                  startCalls: _permissions.startCalls,
-                  sendPolls: value,
-                  sendStickers: _permissions.sendStickers,
-                ),
-              ),
-            ),
-            _buildPermissionSelector(
-              'Post Stickers',
-              _permissions.sendStickers,
-              (value) => setState(
-                () => _permissions = XmoRoomPermissions(
-                  sendMessages: _permissions.sendMessages,
-                  sendMedia: _permissions.sendMedia,
-                  startCalls: _permissions.startCalls,
-                  sendPolls: _permissions.sendPolls,
-                  sendStickers: value,
-                ),
               ),
             ),
             const SizedBox(height: 20),

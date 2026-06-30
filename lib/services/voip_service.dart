@@ -539,10 +539,14 @@ class VoipService with WidgetsBindingObserver {
     }
     _handlingNativeAction = true;
     final roomId = _nativeCallRoomId(payload);
+    final callId = _nativeCallId(payload);
     final deadline = DateTime.now().add(const Duration(seconds: 75));
     try {
       while (DateTime.now().isBefore(deadline)) {
-        final session = _matchingNativeIncomingSession(roomId);
+        final session = _matchingNativeIncomingSession(
+          roomId: roomId,
+          callId: callId,
+        );
         if (session != null) {
           if (action == 'answer') {
             await answerIncomingCall(session);
@@ -554,7 +558,10 @@ class VoipService with WidgetsBindingObserver {
           return;
         }
 
-        final groupCall = _matchingNativeIncomingGroupCall(roomId);
+        final groupCall = _matchingNativeIncomingGroupCall(
+          roomId: roomId,
+          callId: callId,
+        );
         if (groupCall != null) {
           if (action == 'answer') {
             await answerIncomingGroupCall(groupCall);
@@ -593,7 +600,25 @@ class VoipService with WidgetsBindingObserver {
     return null;
   }
 
-  CallSession? _matchingNativeIncomingSession(String? roomId) {
+  String? _nativeCallId(Map<String, String> payload) {
+    for (final key in const [
+      'call_id',
+      'callId',
+      'm.call.id',
+      'm.call_id',
+      'group_call_id',
+      'groupCallId',
+    ]) {
+      final value = payload[key]?.trim();
+      if (value != null && value.isNotEmpty) return value;
+    }
+    return null;
+  }
+
+  CallSession? _matchingNativeIncomingSession({
+    required String? roomId,
+    required String? callId,
+  }) {
     final candidates = <CallSession?>[
       incomingCall.value,
       _activeSession,
@@ -602,15 +627,23 @@ class VoipService with WidgetsBindingObserver {
       if (session == null || session.isGroupCall) continue;
       if (session.direction != CallDirection.kIncoming) continue;
       if (session.state != CallState.kRinging) continue;
-      if (roomId == null || roomId.isEmpty || session.room.id == roomId) {
+      final roomMatches =
+          roomId == null || roomId.isEmpty || session.room.id == roomId;
+      final callMatches =
+          callId == null || callId.isEmpty || session.callId == callId;
+      if (roomMatches && callMatches) {
         return session;
       }
     }
     return null;
   }
 
-  GroupCall? _matchingNativeIncomingGroupCall(String? roomId) {
+  GroupCall? _matchingNativeIncomingGroupCall({
+    required String? roomId,
+    required String? callId,
+  }) {
     final candidates = <GroupCall?>[
+      if (callId != null && callId.isNotEmpty) _voip?.getGroupCallById(callId),
       incomingGroupCall.value,
       if (roomId != null && roomId.isNotEmpty)
         _voip?.getGroupCallForRoom(roomId),
@@ -619,7 +652,11 @@ class VoipService with WidgetsBindingObserver {
     for (final groupCall in candidates) {
       if (groupCall == null || groupCall.terminated) continue;
       if (groupCall.state == GroupCallState.Ended) continue;
-      if (roomId == null || roomId.isEmpty || groupCall.room.id == roomId) {
+      final roomMatches =
+          roomId == null || roomId.isEmpty || groupCall.room.id == roomId;
+      final callMatches =
+          callId == null || callId.isEmpty || groupCall.groupCallId == callId;
+      if (roomMatches && callMatches) {
         return groupCall;
       }
     }

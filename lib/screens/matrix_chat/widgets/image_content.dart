@@ -4,9 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import '../../../theme.dart';
+import '../media_handler.dart';
 
 /// Image content widget for Matrix messages
-class ImageContent extends StatelessWidget {
+class ImageContent extends StatefulWidget {
   final Event event;
   final Future<Uint8List?> Function(Event, {bool getThumbnail}) loadImageBytes;
   final void Function(Uint8List, String, Event) openFullscreenImage;
@@ -23,6 +24,28 @@ class ImageContent extends StatelessWidget {
   });
 
   @override
+  State<ImageContent> createState() => _ImageContentState();
+}
+
+class _ImageContentState extends State<ImageContent> {
+  late Future<Uint8List?> _imageFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _imageFuture = widget.loadImageBytes(widget.event);
+  }
+
+  @override
+  void didUpdateWidget(covariant ImageContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.event.eventId != widget.event.eventId ||
+        oldWidget.loadImageBytes != widget.loadImageBytes) {
+      _imageFuture = widget.loadImageBytes(widget.event);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.sizeOf(context).width;
     final maxMediaWidth = math.min(
@@ -36,19 +59,21 @@ class ImageContent extends StatelessWidget {
     final placeholderWidth = math.min(200.0, maxMediaWidth);
     final placeholderHeight = math.min(150.0, maxMediaHeight);
     final compactPlaceholderHeight = math.min(80.0, maxMediaHeight);
+    final cachedBytes = MediaHandler.getCachedImageBytes(widget.event.eventId);
 
     return FutureBuilder<Uint8List?>(
-      future: loadImageBytes(event),
+      initialData: cachedBytes,
+      future: cachedBytes != null ? null : _imageFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return _RenderedSizeReporter(
-            onSize: onRenderedSize,
+            onSize: widget.onRenderedSize,
             child: Container(
               width: placeholderWidth,
               height: placeholderHeight,
               decoration: BoxDecoration(
                 color: kDarkGrey,
-                borderRadius: borderRadius,
+                borderRadius: widget.borderRadius,
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -57,7 +82,7 @@ class ImageContent extends StatelessWidget {
                       color: kLimeGreen, strokeWidth: 2),
                   const SizedBox(height: 8),
                   Text(
-                    event.body,
+                    widget.event.body,
                     style: GoogleFonts.inter(color: kLightGrey, fontSize: 10),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -71,13 +96,13 @@ class ImageContent extends StatelessWidget {
         final bytes = snapshot.data;
         if (bytes == null || bytes.isEmpty) {
           return _RenderedSizeReporter(
-            onSize: onRenderedSize,
+            onSize: widget.onRenderedSize,
             child: Container(
               width: placeholderWidth,
               height: compactPlaceholderHeight,
               decoration: BoxDecoration(
                 color: kDarkGrey,
-                borderRadius: borderRadius,
+                borderRadius: widget.borderRadius,
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -85,7 +110,7 @@ class ImageContent extends StatelessWidget {
                   const Icon(Icons.broken_image_outlined,
                       color: kLightGrey, size: 28),
                   const SizedBox(height: 4),
-                  Text(event.body,
+                  Text(widget.event.body,
                       style:
                           GoogleFonts.inter(color: kLightGrey, fontSize: 11)),
                 ],
@@ -95,11 +120,12 @@ class ImageContent extends StatelessWidget {
         }
 
         return GestureDetector(
-          onTap: () => openFullscreenImage(bytes, event.body, event),
+          onTap: () => widget.openFullscreenImage(
+              bytes, widget.event.body, widget.event),
           child: _RenderedSizeReporter(
-            onSize: onRenderedSize,
+            onSize: widget.onRenderedSize,
             child: ClipRRect(
-              borderRadius: borderRadius,
+              borderRadius: widget.borderRadius,
               child: ConstrainedBox(
                 constraints: BoxConstraints(
                   maxWidth: maxMediaWidth,
@@ -113,7 +139,7 @@ class ImageContent extends StatelessWidget {
                     height: compactPlaceholderHeight,
                     decoration: BoxDecoration(
                       color: kDarkGrey,
-                      borderRadius: borderRadius,
+                      borderRadius: widget.borderRadius,
                     ),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -121,7 +147,7 @@ class ImageContent extends StatelessWidget {
                         const Icon(Icons.broken_image_outlined,
                             color: kLightGrey, size: 28),
                         const SizedBox(height: 4),
-                        Text(event.body,
+                        Text(widget.event.body,
                             style: GoogleFonts.inter(
                                 color: kLightGrey, fontSize: 11)),
                       ],

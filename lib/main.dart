@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:reown_appkit/reown_appkit.dart';
 import '../theme.dart';
+import 'core/app_dependencies.dart';
 import '../providers/chat_filter_provider.dart';
 import '../providers/matrix_provider.dart';
 import '../providers/group_provider.dart';
@@ -139,7 +140,10 @@ Future<void> _openPushChat(
 
 class XmoApp extends StatelessWidget {
   final MatrixProvider matrixProvider;
-  const XmoApp({super.key, required this.matrixProvider});
+  final AppDependencies dependencies;
+
+  XmoApp({super.key, required this.matrixProvider})
+      : dependencies = AppDependencies.from(matrixProvider.service);
 
   @override
   Widget build(BuildContext context) {
@@ -155,33 +159,36 @@ class XmoApp extends StatelessWidget {
           create: (_) => StoryProvider(StoryService(matrixProvider.service)),
         ),
       ],
-      child: ReownAppKitModalTheme(
-        isDarkMode: true,
-        child: MaterialApp(
-          navigatorKey: xmoNavigatorKey,
-          title: 'xmo',
-          debugShowCheckedModeBanner: false,
-          theme: buildXmoTheme(),
-          home: const SplashScreen(),
-          // ── PiP overlay sits on top of all routes ──────────────────────
-          builder: (context, child) {
-            return AppLockGate(
-              child: Stack(
-                children: [
-                  child!,
-                  const ConnectionStatusBanner(),
-                  ValueListenableBuilder<bool>(
-                    valueListenable: VoipService().pipMode,
-                    builder: (_, isPip, __) {
-                      if (!isPip) return const SizedBox.shrink();
-                      return const CallPipOverlay();
-                    },
-                  ),
-                  const IncomingCallBanner(),
-                ],
-              ),
-            );
-          },
+      child: AppDependenciesScope(
+        dependencies: dependencies,
+        child: ReownAppKitModalTheme(
+          isDarkMode: true,
+          child: MaterialApp(
+            navigatorKey: xmoNavigatorKey,
+            title: 'xmo',
+            debugShowCheckedModeBanner: false,
+            theme: buildXmoTheme(),
+            home: const SplashScreen(),
+            // ── PiP overlay sits on top of all routes ──────────────────────
+            builder: (context, child) {
+              return AppLockGate(
+                child: Stack(
+                  children: [
+                    child!,
+                    const ConnectionStatusBanner(),
+                    ValueListenableBuilder<bool>(
+                      valueListenable: VoipService().pipMode,
+                      builder: (_, isPip, __) {
+                        if (!isPip) return const SizedBox.shrink();
+                        return const CallPipOverlay();
+                      },
+                    ),
+                    const IncomingCallBanner(),
+                  ],
+                ),
+              );
+            },
+          ),
         ),
       ),
     );

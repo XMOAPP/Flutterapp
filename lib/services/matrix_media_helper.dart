@@ -66,10 +66,10 @@ class MatrixMediaHelper {
   MatrixMediaRequest fromUrl(Uri url) {
     final query = Map<String, String>.from(url.queryParameters)
       ..remove('access_token');
-    var normalized = url.replace(queryParameters: query);
+    var normalized = _replaceQueryParameters(url, query);
     if (url.path.startsWith('/_matrix/media/v3/')) {
-      normalized = url.replace(
-        path: url.path.replaceFirst(
+      normalized = normalized.replace(
+        path: normalized.path.replaceFirst(
           '/_matrix/media/v3/',
           '/_matrix/client/v1/media/',
         ),
@@ -82,6 +82,18 @@ class MatrixMediaHelper {
       uri: normalized,
       headers:
           isMatrixMedia ? _authorizationHeaders() : const <String, String>{},
+    );
+  }
+
+  Uri _replaceQueryParameters(Uri uri, Map<String, String> query) {
+    return Uri(
+      scheme: uri.scheme,
+      userInfo: uri.userInfo,
+      host: uri.host,
+      port: uri.hasPort ? uri.port : null,
+      path: uri.path,
+      queryParameters: query.isEmpty ? null : query,
+      fragment: uri.fragment.isEmpty ? null : uri.fragment,
     );
   }
 

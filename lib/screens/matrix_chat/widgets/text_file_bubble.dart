@@ -7,9 +7,15 @@ import 'package:matrix/matrix.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../theme.dart';
 import '../../../models/group_models.dart';
+import '../../../providers/matrix_provider.dart';
+import '../../../providers/story_provider.dart';
+import '../../../services/matrix_media_helper.dart';
 import '../../../services/matrix_service.dart';
+import '../../story/story_viewer_screen.dart';
+import '../media_handler.dart';
 import 'audio_message_bubble.dart';
 import 'tappable_file_chip.dart';
+import 'package:provider/provider.dart';
 
 /// Text or file message bubble with rounded corners
 class TextOrFileMessageBubble extends StatelessWidget {
@@ -66,7 +72,11 @@ class TextOrFileMessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final displayBody = _stripReplyFallback(event.body);
+    final storyReply = _storyReplyContent(event);
+    final displayBody = _storyReplyDisplayBody(
+      _stripReplyFallback(event.body),
+      storyReply,
+    );
 
     return Container(
       padding: EdgeInsets.symmetric(
@@ -247,6 +257,10 @@ class TextOrFileMessageBubble extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  _StoryReplyContextPreview(
+                    storyReply: storyReply,
+                    isMe: isMe,
+                  ),
                   _ReplyContextPreview(
                     event: event,
                     isMe: isMe,
@@ -261,7 +275,8 @@ class TextOrFileMessageBubble extends StatelessWidget {
                     loadVideoThumbnail: loadVideoThumbnail,
                     onTap: onPrivateReplyTap,
                   ),
-                  if (_replyToEventId(event) != null ||
+                  if (storyReply != null ||
+                      _replyToEventId(event) != null ||
                       _privateReplyContent(event) != null)
                     const SizedBox(height: 6),
                   _MentionAwareText(
@@ -701,6 +716,44 @@ Map<String, dynamic>? _privateReplyContent(Event event) {
   return null;
 }
 
+final Map<String, Future<Event?>> _replyPreviewEventFutures = {};
+final Map<String, Future<Uint8List?>> _replyPreviewMediaFutures = {};
+
+Future<Event?> _cachedReplyPreviewEvent(Room room, String eventId) {
+  final trimmedEventId = eventId.trim();
+  if (trimmedEventId.isEmpty) return Future<Event?>.value(null);
+  final key = '${room.id}:$trimmedEventId';
+  return _replyPreviewEventFutures.putIfAbsent(key, () async {
+    try {
+      return room.getEventById(trimmedEventId);
+    } catch (_) {
+      return null;
+    }
+  });
+}
+
+Uint8List? _cachedReplyPreviewMediaBytes(Event event, bool isImage) {
+  return isImage
+      ? MediaHandler.getCachedImageBytes(event.eventId, getThumbnail: true)
+      : MediaHandler.getCachedThumbnail(event.eventId);
+}
+
+Future<Uint8List?>? _cachedReplyPreviewMediaFuture(
+  Event event,
+  bool isImage,
+  Future<Uint8List?> Function(Event, {bool getThumbnail})? loadImageBytes,
+  Future<Uint8List?> Function(Event)? loadVideoThumbnail,
+) {
+  final key =
+      '${event.room.id}:${event.eventId}:${isImage ? 'image' : 'video'}';
+  return _replyPreviewMediaFutures.putIfAbsent(key, () {
+    return isImage
+        ? loadImageBytes?.call(event, getThumbnail: true) ??
+            Future<Uint8List?>.value(null)
+        : loadVideoThumbnail?.call(event) ?? Future<Uint8List?>.value(null);
+  });
+}
+
 class _PrivateReplyContextPreview extends StatelessWidget {
   final Event event;
   final bool isMe;
@@ -727,12 +780,14 @@ class _PrivateReplyContextPreview extends StatelessWidget {
     final sourceEventId = (privateReply['source_event_id'] as String?)?.trim();
     final msgtype = (privateReply['msgtype'] as String?)?.trim();
 
+    final sourceFuture = _loadPrivateReplySourceEvent(
+      event,
+      sourceRoomId: sourceRoomId,
+      sourceEventId: sourceEventId,
+    );
+
     return FutureBuilder<Event?>(
-      future: _loadPrivateReplySourceEvent(
-        event,
-        sourceRoomId: sourceRoomId,
-        sourceEventId: sourceEventId,
-      ),
+      future: sourceFuture,
       builder: (context, snapshot) {
         final sourceEvent = snapshot.data;
         final displayPreview = sourceEvent == null
@@ -823,22 +878,17 @@ class _PrivateReplyContextPreview extends StatelessWidget {
     Event privateReplyEvent, {
     required String? sourceRoomId,
     required String? sourceEventId,
-  }) async {
+  }) {
     if (sourceRoomId == null ||
         sourceRoomId.isEmpty ||
         sourceEventId == null ||
         sourceEventId.isEmpty) {
-      return null;
+      return Future<Event?>.value(null);
     }
 
     final sourceRoom = privateReplyEvent.room.client.getRoomById(sourceRoomId);
-    if (sourceRoom == null) return null;
-
-    try {
-      return sourceRoom.getEventById(sourceEventId);
-    } catch (_) {
-      return null;
-    }
+    if (sourceRoom == null) return Future<Event?>.value(null);
+    return _cachedReplyPreviewEvent(sourceRoom, sourceEventId);
   }
 
   String _privateReplyPreviewText(Event event, {required String fallback}) {
@@ -885,11 +935,18 @@ class _PrivateReplyMediaPreview extends StatelessWidget {
     final msgtype = event?.messageType ?? fallbackMsgtype;
     if (msgtype == MessageTypes.Image || msgtype == MessageTypes.Video) {
       final source = event;
-      final thumbFuture = source == null
-          ? Future<Uint8List?>.value(null)
-          : msgtype == MessageTypes.Image
-              ? loadImageBytes?.call(source, getThumbnail: true)
-              : loadVideoThumbnail?.call(source);
+      final isImage = msgtype == MessageTypes.Image;
+      final cachedBytes = source == null
+          ? null
+          : _cachedReplyPreviewMediaBytes(source, isImage);
+      final thumbFuture = source == null || cachedBytes != null
+          ? null
+          : _cachedReplyPreviewMediaFuture(
+              source,
+              isImage,
+              loadImageBytes,
+              loadVideoThumbnail,
+            );
 
       return Container(
         width: 38,
@@ -900,6 +957,7 @@ class _PrivateReplyMediaPreview extends StatelessWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: FutureBuilder<Uint8List?>(
+          initialData: cachedBytes,
           future: thumbFuture,
           builder: (context, snapshot) {
             final bytes = snapshot.data;
@@ -976,6 +1034,283 @@ class _PrivateReplyTypeIcon extends StatelessWidget {
   }
 }
 
+const _storyReplyContentKey = 'com.xmo.story_reply';
+
+_StoryReplyContent? _storyReplyContent(Event event) {
+  final raw = event.content[_storyReplyContentKey];
+  if (raw is Map) {
+    return _StoryReplyContent.fromJson(
+      raw.map((key, value) => MapEntry(key.toString(), value)),
+    );
+  }
+  if (event.body.startsWith('Replied to your story\n')) {
+    return const _StoryReplyContent.legacy();
+  }
+  return null;
+}
+
+String _storyReplyDisplayBody(
+  String body,
+  _StoryReplyContent? storyReply,
+) {
+  if (storyReply == null) return body;
+  if (body.startsWith('Replied to your story\n')) {
+    return body.substring('Replied to your story\n'.length).trim();
+  }
+  return body;
+}
+
+class _StoryReplyContent {
+  final String? storyId;
+  final String? storyOwnerId;
+  final String? storyOwnerName;
+  final String? mediaType;
+  final String? mediaUrl;
+  final String? thumbnailUrl;
+  final String? textContent;
+  final String? caption;
+  final DateTime? expiresAt;
+  final bool legacy;
+
+  const _StoryReplyContent({
+    required this.storyId,
+    required this.storyOwnerId,
+    required this.storyOwnerName,
+    required this.mediaType,
+    required this.mediaUrl,
+    required this.thumbnailUrl,
+    required this.textContent,
+    required this.caption,
+    required this.expiresAt,
+  }) : legacy = false;
+
+  const _StoryReplyContent.legacy()
+      : storyId = null,
+        storyOwnerId = null,
+        storyOwnerName = null,
+        mediaType = null,
+        mediaUrl = null,
+        thumbnailUrl = null,
+        textContent = null,
+        caption = null,
+        expiresAt = null,
+        legacy = true;
+
+  factory _StoryReplyContent.fromJson(Map<String, dynamic> json) {
+    final expiresAtMs = json['expires_at'];
+    return _StoryReplyContent(
+      storyId: json['story_id'] as String?,
+      storyOwnerId: json['story_owner_id'] as String?,
+      storyOwnerName: json['story_owner_name'] as String?,
+      mediaType: json['media_type'] as String?,
+      mediaUrl: json['media_url'] as String?,
+      thumbnailUrl: json['thumbnail_url'] as String?,
+      textContent: json['text_content'] as String?,
+      caption: json['caption'] as String?,
+      expiresAt: expiresAtMs is int
+          ? DateTime.fromMillisecondsSinceEpoch(expiresAtMs)
+          : null,
+    );
+  }
+
+  bool get isExpired {
+    final expiry = expiresAt;
+    return expiry != null && DateTime.now().isAfter(expiry);
+  }
+
+  String get previewText {
+    if (isExpired) return 'Story expired';
+    return '';
+  }
+
+  IconData get fallbackIcon {
+    if (isExpired) return Icons.image_not_supported_outlined;
+    return switch (mediaType) {
+      'video' => Icons.play_arrow_rounded,
+      'text' => Icons.text_fields_rounded,
+      _ => Icons.image_outlined,
+    };
+  }
+
+  String? get activeThumbnailUrl {
+    if (isExpired) return null;
+    return thumbnailUrl ?? mediaUrl;
+  }
+}
+
+class _StoryReplyContextPreview extends StatelessWidget {
+  final _StoryReplyContent? storyReply;
+  final bool isMe;
+
+  const _StoryReplyContextPreview({
+    required this.storyReply,
+    required this.isMe,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final storyReply = this.storyReply;
+    if (storyReply == null) return const SizedBox.shrink();
+
+    final canOpen = _canOpenStory(context, storyReply);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: canOpen ? () => _openStory(context, storyReply) : null,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 132),
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: isMe
+              ? const Color(0xFF29452B)
+              : Colors.white.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 3,
+              height: 38,
+              decoration: BoxDecoration(
+                color: isMe ? kLimeGreen : const Color(0xFF72B7F2),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 7),
+            _StoryReplyThumb(storyReply: storyReply, isMe: isMe),
+            const SizedBox(width: 7),
+            Flexible(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Story',
+                    style: GoogleFonts.inter(
+                      color: isMe ? kLimeGreen : const Color(0xFF72B7F2),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    storyReply.isExpired ? 'expired' : 'replied',
+                    style: GoogleFonts.inter(
+                      color: isMe ? kLimeGreen : const Color(0xFF72B7F2),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  bool _canOpenStory(BuildContext context, _StoryReplyContent storyReply) {
+    if (storyReply.isExpired || storyReply.storyId == null) return false;
+    final myUserId = context.read<MatrixProvider>().userId;
+    if (storyReply.storyOwnerId != null &&
+        storyReply.storyOwnerId != myUserId) {
+      return false;
+    }
+    return context
+        .read<StoryProvider>()
+        .myStories
+        .any((story) => story.id == storyReply.storyId && !story.isExpired);
+  }
+
+  void _openStory(BuildContext context, _StoryReplyContent storyReply) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => StoryViewerScreen(
+          initialUserIndex: -1,
+          allUserStories: const [],
+          initialStoryId: storyReply.storyId,
+        ),
+      ),
+    );
+  }
+}
+
+class _StoryReplyThumb extends StatelessWidget {
+  final _StoryReplyContent storyReply;
+  final bool isMe;
+
+  const _StoryReplyThumb({
+    required this.storyReply,
+    required this.isMe,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final request = _mediaRequest(context);
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        color: isMe ? const Color(0xFF1A2A1A) : kDarkGrey,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: request == null
+          ? _StoryReplyThumbFallback(storyReply: storyReply, isMe: isMe)
+          : Stack(
+              fit: StackFit.expand,
+              children: [
+                Image.network(
+                  request.uri.toString(),
+                  headers: request.headers,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => _StoryReplyThumbFallback(
+                      storyReply: storyReply, isMe: isMe),
+                ),
+                if (storyReply.mediaType == 'video' && !storyReply.isExpired)
+                  Container(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    child: const Icon(
+                      Icons.play_arrow_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ),
+              ],
+            ),
+    );
+  }
+
+  MatrixMediaRequest? _mediaRequest(BuildContext context) {
+    final url = storyReply.activeThumbnailUrl;
+    if (url == null || url.isEmpty) return null;
+    return context.read<MatrixProvider>().service.getMediaRequest(url);
+  }
+}
+
+class _StoryReplyThumbFallback extends StatelessWidget {
+  final _StoryReplyContent storyReply;
+  final bool isMe;
+
+  const _StoryReplyThumbFallback({
+    required this.storyReply,
+    required this.isMe,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Icon(
+      storyReply.fallbackIcon,
+      color: isMe ? kLimeGreen : kLightGrey,
+      size: 20,
+    );
+  }
+}
+
 class _ReplyContextPreview extends StatelessWidget {
   final Event event;
   final bool isMe;
@@ -997,7 +1332,7 @@ class _ReplyContextPreview extends StatelessWidget {
     if (replyEventId == null) return const SizedBox.shrink();
 
     return FutureBuilder<Event?>(
-      future: event.room.getEventById(replyEventId),
+      future: _cachedReplyPreviewEvent(event.room, replyEventId),
       builder: (context, snapshot) {
         final replyEvent = snapshot.data;
         final sender = replyEvent == null
@@ -1116,9 +1451,15 @@ class _ReplyMediaThumb extends StatelessWidget {
     if (!_hasMediaThumb(event)) return const SizedBox.shrink();
 
     final isImage = event!.messageType == MessageTypes.Image;
-    final thumbFuture = isImage
-        ? loadImageBytes?.call(event!, getThumbnail: true)
-        : loadVideoThumbnail?.call(event!);
+    final cachedBytes = _cachedReplyPreviewMediaBytes(event!, isImage);
+    final thumbFuture = cachedBytes != null
+        ? null
+        : _cachedReplyPreviewMediaFuture(
+            event!,
+            isImage,
+            loadImageBytes,
+            loadVideoThumbnail,
+          );
 
     return Container(
       width: 38,
@@ -1129,6 +1470,7 @@ class _ReplyMediaThumb extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: FutureBuilder<Uint8List?>(
+        initialData: cachedBytes,
         future: thumbFuture,
         builder: (context, snapshot) {
           final bytes = snapshot.data;

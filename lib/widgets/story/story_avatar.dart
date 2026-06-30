@@ -61,7 +61,9 @@ class StoryAvatar extends StatelessWidget {
     final value = avatarUrl;
     if (value == null || value.isEmpty) return null;
     if (value.startsWith('http://') || value.startsWith('https://')) {
-      return MatrixMediaRequest(uri: Uri.parse(value));
+      final uri = Uri.tryParse(value);
+      if (uri == null) return null;
+      return context.read<MatrixProvider>().service.getMediaRequestForUrl(uri);
     }
 
     return context.read<MatrixProvider>().service.getMediaRequest(

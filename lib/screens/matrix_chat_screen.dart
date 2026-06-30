@@ -28,6 +28,7 @@ import '../widgets/matrix_chat/reply_preview.dart';
 import '../widgets/matrix_chat/pinned_messages_banner.dart';
 import '../widgets/matrix_chat/mention_autocomplete.dart';
 import '../widgets/incoming_call_fullscreen_scope.dart';
+import '../widgets/chat/old_messages_loading_indicator.dart';
 import '../widgets/direct_chat/typing_indicator.dart';
 import '../widgets/direct_chat/message_reactions.dart';
 import '../widgets/direct_chat/read_receipt.dart';
@@ -67,6 +68,17 @@ const String _unstablePollStartContentKey = 'org.matrix.msc3381.poll.start';
 const String _unstablePollResponseContentKey =
     'org.matrix.msc3381.poll.response';
 const double _jumpToLatestShowExtent = 160;
+
+double _responsiveBubbleWidth(
+  BuildContext context, {
+  required double compact,
+  required double regular,
+}) {
+  final viewport = MediaQuery.sizeOf(context).width;
+  final target = viewport < 390 ? compact : regular;
+  return math.min(target, math.max(220, viewport - 56));
+}
+
 const double _jumpToLatestHideExtent = 56;
 
 /// Real-time Matrix chat screen for a given Room
@@ -77,6 +89,7 @@ class MatrixChatScreen extends StatefulWidget {
   final String? initialComposerText;
   final PrivateReplyDraft? initialPrivateReply;
   final String? initialHighlightedEventId;
+  final bool? previewIsChannelHint;
 
   const MatrixChatScreen({
     super.key,
@@ -86,6 +99,7 @@ class MatrixChatScreen extends StatefulWidget {
     this.initialComposerText,
     this.initialPrivateReply,
     this.initialHighlightedEventId,
+    this.previewIsChannelHint,
   }) : assert(room != null || previewChannel != null);
 
   @override
@@ -139,6 +153,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   List<double> _recordingWaveform = const [];
   bool? _previewIsChannel;
   StreamSubscription<EventUpdate>? _eventSub;
+  StreamSubscription<dynamic>? _typingSub;
   late MediaHandler _mediaHandler;
   List<Event> _pinnedEvents = []; // Track pinned messages
   int? _pinnedBannerIndex;
@@ -159,6 +174,18 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   Duration _recordingAccumulatedDuration = Duration.zero;
   final AudioRecorder _audioRecorder = AudioRecorder();
   final Map<String, GlobalKey> _messageKeys = {};
+  final Map<String, String> _optimisticPollVotes = {};
+  final Map<String, bool> _savedMessageStatusCache = {};
+  final Map<String, Future<bool>> _savedMessageStatusFutures = {};
+  final Set<String> _preloadedVideoThumbnailEventIds = {};
+  bool _timelineUiRefreshScheduled = false;
+  bool _pendingTimelineAutoScroll = false;
+  int _pendingNewMessagesBelow = 0;
+  Timer? _readMarkerDebounce;
+  Timer? _sharedMediaIndexDebounce;
+  Timer? _stateRefreshDebounce;
+  bool _uploadProgressFrameScheduled = false;
+  bool _uploadPreviewFrameScheduled = false;
   String? _highlightedEventId;
   Timer? _highlightTimer;
   bool _handledInitialHighlightedEvent = false;
@@ -234,6 +261,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   @override
   void initState() {
     super.initState();
+    _previewIsChannel = widget.previewIsChannelHint;
     _privateReplyDraft = widget.initialPrivateReply;
     final initialComposerText = widget.initialComposerText;
     if (initialComposerText != null && initialComposerText.isNotEmpty) {
@@ -450,14 +478,16 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   void _listenForTyping() {
     if (_room == null) return;
 
+    _typingSub?.cancel();
+
     // Listen to room updates for typing indicators
-    _room!.onUpdate.stream.listen((_) {
+    _typingSub = _room!.onUpdate.stream.listen((_) {
       if (mounted) {
         final typingIndicators = _directChatService.getTypingUsers(_room!);
         final typingUserNames =
             typingIndicators.map((t) => t.displayName).toList();
 
-        if (typingUserNames.join() != _typingUsers.join()) {
+        if (!listEquals(typingUserNames, _typingUsers)) {
           setState(() {
             _typingUsers = typingUserNames;
           });
@@ -516,7 +546,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       );
       _scrollToBottom();
       _openInitialHighlightedMessage();
-      _markRoomAsRead();
+      _scheduleMarkRoomAsRead();
       _loadPinnedMessages();
       _eventSub = widget.matrixProvider.service.onEvent.listen((update) {
         if (update.roomID == _room!.id && mounted) {
@@ -524,30 +554,19 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           if (update.type == EventUpdateType.timeline) {
             final timeline = _timeline;
             if (timeline != null) {
-              unawaited(_indexSharedMediaTimeline(timeline));
-            }
-            if (shouldAutoScroll) {
-              if (_showJumpToLatestButton || _newMessagesBelowCount > 0) {
-                setState(_clearNewMessagesBelow);
+              _scheduleSharedMediaIndex(timeline);
+              if (_appSettings.autoDownloadMedia) {
+                _preloadVideoThumbnails(timeline);
               }
-              _scrollToBottom();
-            } else if (!_loadingHistory) {
-              setState(() {
-                _showJumpToLatestButton = true;
-                _newMessagesBelowCount =
-                    (_newMessagesBelowCount + 1).clamp(0, 999);
-              });
-            } else {
-              setState(() {});
             }
-            _markRoomAsRead();
+            _scheduleTimelineUiRefresh(shouldAutoScroll: shouldAutoScroll);
+            _scheduleMarkRoomAsRead();
           } else {
-            setState(() {});
+            _scheduleStateRefresh();
           }
           // Reload pinned messages if state changed
           if (update.type == EventUpdateType.state) {
-            _loadPinnedMessages();
-            _loadOwnRestriction();
+            _scheduleStateRefresh(loadStateData: true);
           }
         }
       });
@@ -564,6 +583,70 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     _handlePinnedBannerScroll();
     _maybeLoadOlderMessages();
     _syncJumpButtonWithScrollPosition();
+  }
+
+  void _scheduleTimelineUiRefresh({required bool shouldAutoScroll}) {
+    if (shouldAutoScroll) {
+      _pendingTimelineAutoScroll = true;
+    } else if (!_loadingHistory) {
+      _pendingNewMessagesBelow = (_pendingNewMessagesBelow + 1).clamp(0, 999);
+    }
+
+    if (_timelineUiRefreshScheduled) return;
+    _timelineUiRefreshScheduled = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        _timelineUiRefreshScheduled = false;
+        return;
+      }
+
+      final shouldScroll = _pendingTimelineAutoScroll;
+      final newMessagesBelow = _pendingNewMessagesBelow;
+      _pendingTimelineAutoScroll = false;
+      _pendingNewMessagesBelow = 0;
+      _timelineUiRefreshScheduled = false;
+
+      if (shouldScroll) {
+        if (_showJumpToLatestButton || _newMessagesBelowCount > 0) {
+          setState(_clearNewMessagesBelow);
+        } else {
+          setState(() {});
+        }
+        _scrollToBottom();
+        return;
+      }
+
+      if (_loadingHistory) {
+        setState(() {});
+        return;
+      }
+
+      setState(() {
+        _showJumpToLatestButton = true;
+        _newMessagesBelowCount =
+            (_newMessagesBelowCount + newMessagesBelow).clamp(0, 999);
+      });
+    });
+  }
+
+  void _scheduleStateRefresh({bool loadStateData = false}) {
+    if (loadStateData) {
+      _stateRefreshDebounce?.cancel();
+      _stateRefreshDebounce =
+          Timer(const Duration(milliseconds: 200), () async {
+        if (!mounted) return;
+        await _loadPinnedMessages();
+        await _loadOwnRestriction();
+        if (mounted) setState(() {});
+      });
+      return;
+    }
+
+    if (_stateRefreshDebounce?.isActive ?? false) return;
+    _stateRefreshDebounce = Timer(const Duration(milliseconds: 16), () {
+      if (mounted) setState(() {});
+    });
   }
 
   void _maybeLoadOlderMessages() {
@@ -634,6 +717,13 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     } finally {
       if (mounted) setState(() => _loadingHistory = false);
     }
+  }
+
+  void _scheduleMarkRoomAsRead() {
+    _readMarkerDebounce?.cancel();
+    _readMarkerDebounce = Timer(const Duration(milliseconds: 450), () {
+      if (mounted) _markRoomAsRead();
+    });
   }
 
   Future<void> _markRoomAsRead() async {
@@ -797,14 +887,35 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   void _preloadVideoThumbnails(Timeline timeline) {
-    final videoEvents = timeline.events.where(
-      (e) =>
-          e.type == EventTypes.Message && e.messageType == MessageTypes.Video,
-    );
-    for (final event in videoEvents) {
-      // Fire-and-forget: fills _mediaHandler cache in background
+    var queued = 0;
+    for (final event in timeline.events) {
+      if (event.type != EventTypes.Message ||
+          event.messageType != MessageTypes.Video) {
+        continue;
+      }
+
+      final eventId = event.eventId;
+      if (eventId.isEmpty ||
+          _preloadedVideoThumbnailEventIds.contains(eventId) ||
+          MediaHandler.getCachedThumbnail(eventId) != null) {
+        continue;
+      }
+
+      _preloadedVideoThumbnailEventIds.add(eventId);
       _mediaHandler.loadVideoThumbnail(event).ignore();
+
+      queued += 1;
+      if (queued >= 12) break;
     }
+  }
+
+  void _scheduleSharedMediaIndex(Timeline timeline) {
+    _sharedMediaIndexDebounce?.cancel();
+    _sharedMediaIndexDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) {
+        unawaited(_indexSharedMediaTimeline(timeline));
+      }
+    });
   }
 
   Future<void> _indexSharedMediaTimeline(
@@ -994,40 +1105,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   Widget _buildHistoryLoadingIndicator() {
-    return Padding(
-      padding: const EdgeInsets.only(top: 6, bottom: 10),
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          decoration: BoxDecoration(
-            color: kDarkGrey.withValues(alpha: 0.92),
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: kLimeGreen,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Loading old messages...',
-                style: GoogleFonts.inter(
-                  color: kLightGrey,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    return const OldMessagesLoadingIndicator();
   }
 
   Future<void> _sendMessage() async {
@@ -1041,24 +1119,40 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         !_ensureSlowModeAllowed()) {
       return;
     }
+    final replyToEvent = _replyToEvent;
+    final privateReplyDraft = _privateReplyDraft;
     _textCtrl.clear();
-
-    // Send reply if replying to a message
-    if (_replyToEvent != null) {
-      await _room!.sendTextEvent(text, inReplyTo: _replyToEvent);
-      setState(() => _replyToEvent = null);
-    } else if (_privateReplyDraft != null) {
-      await _room!.sendEvent({
-        'msgtype': MessageTypes.Text,
-        'body': text,
-        'com.xmo.private_reply': _privateReplyDraft!.toJson(),
-      });
-      setState(() => _privateReplyDraft = null);
-    } else {
-      await widget.matrixProvider.sendMessage(_room!.id, text);
-    }
-
+    setState(() {
+      _replyToEvent = null;
+      _privateReplyDraft = null;
+    });
     _scrollToBottom();
+
+    try {
+      // Send reply if replying to a message
+      if (replyToEvent != null) {
+        await _room!.sendTextEvent(text, inReplyTo: replyToEvent);
+      } else if (privateReplyDraft != null) {
+        await _room!.sendEvent({
+          'msgtype': MessageTypes.Text,
+          'body': text,
+          'com.xmo.private_reply': privateReplyDraft.toJson(),
+        });
+      } else {
+        await widget.matrixProvider.sendMessage(_room!.id, text);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      if (_textCtrl.text.isEmpty) {
+        _textCtrl.text = text;
+        _textCtrl.selection = TextSelection.collapsed(offset: text.length);
+      }
+      setState(() {
+        _replyToEvent = replyToEvent;
+        _privateReplyDraft = privateReplyDraft;
+      });
+      _showSnackBar('Failed to send message: $e');
+    }
   }
 
   void _showComposerEmojiPicker() {
@@ -1311,6 +1405,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   void _setReplyTo(Event event) {
+    if (!_ensureStableMessageActionTarget(event)) return;
     setState(() {
       _replyToEvent = event;
       _privateReplyDraft = null;
@@ -1408,7 +1503,19 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final index = _pendingUploads.indexWhere((upload) => upload.id == id);
     if (index == -1) return;
 
-    final upload = _pendingUploads[index];
+    _applyPendingUploadProgress(
+      _pendingUploads[index],
+      uploadedBytes: uploadedBytes,
+      totalBytes: totalBytes,
+    );
+  }
+
+  void _applyPendingUploadProgress(
+    _PendingUpload upload, {
+    required int uploadedBytes,
+    required int totalBytes,
+  }) {
+    final id = upload.id;
     final clampedTotalBytes = totalBytes < 0 ? 0 : totalBytes;
     final clampedUploadedBytes = clampedTotalBytes > 0
         ? uploadedBytes.clamp(0, clampedTotalBytes).toInt()
@@ -1435,12 +1542,13 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final enoughTimePassed = lastUpdate == null ||
         now.difference(lastUpdate) >= const Duration(milliseconds: 160);
 
+    upload.uploadedBytes = clampedUploadedBytes;
+    upload.totalBytes = clampedTotalBytes;
+
     if (!isComplete &&
         !isFirstProgress &&
         !progressChangedEnough &&
         !enoughTimePassed) {
-      upload.uploadedBytes = clampedUploadedBytes;
-      upload.totalBytes = clampedTotalBytes;
       return;
     }
 
@@ -1450,9 +1558,15 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       clampedUploadedBytes,
       clampedTotalBytes,
     ));
-    setState(() {
-      upload.uploadedBytes = clampedUploadedBytes;
-      upload.totalBytes = clampedTotalBytes;
+    _scheduleUploadProgressRepaint();
+  }
+
+  void _scheduleUploadProgressRepaint() {
+    if (!mounted || _uploadProgressFrameScheduled) return;
+    _uploadProgressFrameScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _uploadProgressFrameScheduled = false;
+      if (mounted) setState(() {});
     });
   }
 
@@ -1517,8 +1631,16 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     _PendingUpload upload, {
     String caption = '',
   }) async {
+    if (upload.isVideo) {
+      await upload.previewHydration;
+    }
+
     await _ensureTransferJob(roomId, upload);
-    await _transferQueue.markRunning(upload.id);
+    final claimed = await _transferQueue.markRunning(upload.id);
+    if (!claimed) {
+      debugPrint('[TransferQueue] Upload ${upload.id} is already running');
+      return;
+    }
     if (mounted) {
       setState(() {
         upload.started = true;
@@ -1541,6 +1663,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         fileName: upload.fileName,
         mimeType: upload.mimeType,
         caption: caption,
+        precomputedThumbnailBytes: upload.thumbnailBytes,
+        precomputedVideoWidth: upload.width,
+        precomputedVideoHeight: upload.height,
+        precomputedDurationMs: upload.durationMs,
         onUploadProgress: (uploadedBytes, totalBytes) =>
             _updatePendingUploadProgress(
           upload.id,
@@ -1608,17 +1734,6 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     required String mimeType,
     required String caption,
   }) async {
-    int? width;
-    int? height;
-
-    try {
-      final imageSize = await _readImageSize(bytes);
-      width = imageSize?.width.round();
-      height = imageSize?.height.round();
-    } catch (e) {
-      debugPrint('[UploadPreview] Failed to read image size: $e');
-    }
-
     final pendingId = _addPendingUpload(
       _PendingUpload(
         id: 'photo_${DateTime.now().microsecondsSinceEpoch}',
@@ -1628,12 +1743,13 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         isVideo: false,
         totalBytes: bytes.length,
         createdAt: DateTime.now(),
-        width: width,
-        height: height,
       ),
     );
 
     final upload = _pendingUploads.firstWhere((item) => item.id == pendingId);
+    upload.previewHydration =
+        _hydratePendingUploadPreview(upload, mimeType: mimeType);
+    unawaited(upload.previewHydration);
     await _runSinglePendingMediaUpload(
       roomId,
       upload,
@@ -1651,6 +1767,63 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     return size;
   }
 
+  Future<void> _hydratePendingUploadPreview(
+    _PendingUpload upload, {
+    required String mimeType,
+  }) async {
+    if (upload.cancelled || upload.completed) return;
+
+    Uint8List? thumbnailBytes;
+    int? width;
+    int? height;
+    int? durationMs;
+
+    if (upload.isVideo) {
+      try {
+        final metadata =
+            await _mediaHandler.readVideoPreviewMetadata(upload.bytes);
+        width = metadata?.width;
+        height = metadata?.height;
+        durationMs = metadata?.durationMs;
+      } catch (e) {
+        debugPrint('[UploadPreview] Failed to read video metadata: $e');
+      }
+
+      try {
+        thumbnailBytes = await _mediaHandler.createVideoPreviewThumbnail(
+          upload.bytes,
+          mimeType,
+        );
+      } catch (e) {
+        debugPrint('[UploadPreview] Failed to create video thumbnail: $e');
+      }
+    } else if (!upload.isAudio && !upload.isFile) {
+      try {
+        final imageSize = await _readImageSize(upload.bytes);
+        width = imageSize?.width.round();
+        height = imageSize?.height.round();
+      } catch (e) {
+        debugPrint('[UploadPreview] Failed to read image size: $e');
+      }
+    }
+
+    if (!mounted || upload.cancelled || upload.completed) return;
+    upload.thumbnailBytes = thumbnailBytes ?? upload.thumbnailBytes;
+    upload.width = width ?? upload.width;
+    upload.height = height ?? upload.height;
+    upload.durationMs = durationMs ?? upload.durationMs;
+    _scheduleUploadPreviewRepaint();
+  }
+
+  void _scheduleUploadPreviewRepaint() {
+    if (!mounted || _uploadPreviewFrameScheduled) return;
+    _uploadPreviewFrameScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _uploadPreviewFrameScheduled = false;
+      if (mounted) setState(() {});
+    });
+  }
+
   Future<void> _sendVideoWithPending(
     String roomId, {
     required Uint8List bytes,
@@ -1658,27 +1831,6 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     required String mimeType,
     required String caption,
   }) async {
-    Uint8List? thumbnailBytes;
-    int? width;
-    int? height;
-    int? durationMs;
-
-    try {
-      final metadata = await _mediaHandler.readVideoPreviewMetadata(bytes);
-      width = metadata?.width;
-      height = metadata?.height;
-      durationMs = metadata?.durationMs;
-    } catch (e) {
-      debugPrint('[UploadPreview] Failed to read video metadata: $e');
-    }
-
-    try {
-      thumbnailBytes =
-          await _mediaHandler.createVideoPreviewThumbnail(bytes, mimeType);
-    } catch (e) {
-      debugPrint('[UploadPreview] Failed to create video thumbnail: $e');
-    }
-
     final pendingId = _addPendingUpload(
       _PendingUpload(
         id: 'video_${DateTime.now().microsecondsSinceEpoch}',
@@ -1688,14 +1840,13 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         isVideo: true,
         totalBytes: bytes.length,
         createdAt: DateTime.now(),
-        thumbnailBytes: thumbnailBytes,
-        width: width,
-        height: height,
-        durationMs: durationMs,
       ),
     );
 
     final upload = _pendingUploads.firstWhere((item) => item.id == pendingId);
+    upload.previewHydration =
+        _hydratePendingUploadPreview(upload, mimeType: mimeType);
+    unawaited(upload.previewHydration);
     await _runSinglePendingMediaUpload(
       roomId,
       upload,
@@ -1703,44 +1854,13 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     );
   }
 
-  Future<_PendingUpload> _createPendingMediaUpload({
+  _PendingUpload _createPendingMediaUpload({
     required Uint8List bytes,
     required String fileName,
     required String mimeType,
     required bool isVideo,
-  }) async {
-    Uint8List? thumbnailBytes;
-    int? width;
-    int? height;
-    int? durationMs;
-
-    if (isVideo) {
-      try {
-        final metadata = await _mediaHandler.readVideoPreviewMetadata(bytes);
-        width = metadata?.width;
-        height = metadata?.height;
-        durationMs = metadata?.durationMs;
-      } catch (e) {
-        debugPrint('[UploadPreview] Failed to read video metadata: $e');
-      }
-
-      try {
-        thumbnailBytes =
-            await _mediaHandler.createVideoPreviewThumbnail(bytes, mimeType);
-      } catch (e) {
-        debugPrint('[UploadPreview] Failed to create video thumbnail: $e');
-      }
-    } else {
-      try {
-        final imageSize = await _readImageSize(bytes);
-        width = imageSize?.width.round();
-        height = imageSize?.height.round();
-      } catch (e) {
-        debugPrint('[UploadPreview] Failed to read image size: $e');
-      }
-    }
-
-    return _PendingUpload(
+  }) {
+    final upload = _PendingUpload(
       id: '${isVideo ? 'video' : 'photo'}_${DateTime.now().microsecondsSinceEpoch}',
       bytes: bytes,
       fileName: fileName,
@@ -1748,11 +1868,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       isVideo: isVideo,
       totalBytes: bytes.length,
       createdAt: DateTime.now(),
-      thumbnailBytes: thumbnailBytes,
-      width: width,
-      height: height,
-      durationMs: durationMs,
     );
+    upload.previewHydration =
+        _hydratePendingUploadPreview(upload, mimeType: mimeType);
+    return upload;
   }
 
   void _startPendingAlbumUpload(String roomId, List<_PendingUpload> uploads) {
@@ -1765,6 +1884,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     if (mounted) {
       setState(() => _pendingAlbumUploads.add(album));
       _scrollToBottom();
+    }
+
+    for (final upload in uploads) {
+      unawaited(upload.previewHydration);
     }
 
     unawaited(_runPendingAlbumUpload(roomId, album));
@@ -1789,8 +1912,15 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       }
 
       try {
+        if (upload.isVideo) {
+          await upload.previewHydration;
+        }
         await _ensureTransferJob(roomId, upload);
-        await _transferQueue.markRunning(upload.id);
+        final claimed = await _transferQueue.markRunning(upload.id);
+        if (!claimed) {
+          debugPrint('[TransferQueue] Upload ${upload.id} is already running');
+          continue;
+        }
         if (upload.isVideo) {
           await _mediaHandler.sendVideoBytes(
             roomId,
@@ -1799,6 +1929,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
             fileName: upload.fileName,
             mimeType: upload.mimeType,
             caption: '',
+            precomputedThumbnailBytes: upload.thumbnailBytes,
+            precomputedVideoWidth: upload.width,
+            precomputedVideoHeight: upload.height,
+            precomputedDurationMs: upload.durationMs,
             onUploadProgress: (uploadedBytes, totalBytes) =>
                 _updatePendingAlbumUploadProgress(
               album.id,
@@ -1901,53 +2035,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final uploadIndex = album.uploads
         .indexWhere((pendingUpload) => pendingUpload.id == uploadId);
     if (uploadIndex == -1) return;
-    final upload = album.uploads[uploadIndex];
-
-    final clampedTotalBytes = totalBytes < 0 ? 0 : totalBytes;
-    final clampedUploadedBytes = clampedTotalBytes > 0
-        ? uploadedBytes.clamp(0, clampedTotalBytes).toInt()
-        : uploadedBytes.clamp(0, uploadedBytes < 0 ? 0 : uploadedBytes).toInt();
-    final previousTotalBytes = upload.totalBytes;
-    final previousUploadedBytes = upload.uploadedBytes;
-    if (previousTotalBytes == clampedTotalBytes &&
-        previousUploadedBytes == clampedUploadedBytes) {
-      return;
-    }
-
-    final previousProgress = previousTotalBytes > 0
-        ? previousUploadedBytes / previousTotalBytes
-        : 0.0;
-    final nextProgress =
-        clampedTotalBytes > 0 ? clampedUploadedBytes / clampedTotalBytes : 0.0;
-    final isComplete =
-        clampedTotalBytes > 0 && clampedUploadedBytes >= clampedTotalBytes;
-    final isFirstProgress = previousUploadedBytes == 0;
-    final progressChangedEnough =
-        (nextProgress - previousProgress).abs() >= 0.02;
-    final now = DateTime.now();
-    final lastUpdate = _pendingUploadProgressUiUpdates[uploadId];
-    final enoughTimePassed = lastUpdate == null ||
-        now.difference(lastUpdate) >= const Duration(milliseconds: 160);
-
-    if (!isComplete &&
-        !isFirstProgress &&
-        !progressChangedEnough &&
-        !enoughTimePassed) {
-      upload.uploadedBytes = clampedUploadedBytes;
-      upload.totalBytes = clampedTotalBytes;
-      return;
-    }
-
-    _pendingUploadProgressUiUpdates[uploadId] = now;
-    unawaited(_transferQueue.updateProgress(
-      uploadId,
-      clampedUploadedBytes,
-      clampedTotalBytes,
-    ));
-    setState(() {
-      upload.uploadedBytes = clampedUploadedBytes;
-      upload.totalBytes = clampedTotalBytes;
-    });
+    _applyPendingUploadProgress(
+      album.uploads[uploadIndex],
+      uploadedBytes: uploadedBytes,
+      totalBytes: totalBytes,
+    );
   }
 
   Future<void> _sendAudioWithPending(
@@ -2414,7 +2506,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           return;
         }
 
-        uploads.add(await _createPendingMediaUpload(
+        uploads.add(_createPendingMediaUpload(
           bytes: bytes,
           fileName: fileName,
           mimeType: mimeType,
@@ -2489,6 +2581,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
   // ignore: unused_element
   Future<void> _playVideo(Event event) async {
+    if (!_canDownloadAttachment(event)) {
+      _showSnackBar('Please wait until the video is ready.');
+      return;
+    }
     try {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -2514,8 +2610,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         ),
       );
 
-      final matrixFile = await event.downloadAndDecryptAttachment(
-        downloadCallback: _mediaHandler.authenticatedDownload(),
+      final matrixFile = await _downloadAttachmentWithQueue(
+        event,
+        activeLabel:
+            'Loading ${event.body.isNotEmpty ? event.body : 'video'}...',
+        failurePrefix: 'Failed to load video',
       );
 
       if (!mounted) return;
@@ -2535,6 +2634,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           ),
         ),
       );
+    } on MatrixDownloadCancelledException {
+      return;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
@@ -2549,12 +2650,19 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   Future<void> _openVideoPlayer(Event event) async {
+    if (!_canDownloadAttachment(event)) {
+      _showSnackBar('Please wait until the video is ready.');
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => FullscreenVideoPlayer.loading(
-          videoFuture: event.downloadAndDecryptAttachment(
-            downloadCallback: _mediaHandler.authenticatedDownload(),
+          videoFuture: _downloadAttachmentWithQueue(
+            event,
+            activeLabel:
+                'Loading ${event.body.isNotEmpty ? event.body : 'video'}...',
+            failurePrefix: 'Failed to load video',
           ),
           title: event.body,
           onReply: () async => _setReplyTo(event),
@@ -2583,7 +2691,17 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     );
   }
 
-  Future<void> _downloadAndOpenFile(Event event) async {
+  Future<MatrixFile> _downloadAttachmentWithQueue(
+    Event event, {
+    required String activeLabel,
+    required String failurePrefix,
+    bool showCompletionSnack = false,
+    Future<void> Function(MatrixFile file)? onDownloaded,
+  }) async {
+    if (!_canDownloadAttachment(event)) {
+      _showSnackBar('Please wait until the attachment is ready.');
+      throw const MatrixDownloadCancelledException();
+    }
     TransferJob? downloadJob;
     final messenger = ScaffoldMessenger.of(context);
     var cancellationSnackShown = false;
@@ -2612,18 +2730,40 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         kind: _downloadTransferKindFor(event),
         totalBytes: size,
       );
-      await _transferQueue.markRunning(downloadJob.id);
+      final claimed = await _transferQueue.markRunning(downloadJob.id);
+      if (!claimed) {
+        throw StateError('Download is already running');
+      }
 
       messenger.showSnackBar(
         SnackBar(
-          content: _DownloadSnackBarContent(
-            jobId: downloadJob.id,
-            initialJobs: _transferQueue.jobs,
-            stream: _transferQueue.stream,
-            onCancel: () {
-              unawaited(_transferQueue.cancel(downloadJob!.id));
-              showDownloadCancelledSnackBar();
-            },
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                child: Text(
+                  activeLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    color: kBlack,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              _DownloadSnackBarContent(
+                jobId: downloadJob.id,
+                initialJobs: _transferQueue.jobs,
+                stream: _transferQueue.stream,
+                onCancel: () {
+                  unawaited(_transferQueue.cancel(downloadJob!.id));
+                  showDownloadCancelledSnackBar();
+                },
+              ),
+            ],
           ),
           backgroundColor: kWhite,
           padding: EdgeInsets.zero,
@@ -2660,39 +2800,41 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         if (mounted) {
           messenger.removeCurrentSnackBar();
           messenger.showSnackBar(
-            const SnackBar(
-              content: Text('Downloaded file is empty'),
+            SnackBar(
+              content: Text('$failurePrefix: downloaded file is empty'),
               backgroundColor: Colors.red,
             ),
           );
         }
-        return;
+        throw Exception('Downloaded file is empty');
       }
-
-      await web_download.downloadFile(
-        bytes,
-        matrixFile.name,
-        mimeType: matrixFile.mimeType,
-        storageCategory: _downloadStorageCategoryFor(event),
-      );
+      if (_transferQueue.isCancelled(downloadJob.id)) {
+        throw const MatrixDownloadCancelledException();
+      }
+      if (onDownloaded != null) {
+        await onDownloaded(matrixFile);
+      }
       if (_transferQueue.isCancelled(downloadJob.id)) {
         throw const MatrixDownloadCancelledException();
       }
 
-      if (mounted) {
-        messenger.removeCurrentSnackBar();
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(kIsWeb
-                ? 'Downloaded: ${matrixFile.name}'
-                : 'Downloaded successfully'),
-            backgroundColor: kLimeGreen,
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
       await _transferQueue.markCompleted(downloadJob.id);
       await _transferQueue.remove(downloadJob.id);
+      if (mounted) {
+        messenger.removeCurrentSnackBar();
+        if (showCompletionSnack) {
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(kIsWeb
+                  ? 'Downloaded: ${matrixFile.name}'
+                  : 'Downloaded successfully'),
+              backgroundColor: kLimeGreen,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+      return matrixFile;
     } catch (e) {
       if (e is MatrixDownloadCancelledException ||
           (downloadJob != null && _transferQueue.isCancelled(downloadJob.id))) {
@@ -2700,7 +2842,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           await _transferQueue.cancel(downloadJob.id);
         }
         showDownloadCancelledSnackBar();
-        return;
+        throw const MatrixDownloadCancelledException();
       }
       if (downloadJob != null) {
         await _transferQueue.markFailed(downloadJob.id, e);
@@ -2709,11 +2851,38 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         messenger.removeCurrentSnackBar();
         messenger.showSnackBar(
           SnackBar(
-            content: Text('Failed to download: $e'),
+            content: Text('$failurePrefix: $e'),
             backgroundColor: Colors.red,
           ),
         );
       }
+      rethrow;
+    }
+  }
+
+  Future<void> _downloadAndOpenFile(Event event) async {
+    if (!_canDownloadAttachment(event)) {
+      _showSnackBar('Please wait until the attachment is ready.');
+      return;
+    }
+    try {
+      await _downloadAttachmentWithQueue(
+        event,
+        activeLabel:
+            'Downloading ${event.body.isNotEmpty ? event.body : 'file'}...',
+        failurePrefix: 'Failed to download',
+        showCompletionSnack: true,
+        onDownloaded: (file) => web_download.downloadFile(
+          file.bytes,
+          file.name,
+          mimeType: file.mimeType,
+          storageCategory: _downloadStorageCategoryFor(event),
+        ),
+      );
+    } on MatrixDownloadCancelledException {
+      return;
+    } catch (_) {
+      return;
     }
   }
 
@@ -2738,41 +2907,39 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   Future<void> _openMessageAttachment(Event event) async {
+    if (!_canDownloadAttachment(event)) {
+      _showSnackBar('Please wait until the attachment is ready.');
+      return;
+    }
     try {
       final displayEvent = _displayEventFor(event);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Opening ${displayEvent.body}...'),
-          backgroundColor: kDarkerGrey,
-          duration: const Duration(seconds: 2),
-        ),
+      await _downloadAttachmentWithQueue(
+        displayEvent,
+        activeLabel:
+            'Opening ${displayEvent.body.isNotEmpty ? displayEvent.body : 'file'}...',
+        failurePrefix: 'Could not open file',
+        onDownloaded: (file) async {
+          if (kIsWeb) {
+            await web_download.downloadFile(
+              file.bytes,
+              file.name,
+              mimeType: file.mimeType,
+              storageCategory: _downloadStorageCategoryFor(displayEvent),
+            );
+          } else {
+            await native_share.openFile(
+              file.bytes,
+              file.name,
+              mimeType: file.mimeType,
+            );
+          }
+        },
       );
-
-      final matrixFile = await displayEvent.downloadAndDecryptAttachment(
-        downloadCallback: _mediaHandler.authenticatedDownload(),
-      );
-
-      if (matrixFile.bytes.isEmpty) {
-        throw Exception('Downloaded file is empty');
-      }
-
-      if (kIsWeb) {
-        await web_download.downloadFile(
-          matrixFile.bytes,
-          matrixFile.name,
-          mimeType: matrixFile.mimeType,
-          storageCategory: _downloadStorageCategoryFor(displayEvent),
-        );
-      } else {
-        await native_share.openFile(
-          matrixFile.bytes,
-          matrixFile.name,
-          mimeType: matrixFile.mimeType,
-        );
-      }
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    } on MatrixDownloadCancelledException {
+      return;
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2784,7 +2951,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     }
   }
 
-  Future<MatrixFile> _downloadAttachment(Event event) {
+  Future<MatrixFile> _downloadAttachment(Event event) async {
+    if (!_canDownloadAttachment(event)) {
+      _showSnackBar('Please wait until the attachment is ready.');
+      throw const MatrixDownloadCancelledException();
+    }
     return event.downloadAndDecryptAttachment(
       downloadCallback: _mediaHandler.authenticatedDownload(),
     );
@@ -3078,14 +3249,14 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     // Determine if user can perform any actions on this message
     final canEdit = _canEditMessage(event);
     final canDelete = _canDeleteMessage(event);
-    final canReply = event.type == EventTypes.Message;
+    final canReply = _canReplyToMessage(event);
     final canForward = _canForwardMessage(event);
     final canCopy = _copyableMessageText(event) != null;
     final canDownload = _canDownloadAttachment(event);
     final isPinned = _pinnedEvents.any((e) => e.eventId == event.eventId);
-    final canPin = _canPinMessages();
+    final canPin = _canPinMessage(event);
     final canDeleteOwnAttachment = isMe && canDelete;
-    final canReact = _canSendMessages && !event.redacted;
+    final canReact = _canReactToMessage(event);
     final canShowMenu = canReply ||
         canCopy ||
         canForward ||
@@ -3199,8 +3370,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                     MessageReactions(
                       reactions: _reactionSummariesFor(event),
                       isMyMessage: isMe,
-                      onTap: (reaction) =>
-                          _showReactionDetails(event, reaction),
+                      onTap: (reaction) {
+                        if (_canReactToMessage(event)) {
+                          _showReactionDetails(event, reaction);
+                        }
+                      },
                     ),
                   ],
                 ),
@@ -3308,7 +3482,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final ownVote = _ownPollVote(event.eventId);
 
     return Container(
-      width: MediaQuery.sizeOf(context).width < 390 ? 285 : 320,
+      width: _responsiveBubbleWidth(
+        context,
+        compact: 285,
+        regular: 320,
+      ),
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
       decoration: BoxDecoration(
         color: isMe ? const Color(0xFF1A2A1A) : const Color(0xFF2C2C2E),
@@ -3355,8 +3533,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
               count: votes[answer.id] ?? 0,
               total: totalVotes,
               selected: ownVote == answer.id,
-              onTap:
-                  _canSendMessages ? () => _voteInPoll(event, answer.id) : null,
+              onTap: _canSendMessages && _isStableMessageActionTarget(event)
+                  ? () => _voteInPoll(event, answer.id)
+                  : null,
             ),
             const SizedBox(height: 7),
           ],
@@ -3409,7 +3588,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final body = event.body.trim();
 
     return Container(
-      width: MediaQuery.sizeOf(context).width < 390 ? 270 : 315,
+      width: _responsiveBubbleWidth(
+        context,
+        compact: 270,
+        regular: 315,
+      ),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: isMe ? const Color(0xFF1A2A1A) : const Color(0xFF2C2C2E),
@@ -3651,6 +3834,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   Future<void> _toggleReaction(Event event, String emoji) async {
     final room = _room;
     if (room == null) return;
+    if (!_ensureStableMessageActionTarget(event)) return;
 
     final events = _timeline?.events ?? const <Event>[];
     final myReactions = <Event>[];
@@ -3775,6 +3959,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       if (answerId == null || answerId.isEmpty) continue;
       latestVoteBySender[event.senderId] = answerId;
     }
+    final optimisticVote = _optimisticPollVotes[pollEventId];
+    if (_myUserId.isNotEmpty &&
+        optimisticVote != null &&
+        optimisticVote.isNotEmpty) {
+      latestVoteBySender[_myUserId] = optimisticVote;
+    }
 
     final counts = <String, int>{};
     for (final answerId in latestVoteBySender.values) {
@@ -3784,6 +3974,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   String? _ownPollVote(String pollEventId) {
+    final optimisticVote = _optimisticPollVotes[pollEventId];
+    if (optimisticVote != null && optimisticVote.isNotEmpty) {
+      return optimisticVote;
+    }
     final events = _timeline?.events ?? const <Event>[];
     for (final event in events) {
       if (event.redacted ||
@@ -3813,14 +4007,27 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   Future<void> _voteInPoll(Event pollEvent, String answerId) async {
     final room = _room;
     if (room == null) return;
+    if (!_ensureStableMessageActionTarget(pollEvent)) return;
+    final pollEventId = pollEvent.eventId;
+    final previousVote = _ownPollVote(pollEventId);
+    if (previousVote == answerId) return;
+
+    setState(() => _optimisticPollVotes[pollEventId] = answerId);
     try {
       await widget.matrixProvider.service.sendPollResponse(
         roomId: room.id,
-        pollEventId: pollEvent.eventId,
+        pollEventId: pollEventId,
         answerId: answerId,
       );
     } catch (e) {
       if (!mounted) return;
+      setState(() {
+        if (previousVote == null || previousVote.isEmpty) {
+          _optimisticPollVotes.remove(pollEventId);
+        } else {
+          _optimisticPollVotes[pollEventId] = previousVote;
+        }
+      });
       _showSnackBar('Failed to vote: $e');
     }
   }
@@ -3834,13 +4041,13 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final isMe = primaryEvent.senderId == _myUserId;
     final senderName = MatrixService.cleanName(primaryEvent.senderId);
     final time = _formatTime(primaryEvent.originServerTs);
-    final canShowMenu = primaryEvent.type == EventTypes.Message ||
+    final canShowMenu = _canReplyToMessage(primaryEvent) ||
         _copyableMessageText(primaryEvent) != null ||
         _canForwardMessage(primaryEvent) ||
         _canDownloadAttachment(primaryEvent) ||
         _canEditMessage(primaryEvent) ||
         _canDeleteMessage(primaryEvent) ||
-        _canPinMessages();
+        _canPinMessage(primaryEvent);
 
     return KeyedSubtree(
       key: key,
@@ -3919,8 +4126,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                     MessageReactions(
                       reactions: _reactionSummariesFor(primaryEvent),
                       isMyMessage: isMe,
-                      onTap: (reaction) =>
-                          _showReactionDetails(primaryEvent, reaction),
+                      onTap: (reaction) {
+                        if (_canReactToMessage(primaryEvent)) {
+                          _showReactionDetails(primaryEvent, reaction);
+                        }
+                      },
                     ),
                   ],
                 ),
@@ -4065,7 +4275,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   Widget _buildAlbumTile(Event event, List<Event> albumEvents) {
     final displayEvent = _displayEventFor(event);
     final isVideo = displayEvent.messageType == MessageTypes.Video;
-    final canShowMenu = event.type == EventTypes.Message ||
+    final canShowMenu = _canReplyToMessage(event) ||
         _copyableMessageText(event) != null ||
         _canForwardMessage(event) ||
         _canDeleteMessage(event) ||
@@ -4102,8 +4312,15 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   Widget _buildAlbumImageThumbnail(Event event) {
+    final cachedBytes = MediaHandler.getCachedImageBytes(
+      event.eventId,
+      getThumbnail: true,
+    );
     return FutureBuilder<Uint8List?>(
-      future: _mediaHandler.loadImageBytes(event, getThumbnail: true),
+      initialData: cachedBytes,
+      future: cachedBytes == null
+          ? _mediaHandler.loadImageBytes(event, getThumbnail: true)
+          : null,
       builder: (context, snapshot) {
         final bytes = snapshot.data;
         if (bytes == null || bytes.isEmpty) {
@@ -4131,8 +4348,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   Widget _buildAlbumVideoThumbnail(Event event) {
+    final cachedBytes = MediaHandler.getCachedThumbnail(event.eventId);
     return FutureBuilder<Uint8List?>(
-      future: _mediaHandler.loadVideoThumbnail(event),
+      initialData: cachedBytes,
+      future:
+          cachedBytes == null ? _mediaHandler.loadVideoThumbnail(event) : null,
       builder: (context, snapshot) {
         final bytes = snapshot.data;
         if (bytes == null || bytes.isEmpty) {
@@ -4174,8 +4394,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           loadVideoThumbnail: _mediaHandler.loadVideoThumbnail,
           downloadAttachment: _downloadAttachment,
           playVideo: _openVideoPlayer,
-          onReply: (event) async => _setReplyTo(event),
-          onDelete: (event) async => _deleteMessage(event),
+          onReply: (event) async {
+            if (_canReplyToMessage(event)) _setReplyTo(event);
+          },
+          onDelete: (event) async {
+            if (_canDeleteMessage(event)) await _deleteMessage(event);
+          },
           canDelete: _canDeleteMessage,
         ),
       ),
@@ -4541,6 +4765,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
   bool _canDeleteMessage(Event event) {
     if (_room == null) return false;
+    if (!_isStableMessageActionTarget(event)) return false;
 
     final isMyMessage = event.senderId == _myUserId;
 
@@ -4557,8 +4782,35 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     return isMyMessage || _isAdmin();
   }
 
+  bool _isStableMessageActionTarget(Event event) {
+    if (event.redacted || event.status.isSending) return false;
+    return event.eventId.startsWith(r'$');
+  }
+
+  bool _ensureStableMessageActionTarget(Event event) {
+    if (_isStableMessageActionTarget(event)) return true;
+    _showSnackBar('Please wait until the message is sent.');
+    return false;
+  }
+
+  bool _canReplyToMessage(Event event) {
+    if (!_isStableMessageActionTarget(event)) return false;
+    return event.type == EventTypes.Message ||
+        event.type == EventTypes.Sticker ||
+        event.type == _pollStartEventType;
+  }
+
+  bool _canReactToMessage(Event event) {
+    return _canSendMessages && _isStableMessageActionTarget(event);
+  }
+
+  bool _canPinMessage(Event event) {
+    return _canPinMessages() && _isStableMessageActionTarget(event);
+  }
+
   bool _canEditMessage(Event event) {
     if (_room == null) return false;
+    if (!_isStableMessageActionTarget(event)) return false;
 
     // Only the sender can edit their own messages
     final isMyMessage = event.senderId == _myUserId;
@@ -4572,6 +4824,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   bool _canForwardMessage(Event event) {
+    if (!_isStableMessageActionTarget(event)) return false;
     if (event.redacted) return false;
     if (event.type != EventTypes.Message && event.type != EventTypes.Sticker) {
       return false;
@@ -4580,6 +4833,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   bool _canDownloadAttachment(Event event) {
+    if (!_isStableMessageActionTarget(event)) return false;
     if (event.redacted || event.type != EventTypes.Message) return false;
 
     final msgtype = _displayEventFor(event).messageType;
@@ -4625,32 +4879,36 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   Future<void> _downloadMessageAttachment(Event event) async {
+    if (!_canDownloadAttachment(event)) {
+      _showSnackBar('Please wait until the attachment is ready.');
+      return;
+    }
     await _downloadAndOpenFile(_displayEventFor(event));
   }
 
   Future<void> _shareMessageAttachment(Event event) async {
+    if (!_canDownloadAttachment(event)) {
+      _showSnackBar('Please wait until the attachment is ready.');
+      return;
+    }
     try {
       final displayEvent = _displayEventFor(event);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Preparing ${displayEvent.body}...'),
-          backgroundColor: kDarkerGrey,
-          duration: const Duration(seconds: 2),
+      await _downloadAttachmentWithQueue(
+        displayEvent,
+        activeLabel:
+            'Preparing ${displayEvent.body.isNotEmpty ? displayEvent.body : 'file'}...',
+        failurePrefix: 'Failed to share',
+        onDownloaded: (file) => native_share.shareFile(
+          file.bytes,
+          file.name,
+          mimeType: file.mimeType,
         ),
-      );
-
-      final matrixFile = await displayEvent.downloadAndDecryptAttachment(
-        downloadCallback: _mediaHandler.authenticatedDownload(),
-      );
-
-      await native_share.shareFile(
-        matrixFile.bytes,
-        matrixFile.name,
-        mimeType: matrixFile.mimeType,
       );
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    } on MatrixDownloadCancelledException {
+      return;
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -4997,6 +5255,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   Future<void> _replyPrivately(Event event) async {
+    if (!_ensureStableMessageActionTarget(event)) return;
     final senderId = event.senderId;
     if (senderId.isEmpty || senderId == _myUserId) return;
 
@@ -5070,12 +5329,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final isPinned = _pinnedEvents.any((e) => e.eventId == event.eventId);
     final canEdit = _canEditMessage(event);
     final canDelete = _canDeleteMessage(event);
-    final canReply = event.type == EventTypes.Message ||
-        event.type == EventTypes.Sticker ||
-        event.type == _pollStartEventType;
+    final canReply = _canReplyToMessage(event);
     final canForward = _canForwardMessage(event);
     final canCopy = _copyableMessageText(event) != null;
     final canDownload = _canDownloadAttachment(event);
+    final canReact = _canReactToMessage(event);
+    final canPin = _canPinMessage(event);
     final canReplyPrivately = canReply &&
         _room != null &&
         !_isDirectRoom &&
@@ -5137,7 +5396,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                       _copyMessageText(event);
                     },
                   ),
-                if (_canSendMessages)
+                if (canReact)
                   ListTile(
                     leading:
                         const Icon(Icons.add_reaction_outlined, color: kWhite),
@@ -5167,6 +5426,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                   ),
                 if (canForward)
                   FutureBuilder<bool>(
+                    initialData: _cachedSavedMessageStatus(event),
                     future: _isMessageSaved(event),
                     builder: (context, snapshot) {
                       final isSaved = snapshot.data == true;
@@ -5222,7 +5482,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                       _editMessage(event);
                     },
                   ),
-                if (_canPinMessages())
+                if (canPin)
                   ListTile(
                     leading: Icon(
                       isPinned ? Icons.push_pin_outlined : Icons.push_pin,
@@ -5261,6 +5521,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   Future<void> _forwardMessage(Event event) async {
     final room = _room;
     if (room == null) return;
+    if (!_ensureStableMessageActionTarget(event)) return;
 
     final selectedRooms = await showForwardMessageSheet(
       context: context,
@@ -5302,6 +5563,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   Future<void> _saveMessage(Event event) async {
+    if (!_ensureStableMessageActionTarget(event)) return;
     try {
       final savedRoom =
           await widget.matrixProvider.getOrCreateSavedMessagesRoom();
@@ -5309,6 +5571,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         event: event,
         targetRoomId: savedRoom.id,
       );
+      _markMessageSaved(event);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -5328,27 +5591,53 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     }
   }
 
-  Future<bool> _isMessageSaved(Event event) async {
-    try {
+  String _savedMessageCacheKey(Event event) {
+    return '${event.room.id}:${event.eventId}';
+  }
+
+  bool? _cachedSavedMessageStatus(Event event) {
+    return _savedMessageStatusCache[_savedMessageCacheKey(event)];
+  }
+
+  void _markMessageSaved(Event event) {
+    final key = _savedMessageCacheKey(event);
+    _savedMessageStatusCache[key] = true;
+    _savedMessageStatusFutures[key] = Future<bool>.value(true);
+  }
+
+  Future<bool> _isMessageSaved(Event event) {
+    if (!_isStableMessageActionTarget(event)) return Future<bool>.value(false);
+    final key = _savedMessageCacheKey(event);
+    final cached = _savedMessageStatusCache[key];
+    if (cached != null) return Future<bool>.value(cached);
+
+    return _savedMessageStatusFutures.putIfAbsent(key, () async {
       final savedRoom = widget.matrixProvider.service.getSavedMessagesRoom();
-      if (savedRoom == null) return false;
-      final timeline = await savedRoom.getTimeline();
-      for (final savedEvent in timeline.events) {
-        if (savedEvent.redacted) continue;
-        final forwarded = savedEvent.content['xmo.forwarded'];
-        if (forwarded is! Map) continue;
-        if (forwarded['event_id'] == event.eventId &&
-            forwarded['room_id'] == event.room.id) {
-          return true;
+      var isSaved = false;
+      try {
+        if (savedRoom != null) {
+          final timeline = await savedRoom.getTimeline();
+          for (final savedEvent in timeline.events) {
+            if (savedEvent.redacted) continue;
+            final forwarded = savedEvent.content['xmo.forwarded'];
+            if (forwarded is! Map) continue;
+            if (forwarded['event_id'] == event.eventId &&
+                forwarded['room_id'] == event.room.id) {
+              isSaved = true;
+              break;
+            }
+          }
         }
+      } catch (e) {
+        debugPrint('[SavedMessages] Unable to check saved state: $e');
       }
-    } catch (e) {
-      debugPrint('[SavedMessages] Unable to check saved state: $e');
-    }
-    return false;
+      _savedMessageStatusCache[key] = isSaved;
+      return isSaved;
+    });
   }
 
   void _showReactionPicker(Event event) {
+    if (!_ensureStableMessageActionTarget(event)) return;
     ReactionPicker.show(context, (emoji) async {
       try {
         await _toggleReaction(event, emoji);
@@ -5512,6 +5801,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   Future<void> _editMessage(Event event) async {
+    if (!_ensureStableMessageActionTarget(event)) return;
     final currentText = _displayEventFor(event).calcUnlocalizedBody(
       hideReply: true,
       hideEdit: true,
@@ -5588,6 +5878,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
   Future<void> _togglePinMessage(Event event) async {
     if (_room == null) return;
+    if (!_ensureStableMessageActionTarget(event)) return;
 
     try {
       final groupService = GroupService(widget.matrixProvider.service);
@@ -5633,6 +5924,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
   Future<void> _deleteMessage(Event event) async {
     if (_room == null) return;
+    if (!_ensureStableMessageActionTarget(event)) return;
 
     // Show confirmation dialog
     final confirmed = await showDialog<bool>(
@@ -5893,8 +6185,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     _scrollCtrl.dispose();
     _mentionAutocomplete.dispose();
     _eventSub?.cancel();
+    _typingSub?.cancel();
     _typingTimer?.cancel();
     _highlightTimer?.cancel();
+    _readMarkerDebounce?.cancel();
+    _sharedMediaIndexDebounce?.cancel();
+    _stateRefreshDebounce?.cancel();
     _mediaHandler.clearCache();
     super.dispose();
   }
@@ -6233,23 +6529,28 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                       TypingIndicator(userName: _typingUsers.first),
                     if (_room == null)
                       Padding(
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.fromLTRB(28, 8, 28, 14),
                         child: SizedBox(
-                          width: double.infinity,
+                          width: math.min(
+                            360,
+                            MediaQuery.sizeOf(context).width - 56,
+                          ),
+                          height: 48,
                           child: ElevatedButton(
                             onPressed: _joinPreviewChannel,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: kLimeGreen,
-                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 20),
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
+                                borderRadius: BorderRadius.circular(28),
                               ),
                             ),
                             child: Text(
                               _getJoinButtonText(),
                               style: GoogleFonts.inter(
                                 color: kBlack,
-                                fontSize: 16,
+                                fontSize: 15,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -6428,6 +6729,12 @@ bool _privateReplyHasMediaPreview(Event? event, String fallbackMsgtype) {
       msgtype == MessageTypes.File;
 }
 
+Uint8List? _privateReplyCachedMediaBytes(Event event, bool isImage) {
+  return isImage
+      ? MediaHandler.getCachedImageBytes(event.eventId, getThumbnail: true)
+      : MediaHandler.getCachedThumbnail(event.eventId);
+}
+
 class _PrivateReplyMediaPreview extends StatelessWidget {
   final Event? event;
   final String fallbackMsgtype;
@@ -6448,9 +6755,13 @@ class _PrivateReplyMediaPreview extends StatelessWidget {
     final msgtype = event?.messageType ?? fallbackMsgtype;
     if (msgtype == MessageTypes.Image || msgtype == MessageTypes.Video) {
       final source = event;
-      final thumbFuture = source == null
-          ? Future<Uint8List?>.value(null)
-          : msgtype == MessageTypes.Image
+      final isImage = msgtype == MessageTypes.Image;
+      final cachedBytes = source == null
+          ? null
+          : _privateReplyCachedMediaBytes(source, isImage);
+      final thumbFuture = source == null || cachedBytes != null
+          ? null
+          : isImage
               ? loadImageBytes(source, getThumbnail: true)
               : loadVideoThumbnail(source);
 
@@ -6463,6 +6774,7 @@ class _PrivateReplyMediaPreview extends StatelessWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: FutureBuilder<Uint8List?>(
+          initialData: cachedBytes,
           future: thumbFuture,
           builder: (context, snapshot) {
             final bytes = snapshot.data;
@@ -6914,7 +7226,7 @@ class _PollTextField extends StatelessWidget {
 class _PendingUpload {
   final String id;
   final Uint8List bytes;
-  final Uint8List? thumbnailBytes;
+  Uint8List? thumbnailBytes;
   final String fileName;
   final String mimeType;
   final bool isVideo;
@@ -6924,15 +7236,16 @@ class _PendingUpload {
   int totalBytes;
   int uploadedBytes = 0;
   String? transferJobId;
+  Future<void>? previewHydration;
   bool started = false;
   bool completed = false;
   bool failed = false;
   bool cancelled = false;
   String? error;
   final DateTime createdAt;
-  final int? width;
-  final int? height;
-  final int? durationMs;
+  int? width;
+  int? height;
+  int? durationMs;
 
   _PendingUpload({
     required this.id,
@@ -6947,8 +7260,6 @@ class _PendingUpload {
     required this.createdAt,
     this.transferJobId,
     this.thumbnailBytes,
-    this.width,
-    this.height,
     this.durationMs,
   });
 }

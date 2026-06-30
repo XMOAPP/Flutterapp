@@ -34,6 +34,7 @@ class MediaHandler {
   // Global in-memory image cache (persists across chat screen navigations)
   static final Map<String, Uint8List> _imageCache = {};
   static final Map<String, Future<Uint8List?>> _imageLoading = {};
+  static final Set<String> _videoThumbnailMisses = {};
 
   /// Gets the persistent Hive cache box (opened in MatrixService.init)
   static Box<Uint8List>? get _hiveCache {
@@ -57,6 +58,18 @@ class MediaHandler {
     return null;
   }
 
+  /// Synchronous cache lookup for image message bytes.
+  ///
+  /// This is used by message widgets as FutureBuilder initial data to avoid a
+  /// one-frame loading flash when a cached image bubble rebuilds.
+  static Uint8List? getCachedImageBytes(
+    String eventId, {
+    bool getThumbnail = false,
+  }) {
+    final key = '${eventId}_$getThumbnail';
+    return _imageCache[key];
+  }
+
   /// Helper to save to both caches
   static void _cacheThumbnail(String cacheKey, Uint8List bytes) {
     _imageCache[cacheKey] = bytes;
@@ -66,6 +79,7 @@ class MediaHandler {
   static void clearMemoryCache() {
     _imageCache.clear();
     _imageLoading.clear();
+    _videoThumbnailMisses.clear();
   }
 
   static int get memoryCacheCount => _imageCache.length + _imageLoading.length;
@@ -223,25 +237,53 @@ class MediaHandler {
       debugPrint(
           '[PartialVideo] Requesting first $maxBytes bytes from: ${mediaRequest.uri}');
 
-      // Make HTTP request with Range header to get only first chunk
-      final response = await http.get(
-        mediaRequest.uri,
-        headers: {
-          'Range': 'bytes=0-${maxBytes - 1}', // Request first 2 MB
-          ...mediaRequest.headers,
-        },
-      );
+      final client = http.Client();
+      try {
+        final request = http.Request('GET', mediaRequest.uri)
+          ..headers.addAll({
+            'Range': 'bytes=0-${maxBytes - 1}', // Request first 2 MB
+            ...mediaRequest.headers,
+          });
+        final response = await client.send(request);
 
-      if (response.statusCode == 206 || response.statusCode == 200) {
-        // 206 = Partial Content (range request succeeded)
-        // 200 = OK (server doesn't support range, but returned full file)
-        final bytes = response.bodyBytes;
+        if (response.statusCode != 206 && response.statusCode != 200) {
+          debugPrint(
+              '[PartialVideo] Failed with status: ${response.statusCode}');
+          return null;
+        }
+
+        // If the homeserver ignored Range and reports a large full body, avoid
+        // pulling the whole video just to render an inline thumbnail.
+        if (response.statusCode == 200 &&
+            response.contentLength != null &&
+            response.contentLength! > maxBytes) {
+          debugPrint(
+              '[PartialVideo] Server ignored range (${response.contentLength} bytes), skipping thumbnail probe');
+          return null;
+        }
+
+        final builder = BytesBuilder(copy: false);
+        var received = 0;
+        await for (final chunk in response.stream) {
+          final remaining = maxBytes - received;
+          if (remaining <= 0) break;
+
+          if (chunk.length <= remaining) {
+            builder.add(chunk);
+            received += chunk.length;
+          } else {
+            builder.add(chunk.sublist(0, remaining));
+            received += remaining;
+            break;
+          }
+        }
+
+        final bytes = builder.takeBytes();
         debugPrint(
             '[PartialVideo] Downloaded ${bytes.length} bytes (requested $maxBytes)');
-        return bytes;
-      } else {
-        debugPrint('[PartialVideo] Failed with status: ${response.statusCode}');
-        return null;
+        return bytes.isEmpty ? null : bytes;
+      } finally {
+        client.close();
       }
     } catch (e) {
       debugPrint('[PartialVideo] Error: $e');
@@ -258,6 +300,10 @@ class MediaHandler {
       debugPrint(
           '[VideoThumb] Returning cached thumbnail for ${event.eventId}');
       return _imageCache[cacheKey];
+    }
+
+    if (_videoThumbnailMisses.contains(cacheKey)) {
+      return null;
     }
 
     // Return ongoing loading future to prevent duplicate processing
@@ -291,6 +337,7 @@ class MediaHandler {
                   debugPrint(
                       '[VideoThumb] Layer 0: Got thumbnail via info.thumbnail_url (${response.bodyBytes.length} bytes)');
                   _cacheThumbnail(cacheKey, response.bodyBytes);
+                  _videoThumbnailMisses.remove(cacheKey);
                   _imageLoading.remove(cacheKey);
                   return response.bodyBytes;
                 }
@@ -313,6 +360,7 @@ class MediaHandler {
               debugPrint(
                   '[VideoThumb] Layer 1: Got SDK thumbnail: ${bytes.length} bytes');
               _cacheThumbnail(cacheKey, bytes);
+              _videoThumbnailMisses.remove(cacheKey);
               _imageLoading.remove(cacheKey);
               return bytes;
             }
@@ -346,47 +394,20 @@ class MediaHandler {
             debugPrint(
                 '[VideoThumb] Generated thumbnail from partial video: ${generatedThumb.length} bytes');
             _cacheThumbnail(cacheKey, generatedThumb);
+            _videoThumbnailMisses.remove(cacheKey);
             _imageLoading.remove(cacheKey);
             return generatedThumb;
-          } else {
-            debugPrint(
-                '[VideoThumb] Partial video thumbnail generation failed, trying full video...');
           }
         }
 
-        // Fallback: If partial download failed, download full video
-        debugPrint('[VideoThumb] Fallback to full video download...');
-        final matrixFile = await event.downloadAndDecryptAttachment(
-          getThumbnail: false,
-          downloadCallback: authenticatedDownload(),
-        );
-        final videoBytes = matrixFile.bytes;
-
-        if (videoBytes.isNotEmpty) {
-          debugPrint(
-              '[VideoThumb] Downloaded full video: ${videoBytes.length} bytes, generating thumbnail...');
-
-          final generatedThumb = await _generateVideoThumbnail(
-            videoBytes,
-            matrixFile.mimeType,
-          );
-
-          if (generatedThumb != null && generatedThumb.isNotEmpty) {
-            debugPrint(
-                '[VideoThumb] Generated thumbnail: ${generatedThumb.length} bytes');
-            _cacheThumbnail(cacheKey, generatedThumb);
-            _imageLoading.remove(cacheKey);
-            return generatedThumb;
-          } else {
-            debugPrint(
-                '[VideoThumb] Thumbnail generation returned null or empty');
-          }
-        }
+        debugPrint(
+            '[VideoThumb] No lightweight thumbnail available; showing placeholder');
       } catch (e) {
         debugPrint('[VideoThumb] Error loading video thumbnail: $e');
       } finally {
         _imageLoading.remove(cacheKey);
       }
+      _videoThumbnailMisses.add(cacheKey);
       return null;
     }();
 
@@ -567,6 +588,10 @@ class MediaHandler {
     required String fileName,
     required String mimeType,
     String caption = '',
+    Uint8List? precomputedThumbnailBytes,
+    int? precomputedVideoWidth,
+    int? precomputedVideoHeight,
+    int? precomputedDurationMs,
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
     bool rethrowErrors = false,
@@ -608,6 +633,10 @@ class MediaHandler {
     required String fileName,
     required String mimeType,
     String caption = '',
+    Uint8List? precomputedThumbnailBytes,
+    int? precomputedVideoWidth,
+    int? precomputedVideoHeight,
+    int? precomputedDurationMs,
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
     bool rethrowErrors = false,
@@ -617,17 +646,26 @@ class MediaHandler {
     setUploading(true);
 
     try {
-      final videoMetadata = await _readVideoMetadata(bytes);
-      Uint8List? thumbBytes;
+      final videoMetadata = precomputedVideoWidth != null ||
+              precomputedVideoHeight != null ||
+              precomputedDurationMs != null
+          ? null
+          : await _readVideoMetadata(bytes);
+      Uint8List? thumbBytes = precomputedThumbnailBytes;
       ({int width, int height})? thumbDimensions;
-      try {
-        debugPrint('[Send] Generating camera video thumbnail before upload...');
-        thumbBytes = await _generateVideoThumbnail(bytes, mimeType);
-        if (thumbBytes != null && thumbBytes.isNotEmpty) {
-          thumbDimensions = await _decodeImageDimensions(thumbBytes);
+      if (thumbBytes == null || thumbBytes.isEmpty) {
+        try {
+          debugPrint(
+              '[Send] Generating camera video thumbnail before upload...');
+          thumbBytes = await _generateVideoThumbnail(bytes, mimeType);
+          if (thumbBytes != null && thumbBytes.isNotEmpty) {
+            thumbDimensions = await _decodeImageDimensions(thumbBytes);
+          }
+        } catch (e) {
+          debugPrint('[Send] Camera video thumbnail failed (non-fatal): $e');
         }
-      } catch (e) {
-        debugPrint('[Send] Camera video thumbnail failed (non-fatal): $e');
+      } else {
+        thumbDimensions = await _decodeImageDimensions(thumbBytes);
       }
 
       await matrixProvider.service.sendVideoWithThumbnail(
@@ -636,9 +674,9 @@ class MediaHandler {
         videoFileName: fileName,
         videoMimeType: mimeType,
         thumbBytes: thumbBytes,
-        videoWidth: videoMetadata?.width,
-        videoHeight: videoMetadata?.height,
-        durationMs: videoMetadata?.durationMs,
+        videoWidth: precomputedVideoWidth ?? videoMetadata?.width,
+        videoHeight: precomputedVideoHeight ?? videoMetadata?.height,
+        durationMs: precomputedDurationMs ?? videoMetadata?.durationMs,
         thumbnailWidth: thumbDimensions?.width,
         thumbnailHeight: thumbDimensions?.height,
         caption: caption,

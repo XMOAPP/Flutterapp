@@ -309,54 +309,99 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
 
   void _showCreateChannelDialog() {
     final nameCtrl = TextEditingController();
+    var isPublic = true;
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: kDarkerGrey,
-        title: Text('New Channel', style: GoogleFonts.inter(color: kWhite)),
-        content: TextField(
-          controller: nameCtrl,
-          style: const TextStyle(color: kWhite),
-          decoration: const InputDecoration(
-            hintText: 'Channel Name',
-            hintStyle: TextStyle(color: Colors.white54),
-            enabledBorder:
-                UnderlineInputBorder(borderSide: BorderSide(color: kLimeGreen)),
-            focusedBorder:
-                UnderlineInputBorder(borderSide: BorderSide(color: kLimeGreen)),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: kDarkerGrey,
+          title: Text('New Channel', style: GoogleFonts.inter(color: kWhite)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                style: const TextStyle(color: kWhite),
+                decoration: const InputDecoration(
+                  hintText: 'Channel Name',
+                  hintStyle: TextStyle(color: Colors.white54),
+                  enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: kLimeGreen)),
+                  focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: kLimeGreen)),
+                ),
+                autofocus: true,
+              ),
+              const SizedBox(height: 12),
+              RadioListTile<bool>(
+                value: true,
+                groupValue: isPublic,
+                activeColor: kLimeGreen,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Public', style: TextStyle(color: kWhite)),
+                subtitle: const Text(
+                  'Anyone can find and join this channel',
+                  style: TextStyle(color: kLightGrey, fontSize: 12),
+                ),
+                onChanged: (value) {
+                  if (value == null) return;
+                  setDialogState(() => isPublic = value);
+                },
+              ),
+              RadioListTile<bool>(
+                value: false,
+                groupValue: isPublic,
+                activeColor: kLimeGreen,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Private', style: TextStyle(color: kWhite)),
+                subtitle: const Text(
+                  'Only invited subscribers can join',
+                  style: TextStyle(color: kLightGrey, fontSize: 12),
+                ),
+                onChanged: (value) {
+                  if (value == null) return;
+                  setDialogState(() => isPublic = value);
+                },
+              ),
+              if (isPublic)
+                const Text(
+                  'Public channels are not end-to-end encrypted.',
+                  style: TextStyle(color: kLightGrey, fontSize: 12),
+                ),
+            ],
           ),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child:
-                const Text('Cancel', style: TextStyle(color: Colors.white54)),
-          ),
-          TextButton(
-            onPressed: () async {
-              if (nameCtrl.text.trim().isEmpty) return;
-              Navigator.pop(ctx);
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child:
+                  const Text('Cancel', style: TextStyle(color: Colors.white54)),
+            ),
+            TextButton(
+              onPressed: () async {
+                if (nameCtrl.text.trim().isEmpty) return;
+                Navigator.pop(ctx);
 
-              setState(() => _startingChat = true);
-              final provider = context.read<MatrixProvider>();
-              try {
-                final roomId = await provider.service.createChannel(
-                  name: nameCtrl.text.trim(),
-                  isPublic: true,
-                );
-                await _openCreatedRoom(provider, roomId);
-              } catch (e) {
-                if (!mounted) return;
-                setState(() {
-                  _startingChat = false;
-                  _error = 'Failed to create channel: $e';
-                });
-              }
-            },
-            child: const Text('Create', style: TextStyle(color: kLimeGreen)),
-          ),
-        ],
+                setState(() => _startingChat = true);
+                final provider = context.read<MatrixProvider>();
+                try {
+                  final roomId = await provider.service.createChannel(
+                    name: nameCtrl.text.trim(),
+                    isPublic: isPublic,
+                  );
+                  await _openCreatedRoom(provider, roomId);
+                } catch (e) {
+                  if (!mounted) return;
+                  setState(() {
+                    _startingChat = false;
+                    _error = 'Failed to create channel: $e';
+                  });
+                }
+              },
+              child: const Text('Create', style: TextStyle(color: kLimeGreen)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -462,6 +507,17 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                   title: const Text('Open',
                       style: TextStyle(color: kWhite, fontSize: 14)),
                   value: JoinRule.open,
+                  groupValue: joinRule,
+                  activeColor: kLimeGreen,
+                  contentPadding: EdgeInsets.zero,
+                  onChanged: (value) {
+                    setDialogState(() => joinRule = value!);
+                  },
+                ),
+                RadioListTile<JoinRule>(
+                  title: const Text('Approve Requests',
+                      style: TextStyle(color: kWhite, fontSize: 14)),
+                  value: JoinRule.knock,
                   groupValue: joinRule,
                   activeColor: kLimeGreen,
                   contentPadding: EdgeInsets.zero,

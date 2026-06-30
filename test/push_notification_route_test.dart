@@ -38,6 +38,33 @@ void main() {
       expect(route.callId, 'group-1');
     });
 
+    test('normalizes Matrix and camelCase call identifier variants', () {
+      const route = PushNotificationRoute({
+        'roomId': '!room:example.org',
+        'event': r'$event',
+        'm.call_id': 'matrix-call',
+        'callType': 'm.video',
+      });
+
+      expect(route.roomId, '!room:example.org');
+      expect(route.eventId, r'$event');
+      expect(route.callId, 'matrix-call');
+      expect(route.callType, 'm.video');
+      expect(route.isCall, isFalse);
+    });
+
+    test('recognizes explicit group-call id payloads', () {
+      const route = PushNotificationRoute({
+        'room_id': '!room:example.org',
+        'groupCallId': 'group-2',
+        'group_call': '1',
+      });
+
+      expect(route.isCall, isTrue);
+      expect(route.isGroupCall, isTrue);
+      expect(route.callId, 'group-2');
+    });
+
     test('accepts the explicit XMO call marker', () {
       const route = PushNotificationRoute({'xmo_push_type': 'call'});
       expect(route.isCall, isTrue);

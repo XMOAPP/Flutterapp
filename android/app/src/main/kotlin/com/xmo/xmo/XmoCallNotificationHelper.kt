@@ -41,9 +41,18 @@ object XmoCallNotificationHelper {
             return true
         }
 
-        val hasCallId = data.containsKey("call_id") || data.containsKey("m.call.id")
+        val hasCallId = data.containsKey("call_id") ||
+            data.containsKey("callId") ||
+            data.containsKey("m.call.id") ||
+            data.containsKey("m.call_id") ||
+            data.containsKey("group_call_id") ||
+            data.containsKey("groupCallId")
         val hasCallPayload = data.containsKey("offer") || data.containsKey("answer")
-        return hasCallId && hasCallPayload && !msgType.startsWith("m.")
+        val isGroupCall = data["group_call"] == "true" ||
+            data["group_call"] == "1" ||
+            data.containsKey("group_call_id") ||
+            data.containsKey("groupCallId")
+        return hasCallId && (hasCallPayload || isGroupCall) && !msgType.startsWith("m.")
     }
 
     fun showIncomingCall(
@@ -98,6 +107,7 @@ object XmoCallNotificationHelper {
             .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))
             .setVibrate(longArrayOf(0, 900, 450, 900, 450, 900))
             .setContentIntent(openPendingIntent)
+            .setFullScreenIntent(openPendingIntent, true)
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
                 "Decline",
@@ -190,10 +200,15 @@ object XmoCallNotificationHelper {
 
     private fun notificationId(data: Map<String, String>): Int {
         val seed = data["call_id"]
+            ?: data["callId"]
             ?: data["m.call.id"]
+            ?: data["m.call_id"]
+            ?: data["group_call_id"]
+            ?: data["groupCallId"]
             ?: data["room_id"]
             ?: data["roomId"]
             ?: data["event_id"]
+            ?: data["eventId"]
             ?: return NOTIFICATION_ID_FALLBACK
         return seed.hashCode() and Int.MAX_VALUE
     }

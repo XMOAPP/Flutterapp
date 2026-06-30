@@ -27,6 +27,8 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
   bool _searching = false;
   String? _error;
   Timer? _debounce;
+  int _searchRequestId = 0;
+  int _roomTypeRequestId = 0;
   final Set<String> _joiningRoomIds = {};
 
   @override
@@ -51,6 +53,8 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
 
   Future<void> _search(String query) async {
     if (!mounted) return;
+    final requestId = ++_searchRequestId;
+    _roomTypeRequestId++;
     setState(() {
       _searching = true;
       _error = null;
@@ -58,6 +62,7 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
     try {
       final svc = context.read<MatrixProvider>().service;
       final results = await svc.searchPublicRooms(query);
+      if (!mounted || requestId != _searchRequestId) return;
       if (mounted) {
         setState(() {
           _results = results;
@@ -66,6 +71,7 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
         _resolveRoomTypes(results);
       }
     } catch (e) {
+      if (!mounted || requestId != _searchRequestId) return;
       if (mounted) {
         setState(() {
           _error = e.toString();
@@ -115,13 +121,14 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
 
   Future<void> _resolveRoomTypes(List<PublicRoomsChunk> rooms) async {
     final provider = context.read<MatrixProvider>();
+    final requestId = ++_roomTypeRequestId;
     for (final room in rooms) {
       if (_roomChannelFlags.containsKey(room.roomId)) continue;
       final isChannel = await provider.service.isPublicRoomChannel(
         room.roomId,
         forceRefresh: true,
       );
-      if (!mounted) return;
+      if (!mounted || requestId != _roomTypeRequestId) return;
       setState(() => _roomChannelFlags[room.roomId] = isChannel);
     }
   }

@@ -22,10 +22,27 @@ class PushNotificationRoute {
   final Map<String, String> data;
 
   String? get roomId => _firstValue(const ['room_id', 'roomId', 'room']);
-  String? get eventId => _firstValue(const ['event_id', 'eventId']);
-  String? get callId =>
-      _firstValue(const ['call_id', 'm.call.id', 'group_call_id']);
-  String? get callType => _firstValue(const ['call_type', 'm.type']);
+  String? get eventId => _firstValue(const ['event_id', 'eventId', 'event']);
+  String? get callId => _firstValue(const [
+        'call_id',
+        'callId',
+        'm.call.id',
+        'm.call_id',
+        'group_call_id',
+        'groupCallId',
+      ]);
+  String? get callType => _firstValue(const [
+        'call_type',
+        'callType',
+        'm.type',
+        'm.call.type',
+        'xmo_call_type',
+        'xmo_call_kind',
+      ]);
+  bool get isGroupCall =>
+      _truthy(data['group_call']) ||
+      _firstValue(const ['group_call_id', 'groupCallId']) != null ||
+      callType == 'group';
   String? get sender =>
       _firstValue(const ['sender_display_name', 'sender', 'room_name']);
 
@@ -38,7 +55,7 @@ class PushNotificationRoute {
       return true;
     }
     return callId != null &&
-        (data['group_call'] == 'true' ||
+        (isGroupCall ||
             data.containsKey('offer') ||
             data.containsKey('answer'));
   }
@@ -49,6 +66,17 @@ class PushNotificationRoute {
       if (value != null && value.isNotEmpty) return value;
     }
     return null;
+  }
+
+  bool _truthy(String? value) {
+    switch (value?.trim().toLowerCase()) {
+      case 'true':
+      case '1':
+      case 'yes':
+      case 'y':
+        return true;
+    }
+    return false;
   }
 }
 
@@ -515,11 +543,22 @@ class PushNotificationService {
             groupCallIntent == 'm.room')) {
       return true;
     }
-    final hasCallId = message.data.containsKey('call_id') ||
-        message.data.containsKey('m.call.id');
+    final hasCallId = _hasAnyKey(message.data, const [
+      'call_id',
+      'callId',
+      'm.call.id',
+      'm.call_id',
+      'group_call_id',
+      'groupCallId',
+    ]);
     final hasCallPayload =
         message.data.containsKey('offer') || message.data.containsKey('answer');
-    return hasCallId && hasCallPayload && !msgType.startsWith('m.');
+    final isGroupCall = _truthy(message.data['group_call']?.toString()) ||
+        message.data.containsKey('group_call_id') ||
+        message.data.containsKey('groupCallId');
+    return hasCallId &&
+        (hasCallPayload || isGroupCall) &&
+        !msgType.startsWith('m.');
   }
 
   bool _isGroupCallEventType(String eventType) {
@@ -548,7 +587,11 @@ class PushNotificationService {
         previewLabel.isNotEmpty &&
         previewKind != null &&
         previewKind.isNotEmpty) {
-      return '${_previewPrefix(previewKind)}$previewLabel';
+      final genericRoomUpdate = previewKind.toLowerCase() == 'room' &&
+          previewLabel.toLowerCase() == 'room updated';
+      if (!genericRoomUpdate) {
+        return '${_previewPrefix(previewKind)}$previewLabel';
+      }
     }
 
     final dataBody = message.data['body']?.toString().trim();
@@ -589,7 +632,6 @@ class PushNotificationService {
       return '${_previewPrefix(message.data['preview_kind'] ?? 'file')}$label';
     }
     if (msgType.contains('location')) return '📍 Location';
-    if (eventType.startsWith('m.room.')) return 'Room updated';
     final body = message.notification?.body?.trim();
     if (body != null && _isDisplayablePushText(body)) return body;
     if (dataBody != null && _isDisplayablePushText(dataBody)) {
@@ -602,6 +644,7 @@ class PushNotificationService {
     if (contentText != null && _isDisplayablePushText(contentText)) {
       return contentText;
     }
+    if (eventType.startsWith('m.room.')) return 'Room updated';
     return isCall ? 'Tap to open XMO' : 'Open XMO to view this message';
   }
 
@@ -654,9 +697,29 @@ class PushNotificationService {
   int _notificationId(RemoteMessage message) {
     final seed = message.messageId ??
         message.data['event_id']?.toString() ??
+        message.data['eventId']?.toString() ??
+        message.data['call_id']?.toString() ??
+        message.data['callId']?.toString() ??
+        message.data['group_call_id']?.toString() ??
+        message.data['groupCallId']?.toString() ??
         message.sentTime?.millisecondsSinceEpoch.toString() ??
         DateTime.now().millisecondsSinceEpoch.toString();
     return seed.hashCode & 0x7fffffff;
+  }
+
+  bool _hasAnyKey(Map<String, dynamic> data, List<String> keys) {
+    return keys.any(data.containsKey);
+  }
+
+  bool _truthy(String? value) {
+    switch (value?.trim().toLowerCase()) {
+      case 'true':
+      case '1':
+      case 'yes':
+      case 'y':
+        return true;
+    }
+    return false;
   }
 
   String get _deviceDisplayName {

@@ -13,6 +13,7 @@ import '../models/invite_link_models.dart';
 import 'matrix_media_helper.dart';
 import 'repositories/matrix_repository_contracts.dart';
 import 'repositories/matrix_sdk_repositories.dart';
+import 'room_controls_service.dart';
 import 'transfer_queue_service.dart';
 
 enum XmoRoomKind { direct, group, channel, saved }
@@ -715,7 +716,7 @@ class MatrixService implements MatrixRepositoryApi {
         visibility: isPublic ? Visibility.public : Visibility.private,
         roomAliasName: aliasName,
         powerLevelContentOverride: {
-          'events_default': 50,
+          'events_default': RoomControlsService.channelPostingPower,
           'users_default': 0,
         },
         initialState: initialState,
@@ -730,7 +731,7 @@ class MatrixService implements MatrixRepositoryApi {
           preset: CreateRoomPreset.publicChat,
           visibility: Visibility.public,
           powerLevelContentOverride: {
-            'events_default': 50,
+            'events_default': RoomControlsService.channelPostingPower,
             'users_default': 0,
           },
           initialState: _channelInitialState(true),
@@ -908,6 +909,9 @@ class MatrixService implements MatrixRepositoryApi {
       if (room.isDirectChat) continue;
       if (room.membership != Membership.join) continue;
       if (isSavedMessagesRoom(room)) continue;
+      final joinRule = room.getState(EventTypes.RoomJoinRules)?.content;
+      final rawJoinRule = joinRule?['join_rule']?.toString();
+      if (rawJoinRule != 'public') continue;
       // Only publish rooms the current user has admin power in
       final ownPower = room.ownPowerLevel;
       if (ownPower < 50) continue;
@@ -930,9 +934,11 @@ class MatrixService implements MatrixRepositoryApi {
     String roomId, {
     bool forceRefresh = false,
   }) async {
+    final cachedIsChannel = isKnownChannel(roomId);
+    final cachedIsGroup = isKnownGroup(roomId);
     if (!forceRefresh) {
-      if (isKnownChannel(roomId)) return true;
-      if (isKnownGroup(roomId)) return false;
+      if (cachedIsChannel) return true;
+      if (cachedIsGroup) return false;
     }
 
     try {
@@ -971,7 +977,8 @@ class MatrixService implements MatrixRepositoryApi {
       debugPrint('[RoomType] Could not read power levels for $roomId: $e');
     }
 
-    cacheGroupId(roomId);
+    if (cachedIsChannel) return true;
+    if (cachedIsGroup) return false;
     return false;
   }
 
@@ -1326,12 +1333,24 @@ class MatrixService implements MatrixRepositoryApi {
     }
   }
 
-  Future<void> sendMessage(String roomId, String message) async {
+  Future<void> sendMessage(
+    String roomId,
+    String message, {
+    Map<String, dynamic> extraContent = const {},
+  }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
     final linkPreview = await _buildLinkPreview(message);
     if (linkPreview == null) {
-      await room.sendTextEvent(message);
+      if (extraContent.isEmpty) {
+        await room.sendTextEvent(message);
+      } else {
+        await room.sendEvent({
+          'msgtype': 'm.text',
+          'body': message,
+          ...extraContent,
+        });
+      }
       return;
     }
 
@@ -1339,6 +1358,7 @@ class MatrixService implements MatrixRepositoryApi {
       'msgtype': 'm.text',
       'body': message,
       'com.xmo.link_preview': linkPreview,
+      ...extraContent,
     });
   }
 
@@ -1467,7 +1487,10 @@ class MatrixService implements MatrixRepositoryApi {
           uri.host.replaceFirst(RegExp(r'^www\.', caseSensitive: false), ''),
     };
 
-    final richPreview = await _fetchRichLinkPreview(uri, fallback);
+    final richPreview = await _fetchRichLinkPreview(uri, fallback).timeout(
+      const Duration(milliseconds: 1200),
+      onTimeout: () => fallback,
+    );
     return richPreview ?? fallback;
   }
 
@@ -1478,12 +1501,12 @@ class MatrixService implements MatrixRepositoryApi {
     if (uri.scheme != 'http' && uri.scheme != 'https') return fallback;
 
     final client = io.HttpClient()
-      ..connectionTimeout = const Duration(seconds: 4)
+      ..connectionTimeout = const Duration(milliseconds: 900)
       ..userAgent = 'XMO/1.0 link preview';
 
     try {
       final request = await client.getUrl(uri).timeout(
-            const Duration(seconds: 4),
+            const Duration(milliseconds: 900),
           );
       request.headers.set(
         io.HttpHeaders.acceptHeader,
@@ -1493,7 +1516,7 @@ class MatrixService implements MatrixRepositoryApi {
       request.maxRedirects = 4;
 
       final response = await request.close().timeout(
-            const Duration(seconds: 5),
+            const Duration(milliseconds: 1200),
           );
       final contentType = response.headers.contentType?.mimeType.toLowerCase();
       if (response.statusCode < 200 ||

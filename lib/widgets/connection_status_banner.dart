@@ -25,6 +25,7 @@ class ConnectionStatusBanner extends StatelessWidget {
       MatrixConnectionStatus.offline => 'Offline',
       MatrixConnectionStatus.online => '',
     };
+    final detail = _detailText(provider);
 
     return SafeArea(
       bottom: false,
@@ -33,11 +34,12 @@ class ConnectionStatusBanner extends StatelessWidget {
         child: Material(
           color: Colors.transparent,
           child: Container(
+            constraints: const BoxConstraints(maxWidth: 520),
             margin: const EdgeInsets.only(top: 6),
-            padding: const EdgeInsets.fromLTRB(12, 7, 8, 7),
+            padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
             decoration: BoxDecoration(
               color: kMediumGrey.withValues(alpha: 0.96),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(14),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -55,12 +57,35 @@ class ConnectionStatusBanner extends StatelessWidget {
                   const Icon(Icons.cloud_off_outlined,
                       color: kLightGrey, size: 16),
                 const SizedBox(width: 7),
-                Text(
-                  label,
-                  style: GoogleFonts.inter(
-                    color: kWhite,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                Flexible(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.inter(
+                          color: kWhite,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (detail != null) ...[
+                        const SizedBox(height: 1),
+                        Text(
+                          detail,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.inter(
+                            color: kLightGrey,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 const SizedBox(width: 4),
@@ -86,5 +111,26 @@ class ConnectionStatusBanner extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String? _detailText(MatrixProvider provider) {
+    final parts = <String>[];
+    final lastSyncAt = provider.lastSyncAt;
+    if (lastSyncAt == null) {
+      parts.add('Waiting for first sync');
+    } else {
+      final age = DateTime.now().difference(lastSyncAt);
+      if (age.inMinutes >= 1) {
+        parts.add('Last sync ${age.inMinutes}m ago');
+      } else {
+        parts.add('Last sync ${age.inSeconds.clamp(1, 59)}s ago');
+      }
+    }
+    final pendingTransfers = provider.pendingTransferCount;
+    if (pendingTransfers > 0) {
+      parts.add(
+          '$pendingTransfers transfer${pendingTransfers == 1 ? '' : 's'} pending');
+    }
+    return parts.isEmpty ? null : parts.join(' | ');
   }
 }

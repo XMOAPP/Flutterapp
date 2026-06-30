@@ -55,4 +55,45 @@ void main() {
   test('unknown total size reports indeterminate progress', () {
     expect(job(totalBytes: 0).progress, isNull);
   });
+
+  test('auto retry requires a scheduled retry before max attempts', () {
+    expect(
+      job(
+        status: TransferStatus.failed,
+        attempts: 1,
+        retryAt: DateTime.utc(2026, 6, 21, 0, 0, 2),
+      ).shouldAutoRetry,
+      isTrue,
+    );
+    expect(
+      job(
+        status: TransferStatus.failed,
+        attempts: 3,
+        retryAt: DateTime.utc(2026, 6, 21, 0, 0, 8),
+      ).shouldAutoRetry,
+      isFalse,
+    );
+    expect(job(status: TransferStatus.running).shouldAutoRetry, isFalse);
+  });
+
+  test('copyWith can clear retry and error state for manual retry', () {
+    final failed = job(
+      status: TransferStatus.failed,
+      uploadedBytes: 40,
+      attempts: 2,
+      retryAt: DateTime.utc(2026, 6, 21, 0, 0, 4),
+    ).copyWith(error: 'network');
+
+    final retried = failed.copyWith(
+      status: TransferStatus.queued,
+      uploadedBytes: 0,
+      clearError: true,
+      clearNextRetryAt: true,
+    );
+
+    expect(retried.status, TransferStatus.queued);
+    expect(retried.uploadedBytes, 0);
+    expect(retried.error, isNull);
+    expect(retried.nextRetryAt, isNull);
+  });
 }

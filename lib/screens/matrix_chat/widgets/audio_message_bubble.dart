@@ -8,6 +8,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:matrix/matrix.dart';
 import '../../../theme.dart';
+import 'audio_playback_file_stub.dart'
+    if (dart.library.io) 'audio_playback_file_io.dart';
 import 'voice_waveform.dart';
 
 class AudioMessageBubble extends StatefulWidget {
@@ -34,12 +36,13 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
   static _AudioMessageBubbleState? _activeBubble;
 
   final AudioPlayer _player = AudioPlayer();
-  bool _loading = false;
   bool _prepared = false;
   Future<void>? _prepareFuture;
   StreamSubscription<PlayerState>? _playerStateSub;
-  double? _scrubProgress;
+  final ValueNotifier<_AudioBubbleUiState> _uiState =
+      ValueNotifier(const _AudioBubbleUiState());
   int _seekRequestId = 0;
+  String? _playbackFilePath;
 
   @override
   void initState() {
@@ -49,7 +52,7 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
         _player.seek(Duration.zero);
         _player.pause();
       }
-      if (mounted) setState(() {});
+      _updateUiState(playing: state.playing);
     });
   }
 
@@ -59,23 +62,74 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
       _activeBubble = null;
     }
     _playerStateSub?.cancel();
+    _uiState.dispose();
     _player.dispose();
+    deleteAudioPlaybackFile(_playbackFilePath).ignore();
     super.dispose();
   }
 
+  @override
+  void didUpdateWidget(covariant AudioMessageBubble oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.event.eventId == widget.event.eventId) return;
+    if (_activeBubble == this) {
+      _activeBubble = null;
+    }
+    _player.stop().ignore();
+    deleteAudioPlaybackFile(_playbackFilePath).ignore();
+    _playbackFilePath = null;
+    _prepared = false;
+    _prepareFuture = null;
+    _seekRequestId++;
+    _uiState.value = const _AudioBubbleUiState();
+  }
+
+  void _updateUiState({
+    bool? loading,
+    bool? prepared,
+    bool? playing,
+    double? scrubProgress,
+    bool clearScrubProgress = false,
+  }) {
+    if (!mounted) return;
+    final current = _uiState.value;
+    _uiState.value = current.copyWith(
+      loading: loading,
+      prepared: prepared,
+      playing: playing,
+      scrubProgress: scrubProgress,
+      clearScrubProgress: clearScrubProgress,
+    );
+  }
+
   Future<void> _togglePlayback() async {
-    if (_player.playing) {
-      await _player.pause();
+    try {
+      if (_player.playing) {
+        await _player.pause();
+        if (_activeBubble == this) {
+          _activeBubble = null;
+        }
+        return;
+      }
+
+      await _prepareAudio();
+      if (!mounted) return;
+      await _stopOtherActiveBubble();
+      _activeBubble = this;
+      await _player.play();
+    } catch (e) {
       if (_activeBubble == this) {
         _activeBubble = null;
       }
-      return;
+      _updateUiState(loading: false, playing: false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unable to play audio: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
-
-    await _prepareAudio();
-    await _stopOtherActiveBubble();
-    _activeBubble = this;
-    await _player.play();
   }
 
   Future<void> _stopOtherActiveBubble() async {
@@ -91,7 +145,7 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
       if (_activeBubble == this) {
         _activeBubble = null;
       }
-      if (mounted) setState(() {});
+      _updateUiState(playing: false);
     }
   }
 
@@ -101,30 +155,40 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
   }
 
   Future<void> _loadAudio() async {
-    if (mounted) {
-      setState(() => _loading = true);
-    }
+    _updateUiState(loading: true);
     try {
       final matrixFile = await widget.downloadAttachment(widget.event);
-      await _player.setAudioSource(
-        _BytesAudioSource(
-          matrixFile.bytes,
-          contentType: _mimeType,
-        ),
+      if (!mounted) return;
+      final mimeType = _mimeTypeFor(matrixFile);
+      final playbackPath = await createAudioPlaybackFile(
+        eventId: widget.event.eventId,
+        bytes: matrixFile.bytes,
+        mimeType: mimeType,
       );
+      if (playbackPath != null) {
+        await deleteAudioPlaybackFile(_playbackFilePath);
+        _playbackFilePath = playbackPath;
+        await _player.setFilePath(playbackPath);
+      } else {
+        await _player.setAudioSource(
+          _BytesAudioSource(
+            matrixFile.bytes,
+            contentType: mimeType,
+          ),
+        );
+      }
       _prepared = true;
+      _updateUiState(prepared: true);
     } finally {
       _prepareFuture = null;
-      if (mounted) setState(() => _loading = false);
+      _updateUiState(loading: false);
     }
   }
 
   Future<void> _seekToProgress(double progress) async {
     final normalizedProgress = progress.clamp(0.0, 1.0);
     final requestId = ++_seekRequestId;
-    if (mounted) {
-      setState(() => _scrubProgress = normalizedProgress);
-    }
+    _updateUiState(scrubProgress: normalizedProgress);
 
     try {
       await _prepareAudio();
@@ -141,7 +205,7 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
       // attachment download path. Keep waveform seeking non-disruptive.
     } finally {
       if (mounted && requestId == _seekRequestId) {
-        setState(() => _scrubProgress = null);
+        _updateUiState(clearScrubProgress: true);
       }
     }
   }
@@ -152,6 +216,12 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
       return info['mimetype'] as String;
     }
     return 'audio/mp4';
+  }
+
+  String _mimeTypeFor(MatrixFile file) {
+    final fileMimeType = file.mimeType;
+    if (fileMimeType.isNotEmpty) return fileMimeType;
+    return _mimeType;
   }
 
   Duration get _eventDuration {
@@ -170,8 +240,6 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
 
   @override
   Widget build(BuildContext context) {
-    final duration = _player.duration ?? _eventDuration;
-    final isPlaying = _player.playing;
     final accent = widget.isMe ? kLimeGreen : const Color(0xFF3B82F6);
     final inactive = widget.isMe
         ? kLimeGreen.withValues(alpha: 0.25)
@@ -185,126 +253,165 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
     final textScale = MediaQuery.textScalerOf(context).scale(1);
     final bubbleHeight = 58.0 + math.max(0.0, textScale - 1.0) * 12.0;
 
-    return StreamBuilder<Duration>(
-      stream: _player.positionStream,
-      initialData: _player.position,
-      builder: (context, snapshot) {
-        final position = snapshot.data ?? Duration.zero;
-        final playbackProgress = duration.inMilliseconds <= 0
-            ? 0.0
-            : position.inMilliseconds / duration.inMilliseconds;
-        final progress = _scrubProgress ?? playbackProgress;
-        final displayedPosition = _scrubProgress == null
-            ? position
-            : Duration(
-                milliseconds:
-                    (duration.inMilliseconds * _scrubProgress!).round(),
-              );
+    return ValueListenableBuilder<_AudioBubbleUiState>(
+      valueListenable: _uiState,
+      builder: (context, uiState, _) {
+        return StreamBuilder<Duration>(
+          stream: _player.positionStream,
+          initialData: _player.position,
+          builder: (context, snapshot) {
+            final duration = _player.duration ?? _eventDuration;
+            final position = snapshot.data ?? Duration.zero;
+            final playbackProgress = duration.inMilliseconds <= 0
+                ? 0.0
+                : position.inMilliseconds / duration.inMilliseconds;
+            final progress = uiState.scrubProgress ?? playbackProgress;
+            final displayedPosition = uiState.scrubProgress == null
+                ? position
+                : Duration(
+                    milliseconds:
+                        (duration.inMilliseconds * uiState.scrubProgress!)
+                            .round(),
+                  );
 
-        return ConstrainedBox(
-          constraints: BoxConstraints(
-            minWidth: minBubbleWidth,
-            maxWidth: maxBubbleWidth,
-          ),
-          child: SizedBox(
-            height: bubbleHeight,
-            child: Stack(
-              children: [
-                Align(
-                  alignment: Alignment.topCenter,
-                  child: SizedBox(
-                    height: 48,
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        GestureDetector(
-                          onTap: _loading ? null : _togglePlayback,
-                          child: Container(
-                            width: 42,
-                            height: 42,
-                            decoration: BoxDecoration(
-                              color: accent,
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: accent.withValues(alpha: 0.25),
-                                  blurRadius: 12,
-                                  offset: const Offset(0, 4),
-                                ),
-                              ],
-                            ),
-                            child: _loading
-                                ? const Padding(
-                                    padding: EdgeInsets.all(13),
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: kBlack,
+            return ConstrainedBox(
+              constraints: BoxConstraints(
+                minWidth: minBubbleWidth,
+                maxWidth: maxBubbleWidth,
+              ),
+              child: SizedBox(
+                height: bubbleHeight,
+                child: Stack(
+                  children: [
+                    Align(
+                      alignment: Alignment.topCenter,
+                      child: SizedBox(
+                        height: 48,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            GestureDetector(
+                              onTap: uiState.loading ? null : _togglePlayback,
+                              child: Container(
+                                width: 42,
+                                height: 42,
+                                decoration: BoxDecoration(
+                                  color: accent,
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: accent.withValues(alpha: 0.25),
+                                      blurRadius: 12,
+                                      offset: const Offset(0, 4),
                                     ),
-                                  )
-                                : Icon(
-                                    isPlaying
-                                        ? Icons.pause_rounded
-                                        : Icons.play_arrow_rounded,
-                                    color: widget.isMe ? kBlack : kWhite,
-                                    size: 27,
-                                  ),
-                          ),
+                                  ],
+                                ),
+                                child: uiState.loading
+                                    ? const Padding(
+                                        padding: EdgeInsets.all(13),
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: kBlack,
+                                        ),
+                                      )
+                                    : Icon(
+                                        uiState.playing
+                                            ? Icons.pause_rounded
+                                            : Icons.play_arrow_rounded,
+                                        color: widget.isMe ? kBlack : kWhite,
+                                        size: 27,
+                                      ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: VoiceWaveform(
+                                color: accent,
+                                inactiveColor: inactive,
+                                progress: progress,
+                                height: 30,
+                                onSeek: _seekToProgress,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: VoiceWaveform(
-                            color: accent,
-                            inactiveColor: inactive,
-                            progress: progress,
-                            height: 30,
-                            onSeek: _seekToProgress,
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-                Align(
-                  alignment: Alignment.bottomCenter,
-                  child: Row(
-                    children: [
-                      const SizedBox(width: 54),
-                      Text(
-                        _format(
-                          _scrubProgress != null
-                              ? displayedPosition
-                              : (_prepared || isPlaying ? position : duration),
-                        ),
-                        style: GoogleFonts.inter(
-                          color: widget.isMe
-                              ? kLimeGreen.withValues(alpha: 0.75)
-                              : kLightGrey,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Row(
+                        children: [
+                          const SizedBox(width: 54),
+                          Text(
+                            _format(
+                              uiState.scrubProgress != null
+                                  ? displayedPosition
+                                  : (uiState.prepared || uiState.playing
+                                      ? position
+                                      : duration),
+                            ),
+                            style: GoogleFonts.inter(
+                              color: widget.isMe
+                                  ? kLimeGreen.withValues(alpha: 0.75)
+                                  : kLightGrey,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            widget.time,
+                            style: GoogleFonts.inter(
+                              color: widget.isMe
+                                  ? kLimeGreen.withValues(alpha: 0.6)
+                                  : kLightGrey,
+                              fontSize: 10,
+                            ),
+                          ),
+                          if (widget.isMe) ...[
+                            const SizedBox(width: 4),
+                            widget.buildMessageStatus(widget.event),
+                          ],
+                        ],
                       ),
-                      const Spacer(),
-                      Text(
-                        widget.time,
-                        style: GoogleFonts.inter(
-                          color: widget.isMe
-                              ? kLimeGreen.withValues(alpha: 0.6)
-                              : kLightGrey,
-                          fontSize: 10,
-                        ),
-                      ),
-                      if (widget.isMe) ...[
-                        const SizedBox(width: 4),
-                        widget.buildMessageStatus(widget.event),
-                      ],
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
+    );
+  }
+}
+
+class _AudioBubbleUiState {
+  final bool loading;
+  final bool prepared;
+  final bool playing;
+  final double? scrubProgress;
+
+  const _AudioBubbleUiState({
+    this.loading = false,
+    this.prepared = false,
+    this.playing = false,
+    this.scrubProgress,
+  });
+
+  _AudioBubbleUiState copyWith({
+    bool? loading,
+    bool? prepared,
+    bool? playing,
+    double? scrubProgress,
+    bool clearScrubProgress = false,
+  }) {
+    return _AudioBubbleUiState(
+      loading: loading ?? this.loading,
+      prepared: prepared ?? this.prepared,
+      playing: playing ?? this.playing,
+      scrubProgress:
+          clearScrubProgress ? null : scrubProgress ?? this.scrubProgress,
     );
   }
 }

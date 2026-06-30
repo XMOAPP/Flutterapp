@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 import '../models/group_models.dart';
 import 'matrix_service.dart';
+import 'room_controls_service.dart';
 
 /// Service for managing group-specific features
 /// Extends Matrix rooms with Telegram-like group functionality
@@ -107,6 +108,16 @@ class GroupService {
     );
 
     _matrixService.cacheGroupId(roomId);
+    final room =
+        _client.getRoomById(roomId) ?? Room(id: roomId, client: _client);
+    await RoomControlsService.setRoomDirectoryVisibility(
+      room,
+      switch (joinRule) {
+        JoinRule.open => XmoJoinMode.public,
+        JoinRule.invite => XmoJoinMode.invite,
+        JoinRule.knock => XmoJoinMode.request,
+      },
+    );
     await _recordAdminAction(
       roomId,
       AdminActionType.settingsChanged,
@@ -149,6 +160,14 @@ class GroupService {
       EventTypes.RoomJoinRules,
       '',
       {'join_rule': _convertJoinRule(settings.joinRule)},
+    );
+    await RoomControlsService.setRoomDirectoryVisibility(
+      room,
+      switch (settings.joinRule) {
+        JoinRule.open => XmoJoinMode.public,
+        JoinRule.invite => XmoJoinMode.invite,
+        JoinRule.knock => XmoJoinMode.request,
+      },
     );
 
     // Update history visibility

@@ -21,6 +21,7 @@ import '../providers/story_provider.dart';
 import '../services/app_settings_service.dart';
 import '../services/direct_chat_service.dart';
 import '../services/e2ee_service.dart';
+import '../services/e2ee_verification_checklist.dart';
 import '../services/privacy_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/story_service.dart';
@@ -683,6 +684,12 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                 _detailRow('Recovery key ID',
                     status?.defaultRecoveryKeyId ?? 'Not configured'),
                 _detailRow('Fingerprint', _shortKey(status?.fingerprintKey)),
+                _detailRow(
+                  'Production E2EE',
+                  E2eeVerificationChecklist.isProductionReady(const {})
+                      ? 'Verified'
+                      : 'Verification evidence required',
+                ),
                 const SizedBox(height: 18),
                 _actionButton(
                   'Set up recovery and key backup',
