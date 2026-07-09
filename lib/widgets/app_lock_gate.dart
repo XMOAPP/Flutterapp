@@ -154,92 +154,46 @@ class _AppLockScreenState extends State<_AppLockScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final hasBiometrics = AppLockService.instance.biometricEnabled;
     return Material(
       color: kBlack,
       child: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 38),
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.lock, color: kWhite, size: 44),
-                const SizedBox(height: 22),
+                _lockEmblem(),
+                const SizedBox(height: 26),
                 Text(
                   'XMO is locked',
                   style: GoogleFonts.inter(
                     color: kWhite,
-                    fontSize: 22,
+                    fontSize: 21,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 40),
-                TextField(
-                  key: ValueKey('app-lock-pin-$_pinInputRevision'),
-                  controller: _pinController,
-                  focusNode: _pinFocusNode,
-                  obscureText: !_pinVisible,
-                  keyboardType: TextInputType.number,
-                  textInputAction: TextInputAction.done,
-                  enableSuggestions: false,
-                  autocorrect: false,
-                  enableIMEPersonalizedLearning: false,
-                  autofillHints: const <String>[],
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(8),
-                  ],
-                  onChanged: _handlePinChanged,
-                  onSubmitted: (_) => _verifyPin(),
-                  maxLength: 8,
-                  style: GoogleFonts.inter(color: kWhite, fontSize: 18),
-                  decoration: InputDecoration(
-                    counterText: '',
-                    hintText: 'Enter PIN',
-                    hintStyle: GoogleFonts.inter(
-                      color: kLightGrey,
-                      fontSize: 18,
-                    ),
-                    filled: true,
-                    fillColor: const Color(0xFF1C1C1D),
-                    errorText: _error,
-                    suffixIcon: Semantics(
-                      label: _pinVisible ? 'Hide PIN' : 'Show PIN',
-                      button: true,
-                      child: IconButton(
-                        onPressed: () {
-                          setState(() => _pinVisible = !_pinVisible);
-                        },
-                        icon: Icon(
-                          _pinVisible ? Icons.visibility_off : Icons.visibility,
-                          color: kLightGrey,
-                        ),
-                      ),
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(28),
-                      borderSide: BorderSide.none,
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(28),
-                      borderSide: BorderSide.none,
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(28),
-                      borderSide: BorderSide.none,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 30,
-                      vertical: 14,
-                    ),
+                const SizedBox(height: 8),
+                Text(
+                  hasBiometrics
+                      ? 'Enter your PIN or use biometrics to unlock'
+                      : 'Enter your PIN to unlock XMO',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(
+                    color: kLightGrey,
+                    fontSize: 13,
+                    height: 1.35,
                   ),
                 ),
-                const SizedBox(height: 22),
+                const SizedBox(height: 34),
+                _pinField(),
+                const SizedBox(height: 20),
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 386),
+                  constraints: const BoxConstraints(maxWidth: 240),
                   child: SizedBox(
                     width: double.infinity,
-                    height: 56,
+                    height: 48,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: kWhite,
@@ -247,31 +201,56 @@ class _AppLockScreenState extends State<_AppLockScreen> {
                         disabledBackgroundColor: kWhite.withValues(alpha: 0.55),
                         disabledForegroundColor: kBlack.withValues(alpha: 0.55),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(28),
+                          borderRadius: BorderRadius.circular(24),
                         ),
                       ),
                       onPressed: _working ? null : _verifyPin,
                       child: Text(
                         _working ? 'Unlocking...' : 'Unlock',
                         style: GoogleFonts.inter(
-                          fontSize: 16,
+                          fontSize: 15,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
                   ),
                 ),
-                if (AppLockService.instance.biometricEnabled) ...[
-                  const SizedBox(height: 12),
-                  Semantics(
-                    label: 'Use biometrics',
-                    button: true,
-                    child: IconButton(
-                      onPressed: _working ? null : _useBiometric,
-                      icon: const Icon(
-                        Icons.fingerprint,
-                        color: kWhite,
-                        size: 38,
+                if (hasBiometrics) ...[
+                  const SizedBox(height: 22),
+                  _orDivider(),
+                  const SizedBox(height: 22),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 386),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: kWhite,
+                          side: const BorderSide(color: kLimeGreen, width: 1),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(26),
+                          ),
+                        ),
+                        onPressed: _working ? null : _useBiometric,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(
+                              Icons.fingerprint,
+                              color: kLimeGreen,
+                              size: 28,
+                            ),
+                            const SizedBox(width: 14),
+                            Text(
+                              'Unlock with biometrics',
+                              style: GoogleFonts.inter(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -280,6 +259,140 @@ class _AppLockScreenState extends State<_AppLockScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _lockEmblem() {
+    return SizedBox(
+      width: 142,
+      height: 142,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            width: 136,
+            height: 136,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: kLimeGreen.withOpacity(0.05),
+              border: Border.all(color: kLimeGreen.withOpacity(0.16)),
+            ),
+          ),
+          Container(
+            width: 104,
+            height: 104,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFF101710),
+              border: Border.all(color: kLimeGreen.withOpacity(0.38)),
+            ),
+          ),
+          const Icon(Icons.lock_outline, color: kLimeGreen, size: 54),
+        ],
+      ),
+    );
+  }
+
+  Widget _pinField() {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 386),
+      child: TextField(
+        key: ValueKey('app-lock-pin-$_pinInputRevision'),
+        controller: _pinController,
+        focusNode: _pinFocusNode,
+        obscureText: !_pinVisible,
+        keyboardType: TextInputType.number,
+        textInputAction: TextInputAction.done,
+        enableSuggestions: false,
+        autocorrect: false,
+        enableIMEPersonalizedLearning: false,
+        autofillHints: const <String>[],
+        inputFormatters: [
+          FilteringTextInputFormatter.digitsOnly,
+          LengthLimitingTextInputFormatter(8),
+        ],
+        onChanged: _handlePinChanged,
+        onSubmitted: (_) => _verifyPin(),
+        maxLength: 8,
+        cursorColor: kWhite,
+        style: GoogleFonts.inter(color: kWhite, fontSize: 15),
+        decoration: InputDecoration(
+          counterText: '',
+          hintText: 'Enter PIN',
+          hintStyle: GoogleFonts.inter(
+            color: kLightGrey,
+            fontSize: 15,
+          ),
+          prefixIcon: const Icon(
+            Icons.lock_outline,
+            color: kWhite,
+            size: 22,
+          ),
+          filled: true,
+          fillColor: const Color(0xFF2C2C2E),
+          errorText: _error,
+          suffixIcon: Semantics(
+            label: _pinVisible ? 'Hide PIN' : 'Show PIN',
+            button: true,
+            child: IconButton(
+              onPressed: () {
+                setState(() => _pinVisible = !_pinVisible);
+              },
+              icon: Icon(
+                _pinVisible ? Icons.visibility_off : Icons.visibility,
+                color: kLightGrey,
+              ),
+            ),
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(25),
+            borderSide: const BorderSide(color: Color(0xFF252B33)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(25),
+            borderSide: const BorderSide(color: Color(0xFF252B33)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(25),
+            borderSide: const BorderSide(color: kWhite, width: 1),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(25),
+            borderSide: const BorderSide(color: Colors.redAccent),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(25),
+            borderSide: const BorderSide(color: Colors.redAccent, width: 1),
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 12,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _orDivider() {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 386),
+      child: Row(
+        children: [
+          const Expanded(child: Divider(color: Color(0xFF20252C), height: 1)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              'OR',
+              style: GoogleFonts.inter(
+                color: kLightGrey,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const Expanded(child: Divider(color: Color(0xFF20252C), height: 1)),
+        ],
       ),
     );
   }

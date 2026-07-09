@@ -105,67 +105,96 @@ class _AppLockSettingsScreenState extends State<AppLockSettingsScreen> {
             ),
           ),
           body: ListView(
-            padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
+            padding: const EdgeInsets.fromLTRB(22, 12, 22, 24),
             children: [
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: _title('Lock XMO'),
-                subtitle: _subtitle(
-                  'Require a PIN when XMO is opened after inactivity.',
-                ),
-                value: _service.enabled,
-                activeThumbColor: kLimeGreen,
-                onChanged: _working ? null : _toggleLock,
+              _settingsCard(
+                children: [
+                  _switchRow(
+                    icon: Icons.lock_outline,
+                    title: 'Lock XMO',
+                    subtitle:
+                        'Require a PIN when XMO is opened after inactivity.',
+                    value: _service.enabled,
+                    onChanged: _working ? null : _toggleLock,
+                  ),
+                  if (_service.enabled) ...[
+                    _cardDivider(),
+                    _switchRow(
+                      icon: Icons.fingerprint,
+                      title: 'Unlock with biometrics',
+                      subtitle: _biometricsAvailable
+                          ? 'Use fingerprint or face authentication.'
+                          : 'Biometric authentication is unavailable.',
+                      value: _service.biometricEnabled,
+                      onChanged: !_biometricsAvailable || _working
+                          ? null
+                          : (value) =>
+                              _run(() => _service.setBiometricEnabled(value)),
+                    ),
+                  ],
+                ],
               ),
               if (_service.enabled) ...[
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: _title('Unlock with biometrics'),
-                  subtitle: _subtitle(
-                    _biometricsAvailable
-                        ? 'Use fingerprint or face authentication.'
-                        : 'Biometric authentication is unavailable.',
-                  ),
-                  value: _service.biometricEnabled,
-                  activeThumbColor: kLimeGreen,
-                  onChanged: !_biometricsAvailable || _working
-                      ? null
-                      : (value) =>
-                          _run(() => _service.setBiometricEnabled(value)),
-                ),
                 const SizedBox(height: 16),
-                Text(
-                  'AUTO-LOCK',
-                  style: GoogleFonts.inter(
-                    color: kLightGrey,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                ...const {
-                  0: 'Immediately',
-                  30: 'After 30 seconds',
-                  60: 'After 1 minute',
-                  300: 'After 5 minutes',
-                  1800: 'After 30 minutes',
-                }.entries.map(
-                      (entry) => _timeoutOption(
-                        value: entry.key,
-                        label: entry.value,
+                _settingsCard(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'AUTO-LOCK',
+                          style: GoogleFonts.inter(
+                            color: kLightGrey,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.1,
+                          ),
+                        ),
                       ),
                     ),
+                    ..._timeoutEntries().expand(
+                      (entry) sync* {
+                        yield _timeoutOption(
+                          value: entry.key,
+                          label: entry.value,
+                        );
+                        if (entry.key != 1800) yield _cardDivider();
+                      },
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 12),
-                SizedBox(
-                  height: 50,
-                  child: ElevatedButton(
-                    onPressed: _working
-                        ? null
-                        : () {
-                            _service.lockNow();
-                            Navigator.pop(context);
-                          },
-                    child: const Text('Lock now'),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 34),
+                  child: SizedBox(
+                    height: 42,
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kWhite,
+                        foregroundColor: kBlack,
+                        disabledBackgroundColor: kWhite.withValues(alpha: 0.45),
+                        disabledForegroundColor: kBlack.withValues(alpha: 0.45),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(21),
+                        ),
+                      ),
+                      onPressed: _working
+                          ? null
+                          : () {
+                              _service.lockNow();
+                              Navigator.pop(context);
+                            },
+                      child: Text(
+                        'Lock now',
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -182,6 +211,14 @@ class _AppLockSettingsScreenState extends State<AppLockSettingsScreen> {
     );
   }
 
+  Iterable<MapEntry<int, String>> _timeoutEntries() => const {
+        0: 'Immediately',
+        30: 'After 30 seconds',
+        60: 'After 1 minute',
+        300: 'After 5 minutes',
+        1800: 'After 30 minutes',
+      }.entries;
+
   Text _title(String text) => Text(
         text,
         style: GoogleFonts.inter(
@@ -196,6 +233,70 @@ class _AppLockSettingsScreenState extends State<AppLockSettingsScreen> {
         style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
       );
 
+  Widget _settingsCard({required List<Widget> children}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF11171D),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: children),
+    );
+  }
+
+  Widget _cardDivider() {
+    return const Divider(
+      color: Color(0xFF242B33),
+      height: 1,
+      indent: 72,
+    );
+  }
+
+  Widget _iconBox(IconData icon) {
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        color: const Color(0xFF252B33),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Icon(icon, color: kWhite, size: 21),
+    );
+  }
+
+  Widget _switchRow({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool>? onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        children: [
+          _iconBox(icon),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _title(title),
+                const SizedBox(height: 4),
+                _subtitle(subtitle),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Switch(
+            value: value,
+            activeThumbColor: kLimeGreen,
+            onChanged: onChanged,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _timeoutOption({
     required int value,
     required String label,
@@ -203,18 +304,19 @@ class _AppLockSettingsScreenState extends State<AppLockSettingsScreen> {
     final selected = _service.timeoutSeconds == value;
     return InkWell(
       onTap: _working ? null : () => _run(() => _service.setTimeout(value)),
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(16),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 11),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
         child: Row(
           children: [
+            _iconBox(value == 0 ? Icons.timer_outlined : Icons.schedule),
+            const SizedBox(width: 14),
+            Expanded(child: _title(label)),
             Icon(
               selected ? Icons.radio_button_checked : Icons.radio_button_off,
               color: selected ? kLimeGreen : kLightGrey,
-              size: 22,
+              size: 23,
             ),
-            const SizedBox(width: 14),
-            Expanded(child: _title(label)),
           ],
         ),
       ),
@@ -238,6 +340,7 @@ class _AppLockPinDialog extends StatefulWidget {
 class _AppLockPinDialogState extends State<_AppLockPinDialog> {
   final _pin = TextEditingController();
   final _confirmation = TextEditingController();
+  bool _showPin = false;
   String? _error;
 
   @override
@@ -273,7 +376,7 @@ class _AppLockPinDialogState extends State<_AppLockPinDialog> {
     return TextField(
       controller: controller,
       autofocus: autofocus,
-      obscureText: true,
+      obscureText: !_showPin,
       keyboardType: TextInputType.number,
       textInputAction: widget.confirm && controller == _pin
           ? TextInputAction.next
@@ -286,15 +389,44 @@ class _AppLockPinDialogState extends State<_AppLockPinDialog> {
         FilteringTextInputFormatter.digitsOnly,
         LengthLimitingTextInputFormatter(8),
       ],
-      style: GoogleFonts.inter(color: kWhite),
+      cursorColor: kWhite,
+      style: GoogleFonts.inter(color: kWhite, fontSize: 15),
       decoration: InputDecoration(
+        isDense: true,
         hintText: hint,
-        hintStyle: GoogleFonts.inter(color: kLightGrey),
+        hintStyle: GoogleFonts.inter(color: kLightGrey, fontSize: 15),
         filled: true,
         fillColor: const Color(0xFF2C2C2E),
+        suffixIcon: IconButton(
+          onPressed: () => setState(() => _showPin = !_showPin),
+          icon: Icon(
+            _showPin
+                ? Icons.visibility_off_outlined
+                : Icons.visibility_outlined,
+            color: kLightGrey,
+            size: 20,
+          ),
+        ),
+        suffixIconConstraints: const BoxConstraints(
+          minWidth: 44,
+          minHeight: 44,
+        ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(18),
           borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide:
+              BorderSide(color: kWhite.withValues(alpha: 0.45), width: 1),
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 12,
         ),
       ),
       onSubmitted: (_) {
@@ -309,9 +441,20 @@ class _AppLockPinDialogState extends State<_AppLockPinDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: kDarkerGrey,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 62, vertical: 24),
+      titlePadding: const EdgeInsets.fromLTRB(28, 26, 28, 12),
+      contentPadding: const EdgeInsets.fromLTRB(28, 0, 28, 18),
+      actionsPadding: const EdgeInsets.fromLTRB(18, 0, 22, 18),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(28),
+      ),
       title: Text(
         widget.title,
-        style: GoogleFonts.inter(color: kWhite, fontSize: 18),
+        style: GoogleFonts.inter(
+          color: kWhite,
+          fontSize: 17,
+          fontWeight: FontWeight.w600,
+        ),
       ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
@@ -339,11 +482,19 @@ class _AppLockPinDialogState extends State<_AppLockPinDialog> {
       actions: [
         TextButton(
           onPressed: _close,
-          child: const Text('Cancel'),
+          style: TextButton.styleFrom(foregroundColor: kWhite),
+          child: Text(
+            'Cancel',
+            style: GoogleFonts.inter(fontWeight: FontWeight.w500),
+          ),
         ),
         TextButton(
           onPressed: _submit,
-          child: const Text('Continue'),
+          style: TextButton.styleFrom(foregroundColor: kWhite),
+          child: Text(
+            'Continue',
+            style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+          ),
         ),
       ],
     );

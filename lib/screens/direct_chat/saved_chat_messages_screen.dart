@@ -5,6 +5,7 @@ import 'package:matrix/matrix.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/matrix_provider.dart';
+import '../../services/matrix_attachment_downloader.dart';
 import '../../services/matrix_service.dart';
 import '../../theme.dart';
 import '../../widgets/incoming_call_fullscreen_scope.dart';
@@ -35,6 +36,8 @@ class SavedChatMessagesScreen extends StatefulWidget {
 }
 
 class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
+  static const MatrixAttachmentDownloader _attachmentDownloader =
+      MatrixAttachmentDownloader();
   late MediaHandler _mediaHandler;
   final TextEditingController _searchController = TextEditingController();
   List<Event> _events = [];
@@ -280,7 +283,8 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
   }
 
   Future<MatrixFile> _downloadAttachment(Event event) {
-    return event.downloadAndDecryptAttachment(
+    return _attachmentDownloader.download(
+      event,
       downloadCallback: _mediaHandler.authenticatedDownload(),
     );
   }

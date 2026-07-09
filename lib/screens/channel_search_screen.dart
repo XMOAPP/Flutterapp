@@ -99,7 +99,7 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
       if (!mounted) return;
       setState(() => _joiningRoomIds.remove(roomId));
 
-      final joined = provider.service.getRoomById(roomId);
+      final joined = provider.service.getJoinedRoomById(roomId);
       if (joined != null) {
         Navigator.push(
           context,
@@ -135,7 +135,7 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
 
   bool _isJoined(String roomId) {
     final svc = context.read<MatrixProvider>().service;
-    return svc.getRoomById(roomId) != null;
+    return svc.getJoinedRoomById(roomId) != null;
   }
 
   @override
@@ -314,7 +314,7 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
                       onPressed: () {
                         final provider = context.read<MatrixProvider>();
                         final joined =
-                            provider.service.getRoomById(room.roomId);
+                            provider.service.getJoinedRoomById(room.roomId);
                         if (joined != null) {
                           Navigator.push(
                             context,

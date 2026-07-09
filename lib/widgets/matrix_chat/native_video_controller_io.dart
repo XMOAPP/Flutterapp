@@ -1,6 +1,6 @@
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 
@@ -24,10 +24,56 @@ Future<VideoPlayerController> createNativeVideoController({
   );
   await file.writeAsBytes(bytes, flush: true);
 
-  final controller = VideoPlayerController.file(file);
-  await controller.initialize();
+  final controller = await _initializeController(
+    () => VideoPlayerController.file(
+      file,
+      viewType: _preferredVideoViewType,
+    ),
+    fallbackFactory: () => VideoPlayerController.file(file),
+  );
   await controller.play();
   return controller;
+}
+
+Future<VideoPlayerController> createNativeNetworkVideoController({
+  required Uri url,
+  required Map<String, String> headers,
+}) async {
+  final controller = await _initializeController(
+    () => VideoPlayerController.networkUrl(
+      url,
+      httpHeaders: headers,
+      viewType: _preferredVideoViewType,
+    ),
+    fallbackFactory: () => VideoPlayerController.networkUrl(
+      url,
+      httpHeaders: headers,
+    ),
+  );
+  await controller.play();
+  return controller;
+}
+
+VideoViewType get _preferredVideoViewType {
+  return defaultTargetPlatform == TargetPlatform.android
+      ? VideoViewType.platformView
+      : VideoViewType.textureView;
+}
+
+Future<VideoPlayerController> _initializeController(
+  VideoPlayerController Function() factory, {
+  required VideoPlayerController Function() fallbackFactory,
+}) async {
+  final controller = factory();
+  try {
+    await controller.initialize();
+    return controller;
+  } catch (_) {
+    await controller.dispose();
+    final fallbackController = fallbackFactory();
+    await fallbackController.initialize();
+    return fallbackController;
+  }
 }
 
 String _extensionFor(String mimeType, String title) {

@@ -6,6 +6,12 @@ enum XmoJoinMode {
   request,
 }
 
+enum XmoRoomSecurityType {
+  privateEncrypted,
+  publicUnencrypted,
+  legacyPrivateUnencrypted,
+}
+
 enum XmoRoomPermission {
   sendMessages,
   sendMedia,
@@ -73,6 +79,7 @@ class XmoRoomPermissions {
 }
 
 class RoomControlsService {
+  static const roomSecurityStateType = 'xmo.room.security';
   static const slowModeStateType = 'xmo.room.slow_mode';
   static const permissionsStateType = 'xmo.room.permissions';
   static const channelPostingPower = 75;
@@ -108,7 +115,67 @@ class RoomControlsService {
     }
   }
 
+  static XmoRoomSecurityType securityTypeFor(Room room) {
+    final security = room.getState(roomSecurityStateType)?.content;
+    final encryptedValue = security?['encrypted'];
+    final visibilityValue = security?['visibility']?.toString();
+    final encryptionState = room.getState(EventTypes.Encryption);
+
+    final encrypted = encryptedValue == true ||
+        encryptedValue?.toString().toLowerCase() == 'true' ||
+        encryptionState != null;
+    if (encrypted) return XmoRoomSecurityType.privateEncrypted;
+
+    if (visibilityValue == 'public' ||
+        joinModeFor(room) == XmoJoinMode.public) {
+      return XmoRoomSecurityType.publicUnencrypted;
+    }
+
+    return XmoRoomSecurityType.legacyPrivateUnencrypted;
+  }
+
+  static bool isPublicUnencrypted(Room room) =>
+      securityTypeFor(room) == XmoRoomSecurityType.publicUnencrypted;
+
+  static bool isPrivateEncrypted(Room room) =>
+      securityTypeFor(room) == XmoRoomSecurityType.privateEncrypted;
+
+  static XmoJoinMode immutableJoinModeFor(Room room) {
+    if (isPublicUnencrypted(room)) return XmoJoinMode.public;
+    final current = joinModeFor(room);
+    return current == XmoJoinMode.public ? XmoJoinMode.invite : current;
+  }
+
+  static String securityTypeLabelFor(Room room) {
+    switch (securityTypeFor(room)) {
+      case XmoRoomSecurityType.privateEncrypted:
+        return 'Private encrypted';
+      case XmoRoomSecurityType.publicUnencrypted:
+        return 'Public not encrypted';
+      case XmoRoomSecurityType.legacyPrivateUnencrypted:
+        return 'Private legacy room';
+    }
+  }
+
+  static String securityTypeSubtitleFor(Room room) {
+    switch (securityTypeFor(room)) {
+      case XmoRoomSecurityType.privateEncrypted:
+        return 'End-to-end encrypted. Create a new room to make it public.';
+      case XmoRoomSecurityType.publicUnencrypted:
+        return 'Searchable/public. Create a new room to make it encrypted.';
+      case XmoRoomSecurityType.legacyPrivateUnencrypted:
+        return 'Private but not encrypted. Create a new encrypted room to upgrade.';
+    }
+  }
+
   static Future<void> setJoinMode(Room room, XmoJoinMode mode) async {
+    final immutableMode = immutableJoinModeFor(room);
+    if (mode == XmoJoinMode.public && immutableMode != XmoJoinMode.public) {
+      throw StateError('Private encrypted rooms cannot be changed to public.');
+    }
+    if (immutableMode == XmoJoinMode.public && mode != XmoJoinMode.public) {
+      throw StateError('Public rooms cannot be changed to private encrypted.');
+    }
     await room.client.setRoomStateWithKey(
       room.id,
       EventTypes.RoomJoinRules,
@@ -131,6 +198,12 @@ class RoomControlsService {
     Room room,
     XmoJoinMode mode,
   ) async {
+    if (mode == XmoJoinMode.public && isPrivateEncrypted(room)) {
+      return false;
+    }
+    if (isPublicUnencrypted(room) && mode != XmoJoinMode.public) {
+      return false;
+    }
     final directoryVisibility = switch (mode) {
       XmoJoinMode.public => Visibility.public,
       XmoJoinMode.invite || XmoJoinMode.request => Visibility.private,

@@ -6,5 +6,13 @@ environment:
   sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
+  bs58: ^1.0.2
+  crypto: ^3.0.6
+  cryptography: ^2.9.0
   googleapis_auth: ^2.0.0
+  http: ^1.6.0
   mailer: ^7.1.0
+  web3dart: ^3.0.2
+
+dev_dependencies:
+  test: ^1.25.0

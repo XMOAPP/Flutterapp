@@ -12,6 +12,7 @@ import 'package:mime/mime.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:record/record.dart';
+import '../config/app_config.dart';
 import '../theme.dart';
 import '../providers/matrix_provider.dart';
 import '../services/matrix_service.dart';
@@ -20,6 +21,8 @@ import '../services/app_settings_service.dart';
 import '../services/voip_service.dart';
 import '../services/room_controls_service.dart';
 import '../services/shared_media_index_service.dart';
+import '../services/matrix_attachment_downloader.dart';
+import '../services/matrix_media_helper.dart';
 import '../services/transfer_queue_service.dart';
 import '../widgets/matrix_chat/album_media_viewer.dart';
 import '../widgets/matrix_chat/fullscreen_image_viewer.dart';
@@ -34,9 +37,12 @@ import '../widgets/direct_chat/message_reactions.dart';
 import '../widgets/direct_chat/read_receipt.dart';
 import '../widgets/story/story_avatar.dart';
 import '../models/group_models.dart';
+import '../models/xmo_stream_manifest.dart';
 import '../services/direct_chat_service.dart';
+import '../services/local_playback_proxy_service.dart';
 import '../services/audio_file_reader_stub.dart'
     if (dart.library.io) '../services/audio_file_reader_io.dart';
+import '../services/streaming_media_service.dart';
 import 'camera_capture_screen.dart';
 import 'media_preview_screen.dart';
 import 'matrix_chat/attachment_sheet.dart';
@@ -137,6 +143,8 @@ class PrivateReplyDraft {
 }
 
 class _MatrixChatScreenState extends State<MatrixChatScreen> {
+  static const MatrixAttachmentDownloader _attachmentDownloader =
+      MatrixAttachmentDownloader();
   final _composerController = ChatComposerController();
   final _timelineController = ChatTimelineController();
   final _replyReactionController =
@@ -144,6 +152,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   final _transferController =
       ChatTransferController<_PendingUpload, _PendingAlbumUpload>();
   final _callCoordinator = ChatCallCoordinator();
+  final _localPlaybackProxyService = LocalPlaybackProxyService();
+  late final StreamingMediaService _streamingMediaService;
   final _scrollCtrl = ScrollController();
   Timeline? _timeline;
   bool _uploading = false;
@@ -261,6 +271,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   @override
   void initState() {
     super.initState();
+    _streamingMediaService = StreamingMediaService(
+      mediaHelper: _matrixService.mediaHelper,
+    );
     _previewIsChannel = widget.previewIsChannelHint;
     _privateReplyDraft = widget.initialPrivateReply;
     final initialComposerText = widget.initialComposerText;
@@ -1432,7 +1445,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       await widget.matrixProvider.service.joinRoom(chunk.roomId);
       widget.matrixProvider.refreshRooms();
       if (mounted) {
-        final room = widget.matrixProvider.service.getRoomById(chunk.roomId);
+        final room =
+            widget.matrixProvider.service.getJoinedRoomById(chunk.roomId);
         if (room != null) {
           Navigator.pushReplacement(
             context,
@@ -2615,6 +2629,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         activeLabel:
             'Loading ${event.body.isNotEmpty ? event.body : 'video'}...',
         failurePrefix: 'Failed to load video',
+        progressLabel: 'Opening',
+        showCancelAction: false,
       );
 
       if (!mounted) return;
@@ -2654,6 +2670,80 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       _showSnackBar('Please wait until the video is ready.');
       return;
     }
+
+    final streamingRequest = _streamingMediaRequestFor(event);
+    if (streamingRequest != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => FullscreenVideoPlayer.network(
+            videoUrl: streamingRequest.uri,
+            videoHeaders: streamingRequest.headers,
+            mimeType: _attachmentMimeTypeFor(event),
+            title: event.body,
+            loadingLabel: 'Loading video...',
+            downloadFuture: () => _downloadAttachment(event),
+            onReply: () async => _setReplyTo(event),
+            onDelete: _canDeleteMessage(event)
+                ? () async => _deleteMessage(event)
+                : null,
+          ),
+        ),
+      );
+      return;
+    }
+
+    final mayPrepareSecureStream = event.isAttachmentEncrypted &&
+        event.content[xmoStreamContentKey] != null;
+    if (mayPrepareSecureStream && mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Preparing secure video...',
+            style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+          ),
+          backgroundColor: kDarkerGrey,
+          duration: const Duration(seconds: 8),
+        ),
+      );
+    }
+    final localPlaybackHandle = await _localPlaybackHandleFor(event);
+    if (!mounted) {
+      if (localPlaybackHandle != null) {
+        await localPlaybackHandle.close();
+        await localPlaybackHandle.session.cleanup();
+      }
+      return;
+    }
+    if (mayPrepareSecureStream) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    }
+    if (localPlaybackHandle != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => FullscreenVideoPlayer.network(
+            videoUrl: localPlaybackHandle.uri,
+            videoHeaders: const <String, String>{},
+            mimeType: _attachmentMimeTypeFor(event),
+            title: event.body,
+            loadingLabel: 'Preparing secure video...',
+            downloadFuture: () => _downloadAttachment(event),
+            onReply: () async => _setReplyTo(event),
+            onDelete: _canDeleteMessage(event)
+                ? () async => _deleteMessage(event)
+                : null,
+            onDispose: () async {
+              await localPlaybackHandle.close();
+              await localPlaybackHandle.session.cleanup();
+            },
+          ),
+        ),
+      );
+      return;
+    }
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -2661,10 +2751,13 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           videoFuture: _downloadAttachmentWithQueue(
             event,
             activeLabel:
-                'Loading ${event.body.isNotEmpty ? event.body : 'video'}...',
+                'Opening ${event.body.isNotEmpty ? event.body : 'video'}...',
             failurePrefix: 'Failed to load video',
+            progressLabel: 'Opening',
+            showCancelAction: false,
           ),
           title: event.body,
+          loadingLabel: 'Opening...',
           onReply: () async => _setReplyTo(event),
           onDelete: _canDeleteMessage(event)
               ? () async => _deleteMessage(event)
@@ -2672,6 +2765,39 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         ),
       ),
     );
+  }
+
+  Future<XmoLocalPlaybackHandle?> _localPlaybackHandleFor(Event event) async {
+    if (kIsWeb || event.messageType != MessageTypes.Video) return null;
+    if (!event.isAttachmentEncrypted) return null;
+    try {
+      final manifest = XmoStreamManifest.fromEventContent(event.content);
+      if (manifest == null) return null;
+      final quality = manifest.resolveQuality(
+        XmoStreamQualityMode.fromName(AppConfig.streamQualityMode),
+      );
+      final session = await _streamingMediaService.open(
+        eventId: event.eventId,
+        manifest: manifest,
+        quality: quality,
+      );
+      return _localPlaybackProxyService.serveSession(session);
+    } catch (e) {
+      debugPrint('[xmo_stream] Falling back to Matrix video playback: $e');
+      return null;
+    }
+  }
+
+  MatrixMediaRequest? _streamingMediaRequestFor(Event event) {
+    if (kIsWeb) return null;
+    if (event.messageType != MessageTypes.Video &&
+        event.messageType != MessageTypes.Audio) {
+      return null;
+    }
+    if (event.isAttachmentEncrypted) return null;
+    final mxcUrl = event.content['url'];
+    if (mxcUrl is! String || mxcUrl.isEmpty) return null;
+    return _matrixService.getMediaRequest(mxcUrl);
   }
 
   void _openFullscreenImage(Uint8List bytes, String title, Event event) {
@@ -2695,6 +2821,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     Event event, {
     required String activeLabel,
     required String failurePrefix,
+    String progressLabel = 'Downloading',
+    bool showCancelAction = true,
     bool showCompletionSnack = false,
     Future<void> Function(MatrixFile file)? onDownloaded,
   }) async {
@@ -2758,6 +2886,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                 jobId: downloadJob.id,
                 initialJobs: _transferQueue.jobs,
                 stream: _transferQueue.stream,
+                label: progressLabel,
+                showCancelAction: showCancelAction,
                 onCancel: () {
                   unawaited(_transferQueue.cancel(downloadJob!.id));
                   showDownloadCancelledSnackBar();
@@ -2771,7 +2901,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         ),
       );
 
-      final matrixFile = await event.downloadAndDecryptAttachment(
+      final matrixFile = await _attachmentDownloader.download(
+        event,
         downloadCallback: _mediaHandler.authenticatedDownloadWithProgress(
           onProgress: (downloadedBytes, totalBytes) {
             unawaited(_transferQueue.updateProgress(
@@ -2918,6 +3049,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         activeLabel:
             'Opening ${displayEvent.body.isNotEmpty ? displayEvent.body : 'file'}...',
         failurePrefix: 'Could not open file',
+        progressLabel: 'Opening',
+        showCancelAction: false,
         onDownloaded: (file) async {
           if (kIsWeb) {
             await web_download.downloadFile(
@@ -2956,7 +3089,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       _showSnackBar('Please wait until the attachment is ready.');
       throw const MatrixDownloadCancelledException();
     }
-    return event.downloadAndDecryptAttachment(
+    return _attachmentDownloader.download(
+      event,
       downloadCallback: _mediaHandler.authenticatedDownload(),
     );
   }
@@ -3350,6 +3484,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                         shareAttachment: _shareMessageAttachment,
                         openAttachmentExternally: _openMessageAttachment,
                         downloadAttachment: _downloadAttachment,
+                        streamingMediaRequest: _streamingMediaRequestFor,
                         onReply: canReply ? () => _setReplyTo(event) : null,
                         onForward:
                             canForward ? () => _forwardMessage(event) : null,
@@ -4898,6 +5033,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         activeLabel:
             'Preparing ${displayEvent.body.isNotEmpty ? displayEvent.body : 'file'}...',
         failurePrefix: 'Failed to share',
+        progressLabel: 'Preparing',
+        showCancelAction: false,
         onDownloaded: (file) => native_share.shareFile(
           file.bytes,
           file.name,
@@ -6192,6 +6329,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     _sharedMediaIndexDebounce?.cancel();
     _stateRefreshDebounce?.cancel();
     _mediaHandler.clearCache();
+    unawaited(_localPlaybackProxyService.stop());
     super.dispose();
   }
 
@@ -7310,12 +7448,16 @@ class _DownloadSnackBarContent extends StatelessWidget {
   final String jobId;
   final List<TransferJob> initialJobs;
   final Stream<List<TransferJob>> stream;
+  final String label;
+  final bool showCancelAction;
   final VoidCallback onCancel;
 
   const _DownloadSnackBarContent({
     required this.jobId,
     required this.initialJobs,
     required this.stream,
+    required this.label,
+    required this.showCancelAction,
     required this.onCancel,
   });
 
@@ -7364,7 +7506,7 @@ class _DownloadSnackBarContent extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Text(
-                            'Downloading',
+                            label,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.inter(
@@ -7383,25 +7525,27 @@ class _DownloadSnackBarContent extends StatelessWidget {
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        const SizedBox(width: 18),
-                        TextButton(
-                          onPressed: onCancel,
-                          style: TextButton.styleFrom(
-                            foregroundColor: kBlack,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 4,
-                              vertical: 8,
+                        if (showCancelAction) ...[
+                          const SizedBox(width: 18),
+                          TextButton(
+                            onPressed: onCancel,
+                            style: TextButton.styleFrom(
+                              foregroundColor: kBlack,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 8,
+                              ),
+                            ),
+                            child: Text(
+                              'Cancel',
+                              style: GoogleFonts.inter(
+                                color: kBlack,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
-                          child: Text(
-                            'Cancel',
-                            style: GoogleFonts.inter(
-                              color: kBlack,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
+                        ],
                       ],
                     ),
                   ),

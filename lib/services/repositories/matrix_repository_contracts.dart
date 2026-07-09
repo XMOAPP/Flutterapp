@@ -51,6 +51,7 @@ abstract interface class MatrixMediaRepository {
     required String mimeType,
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
+    Map<String, dynamic>? xmoStream,
   });
   Future<void> sendImageWithCaption({
     required String roomId,
@@ -60,6 +61,7 @@ abstract interface class MatrixMediaRepository {
     String caption,
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
+    Map<String, dynamic>? xmoStream,
   });
 }
 

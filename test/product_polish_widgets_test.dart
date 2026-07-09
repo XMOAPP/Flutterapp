@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xmo/screens/matrix_chat/chat_input_bar.dart';
+import 'package:xmo/screens/otp/otp_input_boxes.dart';
 import 'package:xmo/widgets/direct_chat/message_reactions.dart';
 
 void main() {
@@ -103,5 +104,44 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.text('01:05'), findsOneWidget);
+  });
+
+  testWidgets('OTP input boxes fit narrow phones without overflow',
+      (tester) async {
+    final controllers = List.generate(6, (_) => TextEditingController());
+    final focusNodes = List.generate(6, (_) => FocusNode());
+    addTearDown(() {
+      for (final controller in controllers) {
+        controller.dispose();
+      }
+      for (final focusNode in focusNodes) {
+        focusNode.dispose();
+      }
+    });
+
+    await tester.binding.setSurfaceSize(const Size(320, 640));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 28),
+              child: OtpInputBoxes(
+                controllers: controllers,
+                focusNodes: focusNodes,
+                error: null,
+                shakeAnimation: const AlwaysStoppedAnimation<double>(0),
+                onDigitChanged: (_, __) {},
+                onKeyPress: (_, __) {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(TextField), findsNWidgets(6));
   });
 }

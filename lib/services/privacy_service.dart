@@ -1,6 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:matrix/matrix.dart';
 
+import '../config/app_config.dart';
 import 'matrix_service.dart';
 
 enum XmoPrivacyAudience {
@@ -148,17 +152,17 @@ class PrivacyService {
     final myUserId = _client.userID;
     if (myUserId == null) return;
 
+    String displayName = _matrixService.displayName ?? myUserId;
+    String? avatarUrl = _matrixService.avatarUrl;
+
+    try {
+      final profile = await _client.getProfileFromUserId(myUserId);
+      displayName = profile.displayName ?? displayName;
+      avatarUrl = profile.avatarUrl?.toString() ?? avatarUrl;
+    } catch (_) {}
+
     try {
       final room = await _ensureUserDirectoryRoom();
-      String displayName = _matrixService.displayName ?? myUserId;
-      String? avatarUrl = _matrixService.avatarUrl;
-
-      try {
-        final profile = await _client.getProfileFromUserId(myUserId);
-        displayName = profile.displayName ?? displayName;
-        avatarUrl = profile.avatarUrl?.toString() ?? avatarUrl;
-      } catch (_) {}
-
       await room.sendEvent({
         'msgtype': userDirectoryEventType,
         'user_id': myUserId,
@@ -168,33 +172,28 @@ class PrivacyService {
         'updated_at': DateTime.now().millisecondsSinceEpoch,
       }, type: userDirectoryEventType);
     } catch (e) {
-      debugPrint('[PrivacyService] Failed to sync public directory: $e');
+      debugPrint('[PrivacyService] Failed to sync Matrix directory room: $e');
     }
+
+    await _syncBackendUserDirectory(
+      userId: myUserId,
+      displayName: displayName,
+      avatarUrl: avatarUrl,
+      isPublic: settings.accountIsPublic,
+    );
   }
 
   Future<List<PublicAccountProfile>> searchPublicAccounts(String query) async {
     final normalizedQuery = query.trim().toLowerCase();
-    if (normalizedQuery.isEmpty || !normalizedQuery.startsWith('@')) {
+    if (normalizedQuery.isEmpty) {
       return const [];
     }
 
     try {
-      final room = await _ensureUserDirectoryRoom();
-      final timeline = await room.getTimeline();
-      final latestByUserId = <String, Event>{};
+      final backendResults = await _searchBackendPublicAccounts(query);
+      if (backendResults.isNotEmpty) return backendResults;
 
-      for (final event in timeline.events) {
-        if (event.type != userDirectoryEventType || event.redacted) continue;
-        final userId = event.content['user_id'] as String?;
-        if (userId == null || userId.isEmpty) continue;
-
-        final current = latestByUserId[userId];
-        if (current == null ||
-            event.originServerTs.isAfter(current.originServerTs)) {
-          latestByUserId[userId] = event;
-        }
-      }
-
+      final latestByUserId = await _latestUserDirectoryEvents();
       final results = <PublicAccountProfile>[];
       for (final event in latestByUserId.values) {
         if (event.content['public'] != true) continue;
@@ -202,8 +201,8 @@ class PrivacyService {
         final userId = event.content['user_id'] as String;
         final displayName = event.content['display_name'] as String? ?? userId;
         final cleanUserId = MatrixService.cleanName(userId).toLowerCase();
-        final matchText = '$userId $cleanUserId'.toLowerCase();
-        if (!matchText.contains(normalizedQuery)) continue;
+        final matchText = '$userId $cleanUserId $displayName'.toLowerCase();
+        if (!_matchesAccountQuery(matchText, normalizedQuery)) continue;
 
         results.add(
           PublicAccountProfile(
@@ -224,6 +223,147 @@ class PrivacyService {
       debugPrint('[PrivacyService] Failed to search public accounts: $e');
       return const [];
     }
+  }
+
+  Future<void> _syncBackendUserDirectory({
+    required String userId,
+    required String displayName,
+    required String? avatarUrl,
+    required bool isPublic,
+  }) async {
+    final token = _matrixService.accessToken;
+    if (token == null || token.isEmpty) return;
+
+    try {
+      final response = await http
+          .post(
+            _userDirectoryEndpoint('users/upsert'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode({
+              'userId': userId,
+              'displayName': displayName,
+              'avatarUrl': avatarUrl,
+              'public': isPublic,
+            }),
+          )
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        debugPrint(
+          '[PrivacyService] Backend directory sync failed: ${response.statusCode}',
+        );
+      }
+    } catch (e) {
+      debugPrint('[PrivacyService] Backend directory sync failed: $e');
+    }
+  }
+
+  Future<List<PublicAccountProfile>> _searchBackendPublicAccounts(
+    String query,
+  ) async {
+    if (!query.trim().startsWith('@')) return const [];
+
+    try {
+      final response = await http
+          .post(
+            _userDirectoryEndpoint('users/search'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'query': query.trim()}),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const [];
+      }
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map || decoded['success'] != true) return const [];
+      final rawResults = decoded['results'];
+      if (rawResults is! List) return const [];
+      return rawResults
+          .whereType<Map>()
+          .map(
+              (raw) => raw.map((key, value) => MapEntry(key.toString(), value)))
+          .map((data) {
+            final userId = data['userId']?.toString() ?? '';
+            if (userId.isEmpty) return null;
+            return PublicAccountProfile(
+              userId: userId,
+              displayName: data['displayName']?.toString() ?? userId,
+              avatarUrl: data['avatarUrl']?.toString(),
+            );
+          })
+          .whereType<PublicAccountProfile>()
+          .toList();
+    } catch (e) {
+      debugPrint('[PrivacyService] Backend directory search failed: $e');
+      return const [];
+    }
+  }
+
+  Uri _userDirectoryEndpoint(String path) {
+    final baseValue = AppConfig.userDirectoryServerUrl.trim();
+    final normalized = baseValue.endsWith('/')
+        ? baseValue.substring(0, baseValue.length - 1)
+        : baseValue;
+    final base = Uri.parse(normalized);
+    return base.replace(path: '${base.path}/$path');
+  }
+
+  Future<Set<String>> searchPrivateAccountIds(String query) async {
+    final normalizedQuery = query.trim().toLowerCase();
+    if (normalizedQuery.isEmpty) return const {};
+
+    try {
+      final latestByUserId = await _latestUserDirectoryEvents();
+      final privateUserIds = <String>{};
+      for (final event in latestByUserId.values) {
+        if (event.content['public'] != false) continue;
+
+        final userId = event.content['user_id'] as String?;
+        if (userId == null || userId.isEmpty) continue;
+
+        final displayName = event.content['display_name'] as String? ?? userId;
+        final cleanUserId = MatrixService.cleanName(userId).toLowerCase();
+        final matchText = '$userId $cleanUserId $displayName'.toLowerCase();
+        if (_matchesAccountQuery(matchText, normalizedQuery)) {
+          privateUserIds.add(userId);
+        }
+      }
+      return privateUserIds;
+    } catch (e) {
+      debugPrint('[PrivacyService] Failed to read private account ids: $e');
+      return const {};
+    }
+  }
+
+  Future<Map<String, Event>> _latestUserDirectoryEvents() async {
+    final room = await _ensureUserDirectoryRoom();
+    final timeline = await room.getTimeline();
+    final latestByUserId = <String, Event>{};
+
+    for (final event in timeline.events) {
+      if (event.type != userDirectoryEventType || event.redacted) continue;
+      final userId = event.content['user_id'] as String?;
+      if (userId == null || userId.isEmpty) continue;
+
+      final current = latestByUserId[userId];
+      if (current == null ||
+          event.originServerTs.isAfter(current.originServerTs)) {
+        latestByUserId[userId] = event;
+      }
+    }
+
+    return latestByUserId;
+  }
+
+  bool _matchesAccountQuery(String matchText, String normalizedQuery) {
+    if (matchText.contains(normalizedQuery)) return true;
+    final withoutAt = normalizedQuery.startsWith('@')
+        ? normalizedQuery.substring(1)
+        : normalizedQuery;
+    if (withoutAt.isEmpty) return false;
+    return matchText.contains(withoutAt);
   }
 
   Future<Room> _ensureUserDirectoryRoom() async {

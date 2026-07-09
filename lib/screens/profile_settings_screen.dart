@@ -296,17 +296,24 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                   fillColor: const Color(0xFF2C2C2E),
                   hintText: 'Enter display name',
                   hintStyle: GoogleFonts.inter(color: kLightGrey),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 13,
+                  ),
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: kMediumGrey),
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide.none,
                   ),
                   enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: kMediumGrey),
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide.none,
                   ),
                   focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: kLimeGreen),
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide(
+                      color: kWhite.withValues(alpha: 0.45),
+                      width: 1,
+                    ),
                   ),
                 ),
               ),

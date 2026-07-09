@@ -96,6 +96,7 @@ class MatrixSdkMediaRepository implements MatrixMediaRepository {
     required String mimeType,
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
+    Map<String, dynamic>? xmoStream,
   }) =>
       _api.sendFileWithProgress(
         roomId: roomId,
@@ -104,6 +105,7 @@ class MatrixSdkMediaRepository implements MatrixMediaRepository {
         mimeType: mimeType,
         onUploadProgress: onUploadProgress,
         isCancelled: isCancelled,
+        xmoStream: xmoStream,
       );
   @override
   Future<void> sendImageWithCaption({
@@ -114,6 +116,7 @@ class MatrixSdkMediaRepository implements MatrixMediaRepository {
     String caption = '',
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
+    Map<String, dynamic>? xmoStream,
   }) =>
       _api.sendImageWithCaption(
         roomId: roomId,
@@ -123,6 +126,7 @@ class MatrixSdkMediaRepository implements MatrixMediaRepository {
         caption: caption,
         onUploadProgress: onUploadProgress,
         isCancelled: isCancelled,
+        xmoStream: xmoStream,
       );
 }
 

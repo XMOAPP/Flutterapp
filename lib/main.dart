@@ -14,6 +14,7 @@ import '../services/app_lock_service.dart';
 import '../services/call_link_service.dart';
 import '../services/crash_reporting_service.dart';
 import '../services/push_notification_service.dart';
+import '../services/streaming_media_service.dart';
 import '../services/story_service.dart';
 import '../services/voip_service.dart';
 import '../services/wallet_deep_link_handler.dart';
@@ -54,6 +55,13 @@ Future<void> main() async {
 }
 
 Future<void> _bootstrapServices(MatrixProvider matrixProvider) async {
+  try {
+    await StreamingMediaService.cleanupDefaultCache();
+  } catch (e, stack) {
+    debugPrint('[main] Streaming media cache cleanup skipped: $e');
+    debugPrintStack(stackTrace: stack);
+  }
+
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
@@ -171,20 +179,31 @@ class XmoApp extends StatelessWidget {
             home: const SplashScreen(),
             // ── PiP overlay sits on top of all routes ──────────────────────
             builder: (context, child) {
-              return AppLockGate(
-                child: Stack(
-                  children: [
-                    child!,
-                    const ConnectionStatusBanner(),
-                    ValueListenableBuilder<bool>(
-                      valueListenable: VoipService().pipMode,
-                      builder: (_, isPip, __) {
-                        if (!isPip) return const SizedBox.shrink();
-                        return const CallPipOverlay();
-                      },
-                    ),
-                    const IncomingCallBanner(),
-                  ],
+              final mediaQuery = MediaQuery.of(context);
+              final clampedMediaQuery = mediaQuery.copyWith(
+                textScaler: mediaQuery.textScaler.clamp(
+                  minScaleFactor: 0.85,
+                  maxScaleFactor: 1.0,
+                ),
+              );
+
+              return MediaQuery(
+                data: clampedMediaQuery,
+                child: AppLockGate(
+                  child: Stack(
+                    children: [
+                      child!,
+                      const ConnectionStatusBanner(),
+                      ValueListenableBuilder<bool>(
+                        valueListenable: VoipService().pipMode,
+                        builder: (_, isPip, __) {
+                          if (!isPip) return const SizedBox.shrink();
+                          return const CallPipOverlay();
+                        },
+                      ),
+                      const IncomingCallBanner(),
+                    ],
+                  ),
                 ),
               );
             },

@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
+import '../../services/matrix_attachment_downloader.dart';
 import '../../services/matrix_service.dart';
 import '../../services/shared_media_index_service.dart';
 import '../../models/direct_chat_models.dart';
@@ -46,6 +47,8 @@ class SharedMediaScreen extends StatefulWidget {
 
 class _SharedMediaScreenState extends State<SharedMediaScreen>
     with SingleTickerProviderStateMixin {
+  static const MatrixAttachmentDownloader _attachmentDownloader =
+      MatrixAttachmentDownloader();
   late TabController _tabController;
   late MediaHandler _mediaHandler;
   final SharedMediaIndexService _indexService =
@@ -832,7 +835,8 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
       matrixProvider: matrixProvider,
       context: context,
     );
-    return event.downloadAndDecryptAttachment(
+    return _attachmentDownloader.download(
+      event,
       downloadCallback: mediaHandler.authenticatedDownload(),
     );
   }

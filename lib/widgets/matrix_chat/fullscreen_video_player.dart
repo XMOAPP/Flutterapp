@@ -24,26 +24,55 @@ class FullscreenVideoPlayer extends StatefulWidget {
   final String? mimeType;
   final String title;
   final Future<MatrixFile>? videoFuture;
+  final Future<MatrixFile> Function()? downloadFuture;
+  final Uri? videoUrl;
+  final Map<String, String> videoHeaders;
+  final String loadingLabel;
   final Future<void> Function()? onReply;
   final Future<void> Function()? onDelete;
+  final Future<void> Function()? onDispose;
 
   const FullscreenVideoPlayer({
     super.key,
     required this.videoBytes,
     required this.mimeType,
     required this.title,
+    this.loadingLabel = 'Opening...',
+    this.downloadFuture,
     this.onReply,
     this.onDelete,
-  }) : videoFuture = null;
+    this.onDispose,
+  })  : videoFuture = null,
+        videoUrl = null,
+        videoHeaders = const <String, String>{};
 
   const FullscreenVideoPlayer.loading({
     super.key,
     required this.videoFuture,
     required this.title,
+    this.loadingLabel = 'Opening...',
+    this.downloadFuture,
     this.onReply,
     this.onDelete,
+    this.onDispose,
   })  : videoBytes = null,
-        mimeType = null;
+        mimeType = null,
+        videoUrl = null,
+        videoHeaders = const <String, String>{};
+
+  const FullscreenVideoPlayer.network({
+    super.key,
+    required this.videoUrl,
+    required this.videoHeaders,
+    required this.title,
+    this.loadingLabel = 'Loading video...',
+    this.mimeType,
+    this.downloadFuture,
+    this.onReply,
+    this.onDelete,
+    this.onDispose,
+  })  : videoBytes = null,
+        videoFuture = null;
 
   @override
   State<FullscreenVideoPlayer> createState() => _FullscreenVideoPlayerState();
@@ -67,7 +96,9 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
     _videoBytes = widget.videoBytes;
     _mimeType = widget.mimeType;
     final future = widget.videoFuture;
-    if (future != null) {
+    if (widget.videoUrl != null) {
+      _nativeInit = _initNetworkVideo();
+    } else if (future != null) {
       _nativeInit = _loadAndInitVideo(future);
     } else {
       _nativeInit = _initLoadedVideo();
@@ -80,6 +111,10 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     if (kIsWeb) {
       web_video.disposeVideoView(_viewId);
+    }
+    final onDispose = widget.onDispose;
+    if (onDispose != null) {
+      unawaited(onDispose());
     }
     _nativeController?.dispose();
     super.dispose();
@@ -99,6 +134,38 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
       return;
     }
     await controller.play();
+    setState(() => _nativeController = controller);
+  }
+
+  Future<void> _initNetworkVideo() async {
+    final url = widget.videoUrl;
+    if (url == null) return;
+    if (kIsWeb) {
+      if (widget.videoHeaders.isNotEmpty) {
+        throw UnsupportedError(
+          'Authenticated browser video streaming is not supported.',
+        );
+      }
+      web_video.registerVideoUrlView(_viewId, url.toString());
+      return;
+    }
+
+    late final VideoPlayerController controller;
+    try {
+      controller = await createNativeNetworkVideoController(
+        url: url,
+        headers: widget.videoHeaders,
+      );
+    } catch (_) {
+      final fallback = widget.downloadFuture;
+      if (fallback == null) rethrow;
+      await _loadAndInitVideo(fallback());
+      return;
+    }
+    if (!mounted) {
+      await controller.dispose();
+      return;
+    }
     setState(() => _nativeController = controller);
   }
 
@@ -213,6 +280,29 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
   }
 
   Future<_LoadedVideo?> _readyVideo(BuildContext context) async {
+    final downloadFuture = widget.downloadFuture;
+    if (_videoBytes == null && downloadFuture != null) {
+      try {
+        final matrixFile = await downloadFuture();
+        _videoBytes = matrixFile.bytes;
+        _mimeType = _effectiveVideoMimeType(
+          matrixFile.mimeType,
+          matrixFile.name,
+          matrixFile.bytes,
+        );
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Video is still loading: $e'),
+              backgroundColor: kDarkerGrey,
+            ),
+          );
+        }
+        return null;
+      }
+    }
+
     if (_videoBytes == null || _resolvedMimeType() == null) {
       try {
         await _nativeInit;
@@ -384,10 +474,34 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
 
   Widget _buildVideoBody() {
     if (kIsWeb) {
+      final url = widget.videoUrl;
+      if (url != null && widget.videoHeaders.isEmpty) {
+        return FutureBuilder<void>(
+          future: _nativeInit,
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  'Failed to play video: ${snapshot.error}',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
+                ),
+              );
+            }
+            return web_video.createVideoView(
+              Uint8List(0),
+              widget.mimeType ?? 'video/mp4',
+              _viewId,
+            );
+          },
+        );
+      }
+
       final bytes = _videoBytes;
       final mimeType = _resolvedMimeType();
       if (bytes == null || mimeType == null) {
-        return const CircularProgressIndicator(color: kWhite);
+        return _buildLoading();
       }
       return web_video.createVideoView(
         bytes,
@@ -431,7 +545,7 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
 
         final controller = _nativeController;
         if (controller == null || !controller.value.isInitialized) {
-          return const CircularProgressIndicator(color: kWhite);
+          return _buildLoading();
         }
 
         if (_showCenterControl && controller.value.isPlaying) {
@@ -495,6 +609,25 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildLoading() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const CircularProgressIndicator(color: kWhite),
+        const SizedBox(height: 14),
+        Text(
+          widget.loadingLabel,
+          textAlign: TextAlign.center,
+          style: GoogleFonts.inter(
+            color: kLightGrey,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
     );
   }
 

@@ -198,6 +198,13 @@ class _OtpScreenState extends State<OtpScreen>
     setState(() => _isVerifying = false);
 
     if (ok) {
+      if (widget.isRegister && widget.username != null) {
+        await OtpService().linkPasswordResetEmail(
+          username: widget.username!,
+          email: widget.email!,
+        );
+        if (!mounted) return;
+      }
       Navigator.of(context).pushAndRemoveUntil(
         PageRouteBuilder(
           pageBuilder: (_, __, ___) => const HomeScreen(),

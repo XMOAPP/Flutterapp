@@ -96,6 +96,59 @@ class _SettingsDropdown<T> extends StatelessWidget {
   }
 }
 
+class _SettingsInfoRow extends StatelessWidget {
+  final String title;
+  final String value;
+  final String subtitle;
+
+  const _SettingsInfoRow({
+    required this.title,
+    required this.value,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.inter(
+                    color: kWhite,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Text(
+            value,
+            textAlign: TextAlign.right,
+            style: GoogleFonts.inter(
+              color: kWhite,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
   static const _adminOnlyChannelPermissions = XmoRoomPermissions(
     sendMessages: RoomControlsService.channelPostingPower,
@@ -339,11 +392,16 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
         await widget.room.setAvatar(matrixFile);
       }
 
-      await RoomControlsService.setChannelJoinMode(widget.room, _joinMode);
+      final immutableJoinMode =
+          RoomControlsService.immutableJoinModeFor(widget.room);
+      await RoomControlsService.setChannelJoinMode(
+        widget.room,
+        immutableJoinMode,
+      );
       final directoryVisibilitySaved =
           await RoomControlsService.setChannelDirectoryVisibility(
         widget.room,
-        _joinMode,
+        immutableJoinMode,
       );
       await RoomControlsService.setSlowModeSeconds(
         widget.room,
@@ -493,40 +551,11 @@ class _ChannelSettingsScreenState extends State<ChannelSettingsScreen> {
   }
 
   Widget _buildJoinModeSelector() {
-    return _SettingsDropdown<XmoJoinMode>(
-      title: 'Channel visibility',
-      subtitle: _joinModeSubtitle,
-      value: _joinMode,
-      items: const [
-        DropdownMenuItem(
-          value: XmoJoinMode.public,
-          child: Text('Public'),
-        ),
-        DropdownMenuItem(
-          value: XmoJoinMode.invite,
-          child: Text('Private'),
-        ),
-        DropdownMenuItem(
-          value: XmoJoinMode.request,
-          child: Text('Private - approve requests'),
-        ),
-      ],
-      onChanged: (value) {
-        if (value == null) return;
-        setState(() => _joinMode = value);
-      },
+    return _SettingsInfoRow(
+      title: 'Channel type',
+      value: RoomControlsService.securityTypeLabelFor(widget.room),
+      subtitle: RoomControlsService.securityTypeSubtitleFor(widget.room),
     );
-  }
-
-  String get _joinModeSubtitle {
-    switch (_joinMode) {
-      case XmoJoinMode.public:
-        return 'Anyone can find and join this channel';
-      case XmoJoinMode.request:
-        return 'Invite-link subscribers need admin approval';
-      case XmoJoinMode.invite:
-        return 'Only invited subscribers can find and join';
-    }
   }
 
   Widget _buildJoinRequestsSection() {

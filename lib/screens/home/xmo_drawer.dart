@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:matrix/matrix.dart';
 import 'package:provider/provider.dart';
 import '../../theme.dart';
 import '../../providers/chat_filter_provider.dart';
@@ -279,7 +280,6 @@ class NewGroupTile extends StatelessWidget {
     final nameCtrl = TextEditingController();
     final descCtrl = TextEditingController();
     GroupType groupType = GroupType.private;
-    JoinRule joinRule = JoinRule.invite;
 
     showDialog(
       context: context,
@@ -287,112 +287,67 @@ class NewGroupTile extends StatelessWidget {
         builder: (context, setDialogState) => AlertDialog(
           backgroundColor: kDarkerGrey,
           title: Text('New Group', style: GoogleFonts.inter(color: kWhite)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: nameCtrl,
-                  style: const TextStyle(color: kWhite),
-                  decoration: const InputDecoration(
-                    labelText: 'Group Name',
-                    labelStyle: TextStyle(color: kLightGrey),
-                    hintText: 'Enter group name',
-                    hintStyle: TextStyle(color: Colors.white54),
-                    enabledBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: kLimeGreen)),
-                    focusedBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: kLimeGreen)),
-                  ),
-                  autofocus: true,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                style: const TextStyle(color: kWhite),
+                decoration: _creationFieldDecoration(
+                  labelText: 'Group Name',
+                  hintText: 'Enter group name',
                 ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: descCtrl,
-                  style: const TextStyle(color: kWhite),
-                  decoration: const InputDecoration(
-                    labelText: 'Description (Optional)',
-                    labelStyle: TextStyle(color: kLightGrey),
-                    hintText: 'What is this group about?',
-                    hintStyle: TextStyle(color: Colors.white54),
-                    enabledBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: kLimeGreen)),
-                    focusedBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: kLimeGreen)),
-                  ),
-                  maxLines: 2,
+                autofocus: true,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: descCtrl,
+                style: const TextStyle(color: kWhite),
+                decoration: _creationFieldDecoration(
+                  labelText: 'Description (Optional)',
+                  hintText: 'What is this group about?',
                 ),
-                const SizedBox(height: 20),
-                Text('Group Type',
-                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 12)),
-                Row(
-                  children: [
-                    Expanded(
-                      child: RadioListTile<GroupType>(
-                        title: const Text('Private (encrypted)',
-                            style: TextStyle(color: kWhite, fontSize: 14)),
-                        value: GroupType.private,
-                        groupValue: groupType,
-                        activeColor: kLimeGreen,
-                        contentPadding: EdgeInsets.zero,
-                        onChanged: (value) {
-                          setDialogState(() => groupType = value!);
-                        },
-                      ),
+                maxLines: 1,
+              ),
+              const SizedBox(height: 20),
+              Text('Group Type',
+                  style: GoogleFonts.inter(color: kLightGrey, fontSize: 12)),
+              Row(
+                children: [
+                  Expanded(
+                    child: RadioListTile<GroupType>(
+                      title: const Text('Private (encrypted)',
+                          style: TextStyle(color: kWhite, fontSize: 14)),
+                      value: GroupType.private,
+                      groupValue: groupType,
+                      activeColor: kLimeGreen,
+                      contentPadding: EdgeInsets.zero,
+                      onChanged: (value) {
+                        setDialogState(() => groupType = value!);
+                      },
                     ),
-                    Expanded(
-                      child: RadioListTile<GroupType>(
-                        title: const Text('Public (not encrypted)',
-                            style: TextStyle(color: kWhite, fontSize: 14)),
-                        value: GroupType.public,
-                        groupValue: groupType,
-                        activeColor: kLimeGreen,
-                        contentPadding: EdgeInsets.zero,
-                        onChanged: (value) {
-                          setDialogState(() => groupType = value!);
-                        },
-                      ),
+                  ),
+                  Expanded(
+                    child: RadioListTile<GroupType>(
+                      title: const Text('Public (not encrypted)',
+                          style: TextStyle(color: kWhite, fontSize: 14)),
+                      value: GroupType.public,
+                      groupValue: groupType,
+                      activeColor: kLimeGreen,
+                      contentPadding: EdgeInsets.zero,
+                      onChanged: (value) {
+                        setDialogState(() => groupType = value!);
+                      },
                     ),
-                  ],
-                ),
-                Text('Who Can Join?',
-                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 12)),
-                RadioListTile<JoinRule>(
-                  title: const Text('Invite Only',
-                      style: TextStyle(color: kWhite, fontSize: 14)),
-                  value: JoinRule.invite,
-                  groupValue: joinRule,
-                  activeColor: kLimeGreen,
-                  contentPadding: EdgeInsets.zero,
-                  onChanged: (value) {
-                    setDialogState(() => joinRule = value!);
-                  },
-                ),
-                RadioListTile<JoinRule>(
-                  title: const Text('Open',
-                      style: TextStyle(color: kWhite, fontSize: 14)),
-                  value: JoinRule.open,
-                  groupValue: joinRule,
-                  activeColor: kLimeGreen,
-                  contentPadding: EdgeInsets.zero,
-                  onChanged: (value) {
-                    setDialogState(() => joinRule = value!);
-                  },
-                ),
-                RadioListTile<JoinRule>(
-                  title: const Text('Approve Requests',
-                      style: TextStyle(color: kWhite, fontSize: 14)),
-                  value: JoinRule.knock,
-                  groupValue: joinRule,
-                  activeColor: kLimeGreen,
-                  contentPadding: EdgeInsets.zero,
-                  onChanged: (value) {
-                    setDialogState(() => joinRule = value!);
-                  },
-                ),
-              ],
-            ),
+                  ),
+                ],
+              ),
+              Text(
+                'This choice cannot be changed later.',
+                style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
+              ),
+            ],
           ),
           actions: [
             TextButton(
@@ -416,7 +371,9 @@ class NewGroupTile extends StatelessWidget {
                         ? null
                         : descCtrl.text.trim(),
                     type: groupType,
-                    joinRule: joinRule,
+                    joinRule: groupType == GroupType.public
+                        ? JoinRule.open
+                        : JoinRule.invite,
                   ),
                   errorPrefix: 'Failed to create group',
                 );
@@ -436,21 +393,32 @@ Future<void> _createAndOpenRoom({
   required Future<String> Function() createRoom,
   required String errorPrefix,
 }) async {
+  BuildContext? loaderContext;
   showDialog(
     context: context,
+    useRootNavigator: true,
     barrierDismissible: false,
-    builder: (_) => const Center(
-      child: CircularProgressIndicator(color: kLimeGreen),
-    ),
+    builder: (dialogContext) {
+      loaderContext = dialogContext;
+      return const Center(
+        child: CircularProgressIndicator(color: kLimeGreen),
+      );
+    },
   );
+
+  void closeLoader() {
+    final dialogContext = loaderContext;
+    if (dialogContext == null) return;
+    loaderContext = null;
+    Navigator.of(dialogContext, rootNavigator: true).pop();
+  }
 
   try {
     final roomId = await createRoom();
-    await provider.service.client.oneShotSync();
+    final room = await _waitForCreatedRoom(provider, roomId);
     provider.refreshRooms();
-    final room = provider.service.getRoomById(roomId);
 
-    if (context.mounted) Navigator.pop(context);
+    closeLoader();
     if (!context.mounted) return;
 
     if (room != null) {
@@ -473,7 +441,7 @@ Future<void> _createAndOpenRoom({
       ),
     );
   } catch (e) {
-    if (context.mounted) Navigator.pop(context);
+    closeLoader();
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -482,6 +450,45 @@ Future<void> _createAndOpenRoom({
       ),
     );
   }
+}
+
+Future<Room?> _waitForCreatedRoom(
+  MatrixProvider provider,
+  String roomId,
+) async {
+  for (final delay in const [
+    Duration.zero,
+    Duration(milliseconds: 250),
+    Duration(milliseconds: 500),
+    Duration(milliseconds: 900),
+    Duration(milliseconds: 1400),
+  ]) {
+    if (delay != Duration.zero) {
+      await Future.delayed(delay);
+    }
+
+    final room = _createdRoomById(provider, roomId);
+    if (room != null) return room;
+
+    try {
+      await provider.service.client.oneShotSync();
+    } catch (e) {
+      debugPrint('[DrawerCreate] oneShotSync failed for $roomId: $e');
+    }
+  }
+
+  return _createdRoomById(provider, roomId);
+}
+
+Room? _createdRoomById(MatrixProvider provider, String roomId) {
+  final serviceRoom = provider.service.getRoomById(roomId);
+  if (serviceRoom != null) return serviceRoom;
+
+  for (final room in provider.rooms) {
+    if (room.id == roomId) return room;
+  }
+
+  return null;
 }
 
 class NewChannelTile extends StatelessWidget {
@@ -510,6 +517,7 @@ class NewChannelTile extends StatelessWidget {
 
   void _showCreateChannelDialog(BuildContext context) {
     final nameCtrl = TextEditingController();
+    final descCtrl = TextEditingController();
     var isPublic = true;
     showDialog(
       context: context,
@@ -524,17 +532,23 @@ class NewChannelTile extends StatelessWidget {
               TextField(
                 controller: nameCtrl,
                 style: const TextStyle(color: kWhite),
-                decoration: const InputDecoration(
-                  hintText: 'Channel Name',
-                  hintStyle: TextStyle(color: Colors.white54),
-                  enabledBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: kLimeGreen)),
-                  focusedBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: kLimeGreen)),
+                decoration: _creationFieldDecoration(
+                  labelText: 'Channel Name',
+                  hintText: 'Enter channel name',
                 ),
                 autofocus: true,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
+              TextField(
+                controller: descCtrl,
+                style: const TextStyle(color: kWhite),
+                decoration: _creationFieldDecoration(
+                  labelText: 'Description (Optional)',
+                  hintText: 'What is this channel about?',
+                ),
+                maxLines: 1,
+              ),
+              const SizedBox(height: 16),
               RadioListTile<bool>(
                 value: true,
                 groupValue: isPublic,
@@ -570,6 +584,11 @@ class NewChannelTile extends StatelessWidget {
                   'Public channels are not end-to-end encrypted.',
                   style: TextStyle(color: kLightGrey, fontSize: 12),
                 ),
+              const SizedBox(height: 6),
+              const Text(
+                'This choice cannot be changed later.',
+                style: TextStyle(color: kLightGrey, fontSize: 11),
+              ),
             ],
           ),
           actions: [
@@ -589,6 +608,9 @@ class NewChannelTile extends StatelessWidget {
                   provider: provider,
                   createRoom: () => provider.service.createChannel(
                     name: name,
+                    topic: descCtrl.text.trim().isEmpty
+                        ? null
+                        : descCtrl.text.trim(),
                     isPublic: isPublic,
                   ),
                   errorPrefix: 'Failed to create channel',
@@ -601,6 +623,31 @@ class NewChannelTile extends StatelessWidget {
       ),
     );
   }
+}
+
+InputDecoration _creationFieldDecoration({
+  required String labelText,
+  required String hintText,
+}) {
+  final border = OutlineInputBorder(
+    borderRadius: BorderRadius.circular(24),
+    borderSide: BorderSide.none,
+  );
+  return InputDecoration(
+    labelText: labelText,
+    labelStyle: const TextStyle(color: kLightGrey),
+    hintText: hintText,
+    hintStyle: const TextStyle(color: Colors.white54),
+    isDense: true,
+    filled: true,
+    fillColor: const Color(0xFF2C2C2E),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+    border: border,
+    enabledBorder: border,
+    focusedBorder: border.copyWith(
+      borderSide: BorderSide(color: kWhite.withValues(alpha: 0.45), width: 1),
+    ),
+  );
 }
 
 /// Logout tile

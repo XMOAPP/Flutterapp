@@ -331,6 +331,11 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
 
     try {
       await widget.room.leave();
+      final provider = context.read<MatrixProvider>();
+      try {
+        await provider.service.client.oneShotSync();
+      } catch (_) {}
+      provider.refreshRooms();
       if (!mounted) return;
       Navigator.pop(context);
     } catch (e) {

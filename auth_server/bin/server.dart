@@ -4,22 +4,24 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:crypto/crypto.dart';
 import 'package:googleapis_auth/auth_io.dart';
-import 'package:mailer/mailer.dart';
-import 'package:mailer/smtp_server.dart';
 
+import 'package:xmo_auth_server/src/email_service.dart';
 import 'package:xmo_auth_server/src/endpoint_modules.dart';
 import 'package:xmo_auth_server/src/health_status.dart';
 import 'package:xmo_auth_server/src/request_guard.dart';
 import 'package:xmo_auth_server/src/structured_logger.dart';
+import 'package:xmo_auth_server/src/wallet_auth_service.dart';
 
+part '../lib/src/handlers/azure_blob_handler.dart';
 part '../lib/src/handlers/donation_handler.dart';
 part '../lib/src/handlers/otp_handler.dart';
+part '../lib/src/handlers/password_reset_handler.dart';
 part '../lib/src/handlers/push_handler.dart';
+part '../lib/src/handlers/user_directory_handler.dart';
+part '../lib/src/handlers/wallet_handler.dart';
 
-final String _gmail = Platform.environment['XMO_GMAIL'] ?? '';
-final String _gmailAppPassword =
-    Platform.environment['XMO_GMAIL_APP_PASSWORD'] ?? '';
 final int _port = int.tryParse(Platform.environment['PORT'] ?? '') ?? 3000;
 final String _thirdwebSecretKey =
     Platform.environment['XMO_THIRDWEB_SECRET_KEY'] ?? '';
@@ -36,14 +38,40 @@ final String _firebaseProjectId =
     Platform.environment['XMO_FIREBASE_PROJECT_ID'] ?? '';
 
 final _otpStore = <String, _OtpRecord>{};
+final _passwordResetStore = <String, _PasswordResetRecord>{};
 final _random = Random.secure();
 final _rateLimiter = RequestRateLimiter();
 const _logger = StructuredLogger();
+final _emailConfig = EmailConfig.fromEnvironment(Platform.environment);
+final _emailService = EmailService(config: _emailConfig, logger: _logger);
+final _passwordResetConfig =
+    PasswordResetConfig.fromEnvironment(Platform.environment);
+final _walletAuthService = WalletAuthService(
+  config: WalletAuthConfig.fromEnvironment(Platform.environment),
+);
+final _azureBlobConfig = AzureBlobConfig.fromEnvironment(Platform.environment);
 const _otpEndpoints = OtpEndpointModule(send: _sendOtp, verify: _verifyOtp);
+const _passwordResetEndpoints = PasswordResetEndpointModule(
+  linkEmail: _linkPasswordResetEmail,
+  start: _startPasswordReset,
+  complete: _completePasswordReset,
+);
 const _donationEndpoints = DonationEndpointModule(_createDonationPayment);
+const _walletEndpoints = WalletEndpointModule(
+  nonce: _createWalletNonce,
+  verify: _verifyWalletSignature,
+);
+const _azureBlobEndpoints = AzureBlobEndpointModule(
+  signUpload: _signAzureBlobChunkUpload,
+);
+const _userDirectoryEndpoints = UserDirectoryEndpointModule(
+  upsert: _upsertUserDirectoryEntry,
+  search: _searchUserDirectory,
+);
 const _pushEndpoints = PushGatewayEndpointModule(_handleMatrixPush);
 
-const _otpTtl = Duration(minutes: 5);
+const _otpTtl = Duration(minutes: 1);
+const _passwordResetTtl = Duration(minutes: 5);
 const _maxAttempts = 5;
 const _thirdwebBaseUrl = 'https://api.thirdweb.com';
 const _baseUsdcAddress = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -86,12 +114,16 @@ Future<void> _handleRequest(HttpRequest request) async {
         request,
         HttpStatus.ok,
         buildHealthStatus(
-          emailConfigured: _gmail.isNotEmpty && _gmailAppPassword.isNotEmpty,
+          emailConfigured: _emailService.isConfigured,
           donationConfigured: _thirdwebSecretKey.isNotEmpty &&
               _donationRecipientAddress.isNotEmpty,
+          walletAuthConfigured: _walletAuthService.config.isConfigured,
+          passwordResetConfigured: _passwordResetConfig.isConfigured,
           pushConfigured: _firebaseServiceAccountJson.isNotEmpty ||
               _firebaseServiceAccountBase64.isNotEmpty ||
               _firebaseServiceAccountFile.isNotEmpty,
+          azureBlobConfigured: _azureBlobConfig.isConfigured,
+          userDirectoryConfigured: _userDirectoryConfig.isConfigured,
         ),
       );
       return;
@@ -110,8 +142,56 @@ Future<void> _handleRequest(HttpRequest request) async {
     }
 
     if (request.method == 'POST' &&
+        _passwordResetEndpoints.handlesLinkEmail(request.uri.path)) {
+      await _passwordResetEndpoints.linkEmail(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _passwordResetEndpoints.handlesStart(request.uri.path)) {
+      await _passwordResetEndpoints.start(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _passwordResetEndpoints.handlesComplete(request.uri.path)) {
+      await _passwordResetEndpoints.complete(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
         _donationEndpoints.handles(request.uri.path)) {
       await _donationEndpoints.create(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _walletEndpoints.handlesNonce(request.uri.path)) {
+      await _walletEndpoints.nonce(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _walletEndpoints.handlesVerify(request.uri.path)) {
+      await _walletEndpoints.verify(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _azureBlobEndpoints.handlesSignUpload(request.uri.path)) {
+      await _azureBlobEndpoints.signUpload(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _userDirectoryEndpoints.handlesUpsert(request.uri.path)) {
+      await _userDirectoryEndpoints.upsert(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _userDirectoryEndpoints.handlesSearch(request.uri.path)) {
+      await _userDirectoryEndpoints.search(request);
       return;
     }
 
@@ -178,7 +258,10 @@ List<dynamic>? _asList(Object? value) => value is List ? value : null;
 void _setCorsHeaders(HttpResponse response) {
   response.headers.add('Access-Control-Allow-Origin', '*');
   response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  response.headers.add('Access-Control-Allow-Headers', 'Content-Type');
+  response.headers.add(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization',
+  );
 }
 
 Future<void> _json(

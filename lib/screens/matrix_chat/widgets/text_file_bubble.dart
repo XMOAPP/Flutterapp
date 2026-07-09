@@ -29,6 +29,7 @@ class TextOrFileMessageBubble extends StatelessWidget {
   final Future<void> Function(Event)? shareAttachment;
   final Future<void> Function(Event)? openAttachmentExternally;
   final Future<MatrixFile> Function(Event)? downloadAttachment;
+  final MatrixMediaRequest? Function(Event)? streamingMediaRequest;
   final VoidCallback? onReply;
   final VoidCallback? onForward;
   final VoidCallback? onPin;
@@ -55,6 +56,7 @@ class TextOrFileMessageBubble extends StatelessWidget {
     this.shareAttachment,
     this.openAttachmentExternally,
     this.downloadAttachment,
+    this.streamingMediaRequest,
     this.onReply,
     this.onForward,
     this.onPin,
@@ -119,6 +121,7 @@ class TextOrFileMessageBubble extends StatelessWidget {
                     isMe: isMe,
                     time: time,
                     downloadAttachment: downloadAttachment!,
+                    streamingMediaRequest: streamingMediaRequest,
                     buildMessageStatus: buildMessageStatus,
                   )
                 else

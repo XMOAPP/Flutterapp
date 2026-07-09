@@ -26,9 +26,7 @@ class _UserTileState extends State<UserTile> {
   Widget build(BuildContext context) {
     final cleanUsername = MatrixService.cleanName(widget.profile.userId);
     final displayName = widget.profile.displayName;
-    final hasDisplayName = displayName != null &&
-        displayName.isNotEmpty &&
-        displayName != cleanUsername;
+    final hasDisplayName = displayName != null && displayName.isNotEmpty;
 
     return RepaintBoundary(
       child: MouseRegion(
@@ -84,11 +82,12 @@ class _UserTileState extends State<UserTile> {
           hasDisplayName ? displayName! : cleanUsername,
           style: _nameTextStyle,
         ),
-        if (hasDisplayName)
-          Text(
-            '@$cleanUsername',
-            style: _usernameTextStyle,
-          ),
+        Text(
+          '@$cleanUsername',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: _usernameTextStyle,
+        ),
       ],
     );
   }

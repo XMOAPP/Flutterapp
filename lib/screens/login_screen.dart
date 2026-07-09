@@ -5,6 +5,7 @@ import '../config/app_config.dart';
 import '../providers/matrix_provider.dart';
 import '../services/otp_service.dart';
 import '../theme.dart';
+import 'forgot_password_screen.dart';
 import 'home_screen.dart';
 import 'otp_screen.dart';
 import 'login/login_form_fields.dart';
@@ -113,6 +114,11 @@ class _LoginScreenState extends State<LoginScreen>
         Navigator.pop(context);
 
         if (ok) {
+          await OtpService().linkPasswordResetEmail(
+            username: username,
+            email: email,
+          );
+          if (!mounted) return;
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(builder: (_) => const HomeScreen()),
           );
@@ -247,6 +253,26 @@ class _LoginScreenState extends State<LoginScreen>
                       isRegisterMode: _isRegisterMode,
                       onPressed: _submit,
                     ),
+                    if (!_isRegisterMode) ...[
+                      const SizedBox(height: 10),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const ForgotPasswordScreen(),
+                            ),
+                          );
+                        },
+                        child: Text(
+                          'Forgot password?',
+                          style: GoogleFonts.inter(
+                            color: kWhite,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     ToggleAuthModeButton(
                       isRegisterMode: _isRegisterMode,

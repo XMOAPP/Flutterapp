@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:bs58/bs58.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -7,6 +8,7 @@ import 'package:reown_appkit/reown_appkit.dart';
 
 import '../config/app_config.dart';
 import '../providers/matrix_provider.dart';
+import '../services/wallet_auth_service.dart';
 import '../services/wallet_deep_link_handler.dart';
 import '../theme.dart';
 import 'home_screen.dart';
@@ -27,6 +29,7 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
   final _formKey = GlobalKey<FormState>();
 
   ReownAppKitModal? _appKitModal;
+  final _walletAuthService = const WalletAuthService();
   bool _isInitializing = true;
   bool _isBusy = false;
   String? _error;
@@ -75,6 +78,39 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
           '1ae92b26df02f0abca6304df07debccd18262fdf5fe82daa81593582dac9a369',
           'fd20dc426fb37566d803205b19bbc1d4096b248ac04548e3cfb6b3a38bd033aa',
         },
+        customWallets: const [
+          ReownAppKitModalWalletInfo(
+            listing: AppKitModalWalletListing(
+              id: 'xmo-rabby-mobile',
+              name: 'Rabby',
+              homepage: 'https://rabby.io',
+              imageId: 'https://rabby.io/assets/images/logo-128.png',
+              order: 1,
+              mobileLink: 'rabby://',
+              playStore:
+                  'https://play.google.com/store/apps/details?id=com.debank.rabbymobile',
+              rdns: 'com.debank.rabbymobile',
+              supportsWc: true,
+              isTopWallet: true,
+            ),
+          ),
+          ReownAppKitModalWalletInfo(
+            listing: AppKitModalWalletListing(
+              id: 'xmo-trust-wallet-mobile',
+              name: 'Trust Wallet',
+              homepage: 'https://trustwallet.com',
+              imageId:
+                  'https://trustwallet.com/assets/images/media/assets/TWT.png',
+              order: 2,
+              mobileLink: 'trust://',
+              playStore:
+                  'https://play.google.com/store/apps/details?id=com.wallet.crypto.trustapp',
+              rdns: 'com.wallet.crypto.trustapp',
+              supportsWc: true,
+              isTopWallet: true,
+            ),
+          ),
+        ],
         optionalNamespaces: {
           'eip155': RequiredNamespace.fromJson({
             'chains': ['eip155:1', 'eip155:137', 'eip155:11155111'],
@@ -86,12 +122,20 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
             ],
             'events': ['accountsChanged', 'chainChanged'],
           }),
+          'solana': RequiredNamespace.fromJson({
+            'chains': [
+              'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+              'solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z',
+            ],
+            'methods': ['solana_signMessage'],
+            'events': ['accountsChanged'],
+          }),
         },
       );
 
-      WalletDeepLinkHandler.attach(appKitModal);
       appKitModal.addListener(_onWalletStateChanged);
       await appKitModal.init();
+      WalletDeepLinkHandler.attach(appKitModal);
       await WalletDeepLinkHandler.checkInitialLink();
 
       if (!mounted) return;
@@ -181,9 +225,9 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
     final appKitModal = _appKitModal;
     final session = appKitModal?.session;
     final username = _usernameCtrl.text.trim();
-    final address = session?.getAddress('eip155');
+    final wallet = _connectedWallet(appKitModal);
 
-    if (appKitModal == null || session == null || address == null) {
+    if (appKitModal == null || session == null || wallet == null) {
       setState(() => _error = 'Connect a wallet first.');
       return;
     }
@@ -194,19 +238,38 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
     });
 
     try {
-      final message = _authMessage(username, address);
-      final signature = await _personalSign(appKitModal, message, address);
-      if (signature == null || signature.toString().isEmpty) {
+      final chainId = _selectedChainId(appKitModal);
+      final mode = _mode.name;
+      final challenge = await _walletAuthService.createChallenge(
+        username: username,
+        address: wallet.address,
+        mode: mode,
+        walletType: wallet.type,
+        chainId: chainId,
+      );
+      final signatureResult = await _signWalletMessage(
+        appKitModal,
+        wallet,
+        challenge.message,
+      );
+      final signature = _normalizeSignature(signatureResult);
+      if (signature.isEmpty) {
         throw Exception('Wallet did not return a signature.');
       }
+      final verification = await _walletAuthService.verifySignature(
+        username: username,
+        address: wallet.address,
+        mode: mode,
+        walletType: wallet.type,
+        message: challenge.message,
+        signature: signature,
+      );
 
       if (!mounted) return;
       final provider = context.read<MatrixProvider>();
-      final password = 'xmo_wallet_${address.toLowerCase()}';
-
       final ok = _mode == _WalletAuthMode.login
-          ? await provider.login(username, password)
-          : await provider.register(username, password);
+          ? await provider.login(username, verification.matrixPassword)
+          : await provider.register(username, verification.matrixPassword);
 
       if (!mounted) return;
       if (ok) {
@@ -253,32 +316,83 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
     return error ?? 'Authentication failed.';
   }
 
-  Future<dynamic> _personalSign(
+  Future<dynamic> _signWalletMessage(
     ReownAppKitModal appKitModal,
+    _WalletConnection wallet,
     String message,
-    String address,
   ) {
-    final chainId = appKitModal.selectedChain?.chainId ??
-        appKitModal.session?.getApprovedChains(namespace: 'eip155')?.first ??
-        'eip155:1';
+    if (wallet.type == 'solana') {
+      return appKitModal.request(
+        topic: appKitModal.session!.topic,
+        chainId: wallet.chainId,
+        request: SessionRequestParams(
+          method: 'solana_signMessage',
+          params: {
+            'message': base58.encode(utf8.encode(message)),
+          },
+        ),
+      );
+    }
 
     return appKitModal.request(
       topic: appKitModal.session!.topic,
-      chainId: chainId,
+      chainId: wallet.chainId,
       request: SessionRequestParams(
         method: 'personal_sign',
-        params: [_hexMessage(message), address],
+        params: [_hexMessage(message), wallet.address],
       ),
     );
   }
 
-  String _authMessage(String username, String address) {
-    final issuedAt = DateTime.now().toUtc().toIso8601String();
-    return 'XMO wants you to sign in with your wallet.\n\n'
-        'Username: $username\n'
-        'Wallet: $address\n'
-        'Issued At: $issuedAt\n\n'
-        'This request will not trigger a blockchain transaction.';
+  String _selectedChainId(ReownAppKitModal appKitModal) {
+    final wallet = _connectedWallet(appKitModal);
+    if (wallet != null) return wallet.chainId;
+    return 'eip155:1';
+  }
+
+  _WalletConnection? _connectedWallet(ReownAppKitModal? appKitModal) {
+    final session = appKitModal?.session;
+    if (session == null) return null;
+
+    final evmAddress = session.getAddress('eip155');
+    if (evmAddress != null && evmAddress.isNotEmpty) {
+      final chainId = appKitModal?.selectedChain?.chainId ??
+          session.getApprovedChains(namespace: 'eip155')?.first ??
+          'eip155:1';
+      return _WalletConnection(
+        type: 'evm',
+        address: evmAddress,
+        chainId: chainId.startsWith('eip155:') ? chainId : 'eip155:$chainId',
+      );
+    }
+
+    final solanaAddress = session.getAddress('solana');
+    if (solanaAddress != null && solanaAddress.isNotEmpty) {
+      final chainId = session.getApprovedChains(namespace: 'solana')?.first ??
+          'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
+      return _WalletConnection(
+        type: 'solana',
+        address: solanaAddress,
+        chainId: chainId.startsWith('solana:') ? chainId : 'solana:$chainId',
+      );
+    }
+
+    return null;
+  }
+
+  String _normalizeSignature(dynamic signatureResult) {
+    if (signatureResult == null) return '';
+    if (signatureResult is String) return signatureResult.trim();
+    if (signatureResult is List<int>) {
+      return base64Encode(signatureResult);
+    }
+    if (signatureResult is Map) {
+      final dynamic signature = signatureResult['signature'] ??
+          signatureResult['signedMessage'] ??
+          signatureResult['result'];
+      return _normalizeSignature(signature);
+    }
+    return signatureResult.toString().trim();
   }
 
   String _hexMessage(String message) {
@@ -303,7 +417,7 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final address = _appKitModal?.session?.getAddress('eip155');
+    final address = _connectedWallet(_appKitModal)?.address;
 
     return Scaffold(
       backgroundColor: kBlack,
@@ -433,7 +547,7 @@ class _NativeConnectStep extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         Text(
-          'Select MetaMask, Rainbow, Coinbase, or another WalletConnect wallet installed on this phone.',
+          'Select MetaMask, Trust Wallet, Coinbase, Rainbow, Phantom, Solflare, or another supported WalletConnect wallet.',
           textAlign: TextAlign.center,
           style: GoogleFonts.inter(
             color: kLightGrey,
@@ -444,4 +558,16 @@ class _NativeConnectStep extends StatelessWidget {
       ],
     );
   }
+}
+
+class _WalletConnection {
+  const _WalletConnection({
+    required this.type,
+    required this.address,
+    required this.chainId,
+  });
+
+  final String type;
+  final String address;
+  final String chainId;
 }

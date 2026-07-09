@@ -72,6 +72,70 @@ class OtpService {
     }
   }
 
+  Future<void> linkPasswordResetEmail({
+    required String username,
+    required String email,
+  }) async {
+    try {
+      await http.post(
+        _endpoint('password/link-email'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'username': username,
+          'email': email,
+        }),
+      );
+    } catch (e) {
+      debugPrint("Password reset email link failed: $e");
+    }
+  }
+
+  Future<String?> startPasswordReset({
+    required String username,
+    required String email,
+  }) async {
+    try {
+      final response = await http.post(
+        _endpoint('password/reset/start'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'username': username,
+          'email': email,
+        }),
+      );
+      if (response.statusCode == 200) return null;
+      return _decodeError(response.body);
+    } catch (e) {
+      debugPrint("Password reset start failed: $e");
+      return 'Failed to connect to password reset server.';
+    }
+  }
+
+  Future<String?> completePasswordReset({
+    required String username,
+    required String email,
+    required String otp,
+    required String newPassword,
+  }) async {
+    try {
+      final response = await http.post(
+        _endpoint('password/reset/complete'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'username': username,
+          'email': email,
+          'otp': otp,
+          'newPassword': newPassword,
+        }),
+      );
+      if (response.statusCode == 200) return null;
+      return _decodeError(response.body);
+    } catch (e) {
+      debugPrint("Password reset complete failed: $e");
+      return 'Failed to connect to password reset server.';
+    }
+  }
+
   String _decodeError(String body) {
     try {
       final data = jsonDecode(body) as Map<String, dynamic>;

@@ -8,10 +8,12 @@ import 'package:provider/provider.dart';
 import '../providers/matrix_provider.dart';
 import '../models/group_models.dart';
 import '../services/group_service.dart';
+import '../services/matrix_service.dart';
 import '../services/privacy_service.dart';
 import '../theme.dart';
 import '../widgets/story/story_avatar.dart';
 import 'matrix_chat_screen.dart';
+import 'user_profile_preview_screen.dart';
 import 'user_search/search_bar_widget.dart';
 import 'user_search/user_tile.dart';
 import 'user_search/search_states.dart';
@@ -70,18 +72,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
     });
 
     final provider = context.read<MatrixProvider>();
-    final myId = provider.userId;
-    final publicAccounts =
-        await PrivacyService(provider.service).searchPublicAccounts(query);
-    final userResults = publicAccounts.map((account) {
-      return Profile(
-        userId: account.userId,
-        displayName: account.displayName,
-        avatarUrl:
-            account.avatarUrl == null ? null : Uri.tryParse(account.avatarUrl!),
-      );
-    }).toList();
-    final filteredUsers = userResults.where((p) => p.userId != myId).toList();
+    final filteredUsers = await _searchUsers(provider, query);
 
     var publicRooms = <PublicRoomsChunk>[];
     try {
@@ -114,6 +105,124 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
     }
   }
 
+  Future<List<Profile>> _searchUsers(
+    MatrixProvider provider,
+    String query,
+  ) async {
+    final privacyService = PrivacyService(provider.service);
+    final publicAccounts = await privacyService.searchPublicAccounts(query);
+    final explicitPrivateUserIds =
+        await privacyService.searchPrivateAccountIds(query);
+    final byUserId = <String, Profile>{};
+    final myId = provider.userId;
+
+    void addProfile(Profile profile) {
+      final userId = profile.userId;
+      if (userId == myId) return;
+      if (explicitPrivateUserIds.contains(userId)) return;
+      byUserId[userId] = profile;
+    }
+
+    for (final account in publicAccounts) {
+      addProfile(
+        Profile(
+          userId: account.userId,
+          displayName: account.displayName,
+          avatarUrl: account.avatarUrl == null
+              ? null
+              : Uri.tryParse(account.avatarUrl!),
+        ),
+      );
+    }
+
+    for (final profile in await _searchMatrixUserDirectory(provider, query)) {
+      addProfile(profile);
+    }
+
+    final exactProfile = await _lookupExactMatrixUser(provider, query);
+    if (exactProfile != null) {
+      addProfile(exactProfile);
+    }
+
+    final results = byUserId.values.toList()
+      ..sort((a, b) {
+        final aName = (a.displayName ?? a.userId).toLowerCase();
+        final bName = (b.displayName ?? b.userId).toLowerCase();
+        return aName.compareTo(bName);
+      });
+    return results.take(20).toList();
+  }
+
+  Future<List<Profile>> _searchMatrixUserDirectory(
+    MatrixProvider provider,
+    String query,
+  ) async {
+    final resultsByUserId = <String, Profile>{};
+
+    void addAll(List<Profile> profiles) {
+      for (final profile in profiles) {
+        final userId = profile.userId;
+        if (userId.isEmpty) continue;
+        resultsByUserId[userId] = profile;
+      }
+    }
+
+    try {
+      addAll(await provider.searchUsers(query));
+      final localpart = _localpartFromQuery(query);
+      if (localpart != null && localpart != query.trim()) {
+        addAll(await provider.searchUsers(localpart));
+      }
+    } catch (e) {
+      debugPrint('[NewChatSearch] Matrix user search failed: $e');
+    }
+
+    return resultsByUserId.values.toList();
+  }
+
+  Future<Profile?> _lookupExactMatrixUser(
+    MatrixProvider provider,
+    String query,
+  ) async {
+    final userId = _matrixUserIdFromQuery(query);
+    if (userId == null) return null;
+
+    try {
+      final profile = await provider.service.client.getProfileFromUserId(
+        userId,
+      );
+      return Profile(
+        userId: userId,
+        displayName: profile.displayName,
+        avatarUrl: profile.avatarUrl,
+      );
+    } catch (e) {
+      debugPrint('[NewChatSearch] Exact profile lookup failed for $userId: $e');
+      return null;
+    }
+  }
+
+  String? _localpartFromQuery(String query) {
+    var value = query.trim();
+    if (value.isEmpty) return null;
+    if (value.startsWith('@')) value = value.substring(1);
+    final separatorIndex = value.indexOf(':');
+    if (separatorIndex >= 0) value = value.substring(0, separatorIndex);
+    return value.trim().isEmpty ? null : value.trim();
+  }
+
+  String? _matrixUserIdFromQuery(String query) {
+    final localpart = _localpartFromQuery(query);
+    if (localpart == null) return null;
+    if (!RegExp(r'^[a-z0-9._=\-/]+$').hasMatch(localpart)) return null;
+
+    final trimmed = query.trim();
+    if (trimmed.startsWith('@') && trimmed.contains(':')) {
+      return trimmed;
+    }
+    return '@$localpart:${MatrixService.matrixServerName}';
+  }
+
   Future<void> _resolvePublicRoomTypes(List<PublicRoomsChunk> rooms) async {
     final provider = context.read<MatrixProvider>();
     for (final room in rooms) {
@@ -128,29 +237,30 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
   }
 
   Future<void> _startChat(Profile user) async {
-    setState(() => _startingChat = true);
+    final userId = user.userId;
+    if (userId.isEmpty) return;
+
     final provider = context.read<MatrixProvider>();
-    final roomId = await provider.startDirectChat(user.userId);
-
-    if (!mounted) return;
-    setState(() => _startingChat = false);
-
-    if (roomId != null) {
-      final room = provider.service.getRoomById(roomId);
-      if (room != null) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => MatrixChatScreen(
-              room: room,
-              matrixProvider: provider,
-            ),
+    final existingRoom = provider.findExistingDirectRoom(userId);
+    if (existingRoom != null) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => MatrixChatScreen(
+            room: existingRoom,
+            matrixProvider: provider,
           ),
-        );
-      }
-    } else {
-      setState(() => _error = provider.error ?? 'Could not start chat.');
+        ),
+      );
+      return;
     }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => UserProfilePreviewScreen(profile: user),
+      ),
+    );
   }
 
   Future<Room?> _waitForCreatedRoom(
@@ -258,7 +368,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
 
   Future<void> _openOrJoinPublicRoom(PublicRoomsChunk publicRoom) async {
     final provider = context.read<MatrixProvider>();
-    final existingRoom = provider.service.getRoomById(publicRoom.roomId);
+    final existingRoom = provider.service.getJoinedRoomById(publicRoom.roomId);
 
     if (existingRoom != null) {
       Navigator.pushReplacement(
@@ -280,7 +390,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
       await provider.service.client.oneShotSync();
       provider.refreshRooms();
 
-      final joined = provider.service.getRoomById(publicRoom.roomId);
+      final joined = provider.service.getJoinedRoomById(publicRoom.roomId);
       if (!mounted) return;
       setState(() => _joiningRoomIds.remove(publicRoom.roomId));
 
@@ -309,6 +419,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
 
   void _showCreateChannelDialog() {
     final nameCtrl = TextEditingController();
+    final descCtrl = TextEditingController();
     var isPublic = true;
     showDialog(
       context: context,
@@ -323,17 +434,23 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
               TextField(
                 controller: nameCtrl,
                 style: const TextStyle(color: kWhite),
-                decoration: const InputDecoration(
-                  hintText: 'Channel Name',
-                  hintStyle: TextStyle(color: Colors.white54),
-                  enabledBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: kLimeGreen)),
-                  focusedBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: kLimeGreen)),
+                decoration: _creationFieldDecoration(
+                  labelText: 'Channel Name',
+                  hintText: 'Enter channel name',
                 ),
                 autofocus: true,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
+              TextField(
+                controller: descCtrl,
+                style: const TextStyle(color: kWhite),
+                decoration: _creationFieldDecoration(
+                  labelText: 'Description (Optional)',
+                  hintText: 'What is this channel about?',
+                ),
+                maxLines: 1,
+              ),
+              const SizedBox(height: 16),
               RadioListTile<bool>(
                 value: true,
                 groupValue: isPublic,
@@ -369,6 +486,11 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                   'Public channels are not end-to-end encrypted.',
                   style: TextStyle(color: kLightGrey, fontSize: 12),
                 ),
+              const SizedBox(height: 6),
+              const Text(
+                'This choice cannot be changed later.',
+                style: TextStyle(color: kLightGrey, fontSize: 11),
+              ),
             ],
           ),
           actions: [
@@ -387,6 +509,9 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                 try {
                   final roomId = await provider.service.createChannel(
                     name: nameCtrl.text.trim(),
+                    topic: descCtrl.text.trim().isEmpty
+                        ? null
+                        : descCtrl.text.trim(),
                     isPublic: isPublic,
                   );
                   await _openCreatedRoom(provider, roomId);
@@ -410,7 +535,6 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
     final nameCtrl = TextEditingController();
     final descCtrl = TextEditingController();
     GroupType groupType = GroupType.private;
-    JoinRule joinRule = JoinRule.invite;
 
     showDialog(
       context: context,
@@ -426,15 +550,9 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                 TextField(
                   controller: nameCtrl,
                   style: const TextStyle(color: kWhite),
-                  decoration: const InputDecoration(
+                  decoration: _creationFieldDecoration(
                     labelText: 'Group Name',
-                    labelStyle: TextStyle(color: kLightGrey),
                     hintText: 'Enter group name',
-                    hintStyle: TextStyle(color: Colors.white54),
-                    enabledBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: kLimeGreen)),
-                    focusedBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: kLimeGreen)),
                   ),
                   autofocus: true,
                 ),
@@ -442,17 +560,11 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                 TextField(
                   controller: descCtrl,
                   style: const TextStyle(color: kWhite),
-                  decoration: const InputDecoration(
+                  decoration: _creationFieldDecoration(
                     labelText: 'Description (Optional)',
-                    labelStyle: TextStyle(color: kLightGrey),
                     hintText: 'What is this group about?',
-                    hintStyle: TextStyle(color: Colors.white54),
-                    enabledBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: kLimeGreen)),
-                    focusedBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: kLimeGreen)),
                   ),
-                  maxLines: 2,
+                  maxLines: 1,
                 ),
                 const SizedBox(height: 20),
                 Text('Group Type',
@@ -488,42 +600,9 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                Text('Who Can Join?',
-                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 12)),
-                const SizedBox(height: 8),
-                RadioListTile<JoinRule>(
-                  title: const Text('Invite Only',
-                      style: TextStyle(color: kWhite, fontSize: 14)),
-                  value: JoinRule.invite,
-                  groupValue: joinRule,
-                  activeColor: kLimeGreen,
-                  contentPadding: EdgeInsets.zero,
-                  onChanged: (value) {
-                    setDialogState(() => joinRule = value!);
-                  },
-                ),
-                RadioListTile<JoinRule>(
-                  title: const Text('Open',
-                      style: TextStyle(color: kWhite, fontSize: 14)),
-                  value: JoinRule.open,
-                  groupValue: joinRule,
-                  activeColor: kLimeGreen,
-                  contentPadding: EdgeInsets.zero,
-                  onChanged: (value) {
-                    setDialogState(() => joinRule = value!);
-                  },
-                ),
-                RadioListTile<JoinRule>(
-                  title: const Text('Approve Requests',
-                      style: TextStyle(color: kWhite, fontSize: 14)),
-                  value: JoinRule.knock,
-                  groupValue: joinRule,
-                  activeColor: kLimeGreen,
-                  contentPadding: EdgeInsets.zero,
-                  onChanged: (value) {
-                    setDialogState(() => joinRule = value!);
-                  },
+                Text(
+                  'This choice cannot be changed later.',
+                  style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
                 ),
               ],
             ),
@@ -557,7 +636,9 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                     description:
                         groupDescription.isEmpty ? null : groupDescription,
                     type: groupType,
-                    joinRule: joinRule,
+                    joinRule: groupType == GroupType.public
+                        ? JoinRule.open
+                        : JoinRule.invite,
                   );
                   debugPrint(
                       '[GroupCreation] Group created with roomId: $roomId');
@@ -727,7 +808,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
 
   Widget _buildPublicRoomTile(PublicRoomsChunk room) {
     final provider = context.read<MatrixProvider>();
-    final joinedRoom = provider.service.getRoomById(room.roomId);
+    final joinedRoom = provider.service.getJoinedRoomById(room.roomId);
     final isJoined = joinedRoom != null;
     final isJoining = _joiningRoomIds.contains(room.roomId);
     final isChannel =
@@ -820,4 +901,29 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
       onTap: isJoining ? null : () => _openOrJoinPublicRoom(room),
     );
   }
+}
+
+InputDecoration _creationFieldDecoration({
+  required String labelText,
+  required String hintText,
+}) {
+  final border = OutlineInputBorder(
+    borderRadius: BorderRadius.circular(24),
+    borderSide: BorderSide.none,
+  );
+  return InputDecoration(
+    labelText: labelText,
+    labelStyle: const TextStyle(color: kLightGrey),
+    hintText: hintText,
+    hintStyle: const TextStyle(color: Colors.white54),
+    isDense: true,
+    filled: true,
+    fillColor: const Color(0xFF2C2C2E),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+    border: border,
+    enabledBorder: border,
+    focusedBorder: border.copyWith(
+      borderSide: BorderSide(color: kWhite.withValues(alpha: 0.45), width: 1),
+    ),
+  );
 }

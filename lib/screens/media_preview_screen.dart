@@ -1,6 +1,6 @@
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_player/video_player.dart';
@@ -68,7 +68,10 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
       );
       await tempFile.writeAsBytes(widget.bytes, flush: true);
 
-      final controller = VideoPlayerController.file(tempFile);
+      final controller = VideoPlayerController.file(
+        tempFile,
+        viewType: _preferredVideoViewType,
+      );
       await controller.initialize();
       controller
         ..setLooping(true)
@@ -289,4 +292,10 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
       ),
     );
   }
+}
+
+VideoViewType get _preferredVideoViewType {
+  return defaultTargetPlatform == TargetPlatform.android
+      ? VideoViewType.platformView
+      : VideoViewType.textureView;
 }

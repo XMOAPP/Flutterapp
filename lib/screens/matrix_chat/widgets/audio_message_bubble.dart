@@ -8,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:matrix/matrix.dart';
 import '../../../theme.dart';
+import '../../../services/matrix_media_helper.dart';
 import 'audio_playback_file_stub.dart'
     if (dart.library.io) 'audio_playback_file_io.dart';
 import 'voice_waveform.dart';
@@ -17,6 +18,7 @@ class AudioMessageBubble extends StatefulWidget {
   final bool isMe;
   final String time;
   final Future<MatrixFile> Function(Event) downloadAttachment;
+  final MatrixMediaRequest? Function(Event)? streamingMediaRequest;
   final Widget Function(Event) buildMessageStatus;
 
   const AudioMessageBubble({
@@ -25,6 +27,7 @@ class AudioMessageBubble extends StatefulWidget {
     required this.isMe,
     required this.time,
     required this.downloadAttachment,
+    this.streamingMediaRequest,
     required this.buildMessageStatus,
   });
 
@@ -157,6 +160,12 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
   Future<void> _loadAudio() async {
     _updateUiState(loading: true);
     try {
+      if (await _tryLoadStreamingAudio()) {
+        _prepared = true;
+        _updateUiState(prepared: true);
+        return;
+      }
+
       final matrixFile = await widget.downloadAttachment(widget.event);
       if (!mounted) return;
       final mimeType = _mimeTypeFor(matrixFile);
@@ -182,6 +191,22 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
     } finally {
       _prepareFuture = null;
       _updateUiState(loading: false);
+    }
+  }
+
+  Future<bool> _tryLoadStreamingAudio() async {
+    final request = widget.streamingMediaRequest?.call(widget.event);
+    if (request == null) return false;
+    try {
+      await deleteAudioPlaybackFile(_playbackFilePath);
+      _playbackFilePath = null;
+      await _player.setUrl(
+        request.uri.toString(),
+        headers: request.headers,
+      );
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 

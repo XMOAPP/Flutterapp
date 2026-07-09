@@ -9,11 +9,11 @@ Future<void> _sendOtp(HttpRequest request) async {
     return;
   }
 
-  if (_gmail.isEmpty || _gmailAppPassword.isEmpty) {
+  if (!_emailService.isConfigured) {
     await _json(
       request,
       HttpStatus.internalServerError,
-      {'error': 'Email credentials are not configured'},
+      {'error': 'Email provider is not configured'},
     );
     return;
   }
@@ -24,8 +24,17 @@ Future<void> _sendOtp(HttpRequest request) async {
     expiresAt: DateTime.now().toUtc().add(_otpTtl),
   );
 
-  await _sendEmail(email, otp);
-  stdout.writeln('OTP sent to $email');
+  try {
+    await _emailService.sendOtpEmail(email: email, otp: otp);
+  } on EmailDeliveryException catch (error) {
+    await _json(
+      request,
+      HttpStatus.badGateway,
+      {'error': error.message},
+    );
+    return;
+  }
+  logInfo('otp_sent', {'emailHash': email.hashCode});
 
   await _json(request, HttpStatus.ok, {'success': true});
 }
@@ -65,24 +74,6 @@ Future<void> _verifyOtp(HttpRequest request) async {
 
   _otpStore.remove(email);
   await _json(request, HttpStatus.ok, {'success': true});
-}
-
-Future<void> _sendEmail(String email, String otp) async {
-  final smtpServer = gmail(_gmail, _gmailAppPassword);
-  final message = Message()
-    ..from = Address(_gmail, 'XMO Verification')
-    ..recipients.add(email)
-    ..subject = 'Your XMO verification code'
-    ..html = '''
-      <div style="font-family: Arial, sans-serif; text-align: center; padding: 24px;">
-        <h2>Welcome to XMO</h2>
-        <p>Your verification code is:</p>
-        <h1 style="color: #9CFF2E; letter-spacing: 6px;">$otp</h1>
-        <p>This code expires in 5 minutes.</p>
-      </div>
-    ''';
-
-  await send(message, smtpServer);
 }
 
 String _normalizeEmail(Object? value) =>

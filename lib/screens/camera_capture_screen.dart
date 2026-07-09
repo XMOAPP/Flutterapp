@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_player/video_player.dart';
@@ -274,7 +274,10 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
 
     try {
       final video = await controller.stopVideoRecording();
-      final previewController = VideoPlayerController.file(File(video.path));
+      final previewController = VideoPlayerController.file(
+        File(video.path),
+        viewType: _preferredVideoViewType,
+      );
       await previewController.initialize();
       await previewController.setLooping(true);
       previewController.addListener(_refreshVideoPreview);
@@ -788,4 +791,10 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       ),
     );
   }
+}
+
+VideoViewType get _preferredVideoViewType {
+  return defaultTargetPlatform == TargetPlatform.android
+      ? VideoViewType.platformView
+      : VideoViewType.textureView;
 }

@@ -1,6 +1,6 @@
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
@@ -103,6 +103,7 @@ class _StoryVideoPlayerState extends State<StoryVideoPlayer> {
         _controller = VideoPlayerController.networkUrl(
           Uri.parse(videoUrl),
           httpHeaders: widget.httpHeaders,
+          viewType: _preferredVideoViewType,
         );
       } else if (videoBytes != null) {
         final tempDir = await getTemporaryDirectory();
@@ -111,7 +112,10 @@ class _StoryVideoPlayerState extends State<StoryVideoPlayer> {
         );
         await file.writeAsBytes(videoBytes, flush: true);
         _previewFile = file;
-        _controller = VideoPlayerController.file(file);
+        _controller = VideoPlayerController.file(
+          file,
+          viewType: _preferredVideoViewType,
+        );
       } else {
         _error = 'Video unavailable';
         return;
@@ -271,4 +275,10 @@ class _StoryVideoPlayerState extends State<StoryVideoPlayer> {
     if (!mounted) return;
     setState(callback);
   }
+}
+
+VideoViewType get _preferredVideoViewType {
+  return defaultTargetPlatform == TargetPlatform.android
+      ? VideoViewType.platformView
+      : VideoViewType.textureView;
 }

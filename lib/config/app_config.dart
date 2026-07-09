@@ -14,6 +14,17 @@ class AppConfig {
     defaultValue: 'https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp',
   );
 
+  static const userDirectoryServerUrl = String.fromEnvironment(
+    'XMO_USER_DIRECTORY_SERVER_URL',
+    defaultValue: 'https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp',
+  );
+
+  static const walletAuthServerUrl = String.fromEnvironment(
+    'XMO_WALLET_AUTH_SERVER_URL',
+    defaultValue:
+        'https://xmo-matrix.centralindia.cloudapp.azure.com/auth/wallet',
+  );
+
   static const donationServerUrl = String.fromEnvironment(
     'XMO_DONATION_SERVER_URL',
     defaultValue: '',
@@ -54,4 +65,23 @@ class AppConfig {
     'XMO_PUSH_PROFILE_TAG',
     defaultValue: 'mobile',
   );
+
+  static const streamChunkStorage = String.fromEnvironment(
+    'XMO_STREAM_CHUNK_STORAGE',
+    defaultValue: 'matrix',
+  );
+
+  static const azureChunkSignUrl = String.fromEnvironment(
+    'XMO_AZURE_CHUNK_SIGN_URL',
+    defaultValue: '',
+  );
+
+  static const streamQualityMode = String.fromEnvironment(
+    'XMO_STREAM_QUALITY_MODE',
+    defaultValue: 'auto',
+  );
+
+  static bool get useAzureBlobChunks =>
+      streamChunkStorage.toLowerCase() == 'azure' &&
+      azureChunkSignUrl.trim().isNotEmpty;
 }

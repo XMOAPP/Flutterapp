@@ -235,6 +235,40 @@ class MatrixProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<bool> deleteAccount({
+    String? password,
+    bool erase = true,
+  }) async {
+    if (_state != MatrixAuthState.loggedIn) return false;
+
+    _error = null;
+    notifyListeners();
+
+    try {
+      try {
+        await PushNotificationService().unregisterCurrentUser();
+      } catch (_) {
+        // Account deletion must still be allowed if push cleanup is offline.
+      }
+      await _syncSubscription?.cancel();
+      _syncSubscription = null;
+      _connectionWatchdog?.cancel();
+      _connectionWatchdog = null;
+      await _svc.deactivateAccount(password: password, erase: erase);
+      await CallHistoryService().setCurrentUser(null);
+      await TransferQueueService.instance.setCurrentUser(null);
+      _state = MatrixAuthState.loggedOut;
+      _connectionStatus = MatrixConnectionStatus.offline;
+      _lastSyncAt = null;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = _friendlyError(e.toString());
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<bool> updateProfile({
     required String displayName,
     Uint8List? avatarBytes,
@@ -329,21 +363,51 @@ class MatrixProvider extends ChangeNotifier {
     }
   }
 
+  String normalizeUserId(String userId) {
+    var normalizedUserId = userId.trim();
+    if (!normalizedUserId.startsWith('@')) {
+      normalizedUserId = '@$normalizedUserId';
+    }
+    if (!normalizedUserId.contains(':')) {
+      normalizedUserId = '$normalizedUserId:${MatrixService.matrixServerName}';
+    }
+    return normalizedUserId;
+  }
+
+  Room? findExistingDirectRoom(String userId) {
+    final normalizedUserId = normalizeUserId(userId);
+    final mappedRoomId = _svc.client.getDirectChatFromUserId(normalizedUserId);
+    if (mappedRoomId != null) {
+      final room = _svc.getRoomById(mappedRoomId);
+      if (room != null && room.membership == Membership.join) return room;
+    }
+
+    for (final room in _svc.client.rooms) {
+      if (room.membership != Membership.join) continue;
+      final directPeerUserId = _svc.getDirectPeerUserId(room);
+      if (directPeerUserId == normalizedUserId ||
+          _svc.looksLikeLegacyDirectRoom(room, normalizedUserId)) {
+        return room;
+      }
+    }
+    return null;
+  }
+
   Future<String?> startDirectChat(String userId) async {
     try {
-      String normalizedUserId = userId.trim();
-      if (!normalizedUserId.startsWith('@')) {
-        normalizedUserId = '@$normalizedUserId';
-      }
-      if (!normalizedUserId.contains(':')) {
-        normalizedUserId =
-            '$normalizedUserId:${MatrixService.matrixServerName}';
-      }
+      final normalizedUserId = normalizeUserId(userId);
 
       debugPrint(
           '[startDirectChat] Looking for existing DM with $normalizedUserId');
       debugPrint(
           '[startDirectChat] Current rooms count: ${_svc.client.rooms.length}');
+
+      final cachedRoom = findExistingDirectRoom(normalizedUserId);
+      if (cachedRoom != null) {
+        debugPrint(
+            '[startDirectChat] Reusing cached direct room: ${cachedRoom.id}');
+        return cachedRoom.id;
+      }
 
       await _svc.client.oneShotSync();
       await _svc.acceptAllInvites();

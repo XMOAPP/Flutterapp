@@ -31,10 +31,13 @@ class GroupService {
     debugPrint(
         '[GroupService] Creating group: $name (type: $type, joinRule: $joinRule)');
 
+    final effectiveJoinRule =
+        type == GroupType.public ? JoinRule.open : JoinRule.invite;
+
     // Convert our enums to Matrix types
     final matrixVisibility =
         type == GroupType.public ? Visibility.public : Visibility.private;
-    final matrixJoinRules = _convertJoinRule(joinRule);
+    final matrixJoinRules = _convertJoinRule(effectiveJoinRule);
     const matrixHistoryVisibility = 'shared';
 
     // Create room with group settings
@@ -112,11 +115,7 @@ class GroupService {
         _client.getRoomById(roomId) ?? Room(id: roomId, client: _client);
     await RoomControlsService.setRoomDirectoryVisibility(
       room,
-      switch (joinRule) {
-        JoinRule.open => XmoJoinMode.public,
-        JoinRule.invite => XmoJoinMode.invite,
-        JoinRule.knock => XmoJoinMode.request,
-      },
+      type == GroupType.public ? XmoJoinMode.public : XmoJoinMode.invite,
     );
     await _recordAdminAction(
       roomId,
@@ -124,7 +123,7 @@ class GroupService {
       metadata: {
         'name': name,
         'type': type.name,
-        'join_rule': joinRule.name,
+        'join_rule': effectiveJoinRule.name,
       },
     );
     debugPrint('[GroupService] Group created: $roomId');
@@ -154,20 +153,12 @@ class GroupService {
       // TODO: Upload avatar and set
     }
 
-    // Update join rules
-    await room.client.setRoomStateWithKey(
-      roomId,
-      EventTypes.RoomJoinRules,
-      '',
-      {'join_rule': _convertJoinRule(settings.joinRule)},
-    );
+    // Group public/private security type is permanent after creation.
+    final immutableJoinMode = RoomControlsService.immutableJoinModeFor(room);
+    await RoomControlsService.setJoinMode(room, immutableJoinMode);
     await RoomControlsService.setRoomDirectoryVisibility(
       room,
-      switch (settings.joinRule) {
-        JoinRule.open => XmoJoinMode.public,
-        JoinRule.invite => XmoJoinMode.invite,
-        JoinRule.knock => XmoJoinMode.request,
-      },
+      immutableJoinMode,
     );
 
     // Update history visibility
@@ -200,7 +191,7 @@ class GroupService {
       name: room.name,
       description: room.topic,
       avatarUrl: room.avatar?.toString(),
-      type: room.joinRules == JoinRules.public
+      type: RoomControlsService.isPublicUnencrypted(room)
           ? GroupType.public
           : GroupType.private,
       joinRule: _convertToJoinRule(joinRulesState?.content['join_rule']),

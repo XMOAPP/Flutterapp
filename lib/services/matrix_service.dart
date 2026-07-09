@@ -10,11 +10,17 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import '../config/app_config.dart';
 import '../models/invite_link_models.dart';
+import 'azure_blob_chunk_storage_service.dart';
+import 'matrix_encrypted_media_helper.dart';
 import 'matrix_media_helper.dart';
 import 'repositories/matrix_repository_contracts.dart';
 import 'repositories/matrix_sdk_repositories.dart';
 import 'room_controls_service.dart';
 import 'transfer_queue_service.dart';
+import 'video_quality_variant_provider_stub.dart'
+    if (dart.library.io) 'video_quality_variant_provider_io.dart';
+import 'xmo_chunked_media_upload_service.dart';
+import 'xmo_media_compatibility.dart';
 
 enum XmoRoomKind { direct, group, channel, saved }
 
@@ -23,6 +29,15 @@ class MatrixUploadCancelledException implements Exception {
 
   @override
   String toString() => 'Upload cancelled';
+}
+
+class MatrixAccountDeactivationException implements Exception {
+  const MatrixAccountDeactivationException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
 }
 
 class _PreparedMediaUpload {
@@ -60,6 +75,14 @@ class MatrixService implements MatrixRepositoryApi {
   late Box _authBox;
   late Box _channelBox;
   late Box _groupBox;
+  final MatrixEncryptedMediaHelper _encryptedMediaHelper =
+      const MatrixEncryptedMediaHelper();
+  late final XmoChunkedMediaUploadService _chunkedMediaUploadService =
+      XmoChunkedMediaUploadService(
+    qualityVariantProvider: createVideoCompressionQualityVariantProvider(),
+    sourceNormalizer: createVideoCompressionSourceNormalizer(),
+  );
+  AzureBlobChunkStorageService? _azureBlobChunkStorageService;
   final Set<String> _channelIdCache = {};
   final Set<String> _groupIdCache = {};
   final Set<String> _publishedRoomIds = {};
@@ -86,6 +109,10 @@ class MatrixService implements MatrixRepositoryApi {
 
   bool get isLoggedIn => _client.isLogged();
   String? get userId => _client.userID;
+  String? get currentLoginUsername =>
+      _client.userID?.split(':').first.replaceFirst('@', '');
+  bool get hasCachedPasswordForCurrentUser =>
+      _storedPasswordForCurrentUser() != null;
   String? get displayName => _profileDisplayName?.trim().isNotEmpty == true
       ? _profileDisplayName
       : _client.userID?.split(':').first.replaceFirst('@', '');
@@ -433,6 +460,144 @@ class MatrixService implements MatrixRepositoryApi {
     await _client.logout();
   }
 
+  Future<void> deactivateAccount({
+    String? password,
+    bool erase = true,
+  }) async {
+    final token = accessToken;
+    final loginUser = currentLoginUsername;
+    final authPassword = password?.trim().isNotEmpty == true
+        ? password!.trim()
+        : _storedPasswordForCurrentUser();
+
+    if (token == null || token.isEmpty || loginUser == null) {
+      throw const MatrixAccountDeactivationException(
+        'You must be logged in to delete this account.',
+      );
+    }
+    if (authPassword == null || authPassword.isEmpty) {
+      throw const MatrixAccountDeactivationException(
+        'Enter your account password to delete this account.',
+      );
+    }
+
+    final session = await _sendDeactivateAccountRequest(
+      token: token,
+      erase: erase,
+      authUser: loginUser,
+      password: authPassword,
+    );
+
+    if (session != null) {
+      await _sendDeactivateAccountRequest(
+        token: token,
+        erase: erase,
+        authUser: loginUser,
+        password: authPassword,
+        session: session,
+      );
+    }
+
+    await _removeStoredCredentialsForCurrentUser();
+    await _client.clear();
+  }
+
+  Future<String?> _sendDeactivateAccountRequest({
+    required String token,
+    required bool erase,
+    required String authUser,
+    required String password,
+    String? session,
+  }) async {
+    final uri =
+        Uri.parse('$homeserverUrl/_matrix/client/v3/account/deactivate');
+    final httpClient = io.HttpClient();
+    try {
+      final request = await httpClient.postUrl(uri);
+      request.headers
+        ..set(io.HttpHeaders.authorizationHeader, 'Bearer $token')
+        ..set(io.HttpHeaders.contentTypeHeader, 'application/json');
+      request.write(jsonEncode({
+        'erase': erase,
+        'auth': {
+          'type': 'm.login.password',
+          'identifier': {
+            'type': 'm.id.user',
+            'user': authUser,
+          },
+          'password': password,
+          if (session != null) 'session': session,
+        },
+      }));
+
+      final response = await request.close().timeout(
+            const Duration(seconds: 20),
+          );
+      final responseBody = await utf8.decodeStream(response);
+      final decoded = responseBody.isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(responseBody) as Map<String, dynamic>;
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return null;
+      }
+
+      if (response.statusCode == 401 && session == null) {
+        final nextSession = decoded['session'];
+        if (nextSession is String && nextSession.isNotEmpty) {
+          return nextSession;
+        }
+      }
+
+      final message = decoded['error'] as String?;
+      throw MatrixAccountDeactivationException(
+        message?.isNotEmpty == true
+            ? message!
+            : 'Failed to delete account (${response.statusCode}).',
+      );
+    } on MatrixAccountDeactivationException {
+      rethrow;
+    } on TimeoutException {
+      throw const MatrixAccountDeactivationException(
+        'Deleting account timed out. Check your connection and try again.',
+      );
+    } catch (e) {
+      throw MatrixAccountDeactivationException(
+        'Failed to delete account: $e',
+      );
+    } finally {
+      httpClient.close(force: true);
+    }
+  }
+
+  String? _storedPasswordForCurrentUser() {
+    final loginUser = currentLoginUsername;
+    if (loginUser == null) return null;
+    for (final key in _authBox.keys) {
+      final value = _authBox.get(key);
+      if (value is Map && value['username'] == loginUser) {
+        final password = value['password'];
+        return password is String ? password : null;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _removeStoredCredentialsForCurrentUser() async {
+    final loginUser = currentLoginUsername;
+    if (loginUser == null) return;
+    final keysToDelete = <dynamic>[];
+    for (final key in _authBox.keys) {
+      final value = _authBox.get(key);
+      if (value is Map && value['username'] == loginUser) {
+        keysToDelete.add(key);
+      }
+    }
+    for (final key in keysToDelete) {
+      await _authBox.delete(key);
+    }
+  }
+
   Future<void> setHttpPusher({
     required String pushKey,
     required String appId,
@@ -770,7 +935,12 @@ class MatrixService implements MatrixRepositoryApi {
       StateEvent(
         type: roomSecurityStateType,
         stateKey: '',
-        content: const {'visibility': 'private', 'encrypted': true},
+        content: const {
+          'version': 1,
+          'visibility': 'private',
+          'encrypted': true,
+          'locked': true,
+        },
       ),
       ...extra,
     ];
@@ -779,7 +949,12 @@ class MatrixService implements MatrixRepositoryApi {
   StateEvent publicRoomSecurityState() => StateEvent(
         type: roomSecurityStateType,
         stateKey: '',
-        content: const {'visibility': 'public', 'encrypted': false},
+        content: const {
+          'version': 1,
+          'visibility': 'public',
+          'encrypted': false,
+          'locked': true,
+        },
       );
 
   List<StateEvent> _channelInitialState(bool isPublic) {
@@ -1118,6 +1293,12 @@ class MatrixService implements MatrixRepositoryApi {
   }
 
   Room? getRoomById(String roomId) => _client.getRoomById(roomId);
+
+  Room? getJoinedRoomById(String roomId) {
+    final room = _client.getRoomById(roomId);
+    if (room == null || room.membership != Membership.join) return null;
+    return room;
+  }
 
   bool isDirectRoom(Room room) {
     return classifyRoomKind(
@@ -1647,6 +1828,7 @@ class MatrixService implements MatrixRepositoryApi {
     bool isVoiceMessage = true,
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
+    Map<String, dynamic>? xmoStream,
   }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
@@ -1666,21 +1848,27 @@ class MatrixService implements MatrixRepositoryApi {
     );
     _throwIfCancelled(isCancelled);
 
-    await room.sendEvent({
-      'msgtype': 'm.audio',
-      'body': fileName,
-      'filename': fileName,
-      if (preparedAudio.encryptedFile == null) 'url': audioMxc.toString(),
-      if (preparedAudio.encryptedFile != null)
-        'file': _encryptedFileContent(preparedAudio.encryptedFile!, audioMxc,
-            mimeType: mimeType),
-      'info': {
-        'mimetype': mimeType,
-        'size': audioBytes.length,
-        if (durationMs > 0) 'duration': durationMs,
-      },
-      if (isVoiceMessage) 'org.matrix.msc3245.voice': {},
-    });
+    await room.sendEvent(
+      XmoMediaCompatibility.withOptionalStream(
+        matrixContent: {
+          'msgtype': 'm.audio',
+          'body': fileName,
+          'filename': fileName,
+          if (preparedAudio.encryptedFile == null) 'url': audioMxc.toString(),
+          if (preparedAudio.encryptedFile != null)
+            'file': _encryptedFileContent(
+                preparedAudio.encryptedFile!, audioMxc,
+                mimeType: mimeType),
+          'info': {
+            'mimetype': mimeType,
+            'size': audioBytes.length,
+            if (durationMs > 0) 'duration': durationMs,
+          },
+          if (isVoiceMessage) 'org.matrix.msc3245.voice': {},
+        },
+        xmoStream: xmoStream,
+      ),
+    );
   }
 
   Future<void> forwardMessage({
@@ -1750,11 +1938,14 @@ class MatrixService implements MatrixRepositoryApi {
     return html.substring(replyEnd + '</mx-reply>'.length).trimLeft();
   }
 
-  /// Sends a file/image/video to a room. The SDK handles mxc upload internally.
+  /// Sends a file/image/video to a room through XMO's media path.
   Future<void> sendFile(String roomId, MatrixFile file) async {
-    final room = _client.getRoomById(roomId);
-    if (room == null) throw Exception('Room not found: $roomId');
-    await room.sendFileEvent(file);
+    await sendFileWithProgress(
+      roomId: roomId,
+      bytes: file.bytes,
+      fileName: file.name,
+      mimeType: file.mimeType,
+    );
   }
 
   Future<void> sendFileWithProgress({
@@ -1764,6 +1955,7 @@ class MatrixService implements MatrixRepositoryApi {
     required String mimeType,
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
+    Map<String, dynamic>? xmoStream,
   }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
@@ -1783,19 +1975,24 @@ class MatrixService implements MatrixRepositoryApi {
     );
     _throwIfCancelled(isCancelled);
 
-    await room.sendEvent({
-      'msgtype': 'm.file',
-      'body': fileName,
-      'filename': fileName,
-      if (preparedFile.encryptedFile == null) 'url': fileMxc.toString(),
-      if (preparedFile.encryptedFile != null)
-        'file': _encryptedFileContent(preparedFile.encryptedFile!, fileMxc,
-            mimeType: mimeType),
-      'info': {
-        'mimetype': mimeType,
-        'size': bytes.length,
-      },
-    });
+    await room.sendEvent(
+      XmoMediaCompatibility.withOptionalStream(
+        matrixContent: {
+          'msgtype': 'm.file',
+          'body': fileName,
+          'filename': fileName,
+          if (preparedFile.encryptedFile == null) 'url': fileMxc.toString(),
+          if (preparedFile.encryptedFile != null)
+            'file': _encryptedFileContent(preparedFile.encryptedFile!, fileMxc,
+                mimeType: mimeType),
+          'info': {
+            'mimetype': mimeType,
+            'size': bytes.length,
+          },
+        },
+        xmoStream: xmoStream,
+      ),
+    );
   }
 
   Future<void> sendImageWithCaption({
@@ -1806,6 +2003,7 @@ class MatrixService implements MatrixRepositoryApi {
     String caption = '',
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
+    Map<String, dynamic>? xmoStream,
   }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
@@ -1826,20 +2024,26 @@ class MatrixService implements MatrixRepositoryApi {
     _throwIfCancelled(isCancelled);
     final cleanCaption = caption.trim();
 
-    await room.sendEvent({
-      'msgtype': 'm.image',
-      'body': cleanCaption.isEmpty ? fileName : cleanCaption,
-      'filename': fileName,
-      if (cleanCaption.isNotEmpty) 'xmo_caption': cleanCaption,
-      if (preparedImage.encryptedFile == null) 'url': imageMxc.toString(),
-      if (preparedImage.encryptedFile != null)
-        'file': _encryptedFileContent(preparedImage.encryptedFile!, imageMxc,
-            mimeType: mimeType),
-      'info': {
-        'mimetype': mimeType,
-        'size': bytes.length,
-      },
-    });
+    await room.sendEvent(
+      XmoMediaCompatibility.withOptionalStream(
+        matrixContent: {
+          'msgtype': 'm.image',
+          'body': cleanCaption.isEmpty ? fileName : cleanCaption,
+          'filename': fileName,
+          if (cleanCaption.isNotEmpty) 'xmo_caption': cleanCaption,
+          if (preparedImage.encryptedFile == null) 'url': imageMxc.toString(),
+          if (preparedImage.encryptedFile != null)
+            'file': _encryptedFileContent(
+                preparedImage.encryptedFile!, imageMxc,
+                mimeType: mimeType),
+          'info': {
+            'mimetype': mimeType,
+            'size': bytes.length,
+          },
+        },
+        xmoStream: xmoStream,
+      ),
+    );
   }
 
   /// Sends a video with an embedded thumbnail.
@@ -1861,21 +2065,52 @@ class MatrixService implements MatrixRepositoryApi {
     String caption = '',
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
+    Map<String, dynamic>? xmoStream,
   }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
 
+    var effectiveVideoBytes = videoBytes;
+    var effectiveVideoFileName = videoFileName;
+    var effectiveVideoMimeType = videoMimeType;
+    try {
+      _throwIfCancelled(isCancelled);
+      final normalized = await _chunkedMediaUploadService.normalizeVideoSource(
+        videoBytes: videoBytes,
+        videoFileName: videoFileName,
+        videoMimeType: videoMimeType,
+        durationMs: durationMs,
+        isCancelled: isCancelled,
+      );
+      _throwIfCancelled(isCancelled);
+      if (normalized != null) {
+        effectiveVideoBytes = normalized.bytes;
+        effectiveVideoFileName = normalized.fileName;
+        effectiveVideoMimeType = normalized.mimeType;
+        debugPrint(
+          '[sendVideo] Normalized video source '
+          '(${videoBytes.length} -> ${effectiveVideoBytes.length} bytes).',
+        );
+      }
+    } on XmoChunkedMediaUploadCancelledException {
+      throw const MatrixUploadCancelledException();
+    } catch (e) {
+      debugPrint('[sendVideo] Video source normalization skipped: $e');
+    }
+
     // Step 1: Upload video
-    debugPrint('[sendVideo] Uploading video (${videoBytes.length} bytes)...');
+    debugPrint(
+      '[sendVideo] Uploading video (${effectiveVideoBytes.length} bytes)...',
+    );
     final preparedVideo = await _prepareMediaUpload(
       room,
-      bytes: videoBytes,
-      fileName: videoFileName,
-      mimeType: videoMimeType,
+      bytes: effectiveVideoBytes,
+      fileName: effectiveVideoFileName,
+      mimeType: effectiveVideoMimeType,
     );
     final videoMxc = await _uploadContentWithProgress(
       preparedVideo.bytes,
-      filename: videoFileName,
+      filename: effectiveVideoFileName,
       contentType: preparedVideo.contentType,
       onProgress: onUploadProgress,
       isCancelled: isCancelled,
@@ -1885,8 +2120,8 @@ class MatrixService implements MatrixRepositoryApi {
 
     // Step 2: Build info map
     final info = <String, dynamic>{
-      'mimetype': videoMimeType,
-      'size': videoBytes.length,
+      'mimetype': effectiveVideoMimeType,
+      'size': effectiveVideoBytes.length,
       if (videoWidth != null && videoWidth > 0) 'w': videoWidth,
       if (videoHeight != null && videoHeight > 0) 'h': videoHeight,
       if (durationMs != null && durationMs > 0) 'duration': durationMs,
@@ -1901,12 +2136,12 @@ class MatrixService implements MatrixRepositoryApi {
         final preparedThumb = await _prepareMediaUpload(
           room,
           bytes: thumbBytes,
-          fileName: '${videoFileName}_thumb.jpg',
+          fileName: '${effectiveVideoFileName}_thumb.jpg',
           mimeType: 'image/jpeg',
         );
         final thumbMxc = await _client.uploadContent(
           preparedThumb.bytes,
-          filename: '${videoFileName}_thumb.jpg',
+          filename: '${effectiveVideoFileName}_thumb.jpg',
           contentType: preparedThumb.contentType,
         );
         debugPrint('[sendVideo] Thumbnail uploaded: $thumbMxc');
@@ -1934,20 +2169,125 @@ class MatrixService implements MatrixRepositoryApi {
 
     final cleanCaption = caption.trim();
     _throwIfCancelled(isCancelled);
+    final shouldAttachXmoStream = preparedVideo.encryptedFile != null;
+    final effectiveXmoStream = shouldAttachXmoStream
+        ? xmoStream ??
+            await _buildLargeVideoStreamManifest(
+              videoBytes: effectiveVideoBytes,
+              videoFileName: effectiveVideoFileName,
+              videoMimeType: effectiveVideoMimeType,
+              durationMs: durationMs,
+              isCancelled: isCancelled,
+            )
+        : null;
+    _throwIfCancelled(isCancelled);
 
     // Step 4: Send the m.video event with both URLs
-    await room.sendEvent({
-      'msgtype': 'm.video',
-      'body': cleanCaption.isEmpty ? videoFileName : cleanCaption,
-      'filename': videoFileName,
-      if (cleanCaption.isNotEmpty) 'xmo_caption': cleanCaption,
-      if (preparedVideo.encryptedFile == null) 'url': videoMxc.toString(),
-      if (preparedVideo.encryptedFile != null)
-        'file': _encryptedFileContent(preparedVideo.encryptedFile!, videoMxc,
-            mimeType: videoMimeType),
-      'info': info,
-    });
+    await room.sendEvent(
+      XmoMediaCompatibility.withOptionalStream(
+        matrixContent: {
+          'msgtype': 'm.video',
+          'body': cleanCaption.isEmpty ? effectiveVideoFileName : cleanCaption,
+          'filename': effectiveVideoFileName,
+          if (cleanCaption.isNotEmpty) 'xmo_caption': cleanCaption,
+          if (preparedVideo.encryptedFile == null) 'url': videoMxc.toString(),
+          if (preparedVideo.encryptedFile != null)
+            'file': _encryptedFileContent(
+                preparedVideo.encryptedFile!, videoMxc,
+                mimeType: effectiveVideoMimeType),
+          'info': info,
+        },
+        xmoStream: effectiveXmoStream,
+      ),
+    );
     debugPrint('[sendVideo] Event sent.');
+  }
+
+  Future<Map<String, dynamic>?> _buildLargeVideoStreamManifest({
+    required Uint8List videoBytes,
+    required String videoFileName,
+    required String videoMimeType,
+    required int? durationMs,
+    required bool Function()? isCancelled,
+  }) async {
+    if (!_chunkedMediaUploadService.shouldUploadAsStream(
+      size: videoBytes.length,
+      mimeType: videoMimeType,
+    )) {
+      return null;
+    }
+
+    debugPrint(
+      '[sendVideo] Uploading encrypted stream chunks (${videoBytes.length} bytes)...',
+    );
+    try {
+      final manifest = await _chunkedMediaUploadService.uploadVideoStream(
+        videoBytes: videoBytes,
+        videoFileName: videoFileName,
+        videoMimeType: videoMimeType,
+        durationMs: durationMs,
+        isCancelled: isCancelled,
+        uploadChunk: ({
+          required encryptedBytes,
+          required fileName,
+          required contentType,
+          required chunkIndex,
+        }) async {
+          final azureStorage = _azureChunkStorage;
+          if (azureStorage != null) {
+            try {
+              return await azureStorage.uploadEncryptedChunk(
+                encryptedBytes: encryptedBytes,
+                fileName: fileName,
+                contentType: contentType,
+                chunkIndex: chunkIndex,
+              );
+            } catch (e) {
+              debugPrint(
+                '[sendVideo] Azure stream chunk upload failed; '
+                'falling back to Matrix media: $e',
+              );
+            }
+          }
+          return _uploadMatrixStreamChunk(
+            encryptedBytes: encryptedBytes,
+            fileName: fileName,
+            contentType: contentType,
+          );
+        },
+      );
+      debugPrint(
+        '[sendVideo] Encrypted stream chunks uploaded: '
+        '${manifest.sourceQuality?.chunks.length ?? 0}',
+      );
+      return manifest.toJson();
+    } on XmoChunkedMediaUploadCancelledException {
+      throw const MatrixUploadCancelledException();
+    } catch (e) {
+      debugPrint(
+          '[sendVideo] Stream chunk upload failed; sending fallback only: $e');
+      return null;
+    }
+  }
+
+  AzureBlobChunkStorageService? get _azureChunkStorage {
+    if (!AppConfig.useAzureBlobChunks) return null;
+    final endpoint = Uri.tryParse(AppConfig.azureChunkSignUrl.trim());
+    if (endpoint == null || !endpoint.hasScheme) return null;
+    return _azureBlobChunkStorageService ??=
+        AzureBlobChunkStorageService(signingEndpoint: endpoint);
+  }
+
+  Future<Uri> _uploadMatrixStreamChunk({
+    required Uint8List encryptedBytes,
+    required String fileName,
+    required String contentType,
+  }) {
+    return _client.uploadContent(
+      encryptedBytes,
+      filename: fileName,
+      contentType: contentType,
+    );
   }
 
   Future<_PreparedMediaUpload> _prepareMediaUpload(
@@ -1963,11 +2303,7 @@ class MatrixService implements MatrixRepositoryApi {
       );
     }
 
-    final encryptedFile = await MatrixFile(
-      bytes: bytes,
-      name: fileName,
-      mimeType: mimeType,
-    ).encrypt();
+    final encryptedFile = await _encryptedMediaHelper.encrypt(bytes);
     return _PreparedMediaUpload(
       bytes: encryptedFile.data,
       contentType: 'application/octet-stream',
@@ -2079,24 +2415,23 @@ class MatrixService implements MatrixRepositoryApi {
   /// Returns the current access token for authenticated requests.
   String? get accessToken => _client.accessToken;
 
+  MatrixMediaHelper get mediaHelper => MatrixMediaHelper(
+        homeserverUrl: homeserverUrl,
+        accessToken: accessToken,
+      );
+
   /// Resolves Matrix media without exposing the access token in its URL.
   MatrixMediaRequest? getMediaRequest(
     String? mxcUrl, {
     int? width,
     int? height,
   }) {
-    return MatrixMediaHelper(
-      homeserverUrl: homeserverUrl,
-      accessToken: accessToken,
-    ).fromMxc(mxcUrl, width: width, height: height);
+    return mediaHelper.fromMxc(mxcUrl, width: width, height: height);
   }
 
   /// Converts an SDK-provided media URL to an authenticated request.
   MatrixMediaRequest getMediaRequestForUrl(Uri url) {
-    return MatrixMediaHelper(
-      homeserverUrl: homeserverUrl,
-      accessToken: accessToken,
-    ).fromUrl(url);
+    return mediaHelper.fromUrl(url);
   }
 
   Future<Timeline?> getTimeline(String roomId) async {

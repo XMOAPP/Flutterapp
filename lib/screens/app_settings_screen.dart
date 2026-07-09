@@ -21,7 +21,6 @@ import '../providers/story_provider.dart';
 import '../services/app_settings_service.dart';
 import '../services/direct_chat_service.dart';
 import '../services/e2ee_service.dart';
-import '../services/e2ee_verification_checklist.dart';
 import '../services/privacy_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/story_service.dart';
@@ -29,6 +28,7 @@ import '../theme.dart';
 import '../widgets/matrix_chat/fullscreen_video_player.dart';
 import '../widgets/story/story_avatar.dart';
 import 'app_lock_settings_screen.dart';
+import 'auth_choice_screen.dart';
 import 'device_sessions_screen.dart';
 import 'matrix_chat/media_handler.dart';
 import 'matrix_chat/widgets/tappable_file_chip.dart';
@@ -201,6 +201,19 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                   },
                 ),
                 _navTile(
+                  icon: Icons.delete_forever,
+                  title: 'Delete Account',
+                  subtitle: 'Permanently deactivate your XMO account',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const DeleteAccountScreen(),
+                      ),
+                    );
+                  },
+                ),
+                _navTile(
                   icon: Icons.storage,
                   title: 'Data & Storage',
                   subtitle: 'Manage cached media and storage',
@@ -361,6 +374,325 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   }
 }
 
+class DeleteAccountScreen extends StatefulWidget {
+  const DeleteAccountScreen({super.key});
+
+  @override
+  State<DeleteAccountScreen> createState() => _DeleteAccountScreenState();
+}
+
+class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
+  final _passwordController = TextEditingController();
+  final _confirmController = TextEditingController();
+  bool _eraseContent = true;
+  bool _deleting = false;
+  bool _passwordVisible = false;
+
+  bool get _confirmMatches =>
+      _confirmController.text.trim().toUpperCase() == 'DELETE';
+
+  bool _canDelete(bool hasCachedPassword) {
+    return _confirmMatches &&
+        (hasCachedPassword || _passwordController.text.trim().isNotEmpty);
+  }
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    _confirmController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _deleteAccount() async {
+    final provider = context.read<MatrixProvider>();
+    final hasCachedPassword = provider.service.hasCachedPasswordForCurrentUser;
+    if (_deleting || !_canDelete(hasCachedPassword)) return;
+
+    final password = _passwordController.text.trim();
+    if (!hasCachedPassword && password.isEmpty) {
+      _showError('Enter your account password to continue.');
+      return;
+    }
+
+    setState(() => _deleting = true);
+    final success = await provider.deleteAccount(
+      password: password.isEmpty ? null : password,
+      erase: _eraseContent,
+    );
+    if (!mounted) return;
+
+    if (success) {
+      Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const AuthChoiceScreen()),
+        (route) => false,
+      );
+      return;
+    }
+
+    setState(() => _deleting = false);
+    _showError(provider.error ?? 'Failed to delete account.');
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final service = context.read<MatrixProvider>().service;
+    final hasCachedPassword = service.hasCachedPasswordForCurrentUser;
+    final accountName = _shortAccountName(service.userId);
+    final canDelete = _canDelete(hasCachedPassword);
+
+    return Scaffold(
+      backgroundColor: kBlack,
+      appBar: AppBar(
+        title: Text(
+          'Delete Account',
+          style: GoogleFonts.inter(
+            color: kWhite,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
+        children: [
+          Icon(Icons.warning_amber_rounded, color: Colors.red[300], size: 42),
+          const SizedBox(height: 14),
+          Text(
+            'Delete $accountName?',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(
+              color: kWhite,
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'This permanently deactivates your Matrix account. You will not be able to log in again with this account.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(
+              color: kLightGrey,
+              fontSize: 13,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 22),
+          _warningBox(),
+          const SizedBox(height: 18),
+          SwitchListTile(
+            value: _eraseContent,
+            onChanged: _deleting
+                ? null
+                : (value) => setState(() => _eraseContent = value),
+            activeThumbColor: kLimeGreen,
+            contentPadding: EdgeInsets.zero,
+            title: Text(
+              'Erase my message content where possible',
+              style: GoogleFonts.inter(
+                color: kWhite,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            subtitle: Text(
+              'Some messages may still remain for users or servers that already received them.',
+              style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+            ),
+          ),
+          const SizedBox(height: 10),
+          if (!hasCachedPassword) ...[
+            _inputLabel('Account password'),
+            _inputField(
+              controller: _passwordController,
+              hint: 'Password',
+              obscure: !_passwordVisible,
+              suffix: IconButton(
+                onPressed: _deleting
+                    ? null
+                    : () {
+                        setState(() => _passwordVisible = !_passwordVisible);
+                      },
+                icon: Icon(
+                  _passwordVisible
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                  color: kLightGrey,
+                  size: 20,
+                ),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 14),
+          ] else
+            Text(
+              'This phone has the saved login credentials needed to confirm deletion.',
+              style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+            ),
+          const SizedBox(height: 14),
+          _inputLabel('Type DELETE to confirm'),
+          _inputField(
+            controller: _confirmController,
+            hint: 'DELETE',
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 24),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 160),
+            child: canDelete || _deleting
+                ? SizedBox(
+                    key: const ValueKey('delete-button'),
+                    height: 44,
+                    child: ElevatedButton(
+                      onPressed: _deleting ? null : _deleteAccount,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kWhite,
+                        disabledBackgroundColor: kDarkerGrey,
+                        foregroundColor: kBlack,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(22),
+                        ),
+                      ),
+                      child: _deleting
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: kBlack,
+                              ),
+                            )
+                          : Text(
+                              'Delete Account',
+                              style: GoogleFonts.inter(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                    ),
+                  )
+                : const SizedBox.shrink(key: ValueKey('delete-hidden')),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _shortAccountName(String? userId) {
+    if (userId == null || userId.trim().isEmpty) return 'this account';
+    final localPart = userId.split(':').first.trim();
+    if (localPart.isEmpty) return userId;
+    return localPart.startsWith('@') ? localPart : '@$localPart';
+  }
+
+  Widget _warningBox() {
+    final rows = [
+      'Your local session, cached rooms, and device data will be cleared.',
+      'Encrypted message recovery can be lost if you did not save your recovery key.',
+      'This is different from logout and cannot be undone.',
+    ];
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF241616),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.red.withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: rows
+            .map(
+              (row) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.error_outline, color: Colors.red[200], size: 17),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        row,
+                        style: GoogleFonts.inter(
+                          color: kWhite,
+                          fontSize: 12,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+            .toList(),
+      ),
+    );
+  }
+
+  Widget _inputLabel(String label) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 7),
+      child: Text(
+        label,
+        style: GoogleFonts.inter(
+          color: kLightGrey,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _inputField({
+    required TextEditingController controller,
+    required String hint,
+    bool obscure = false,
+    Widget? suffix,
+    required ValueChanged<String> onChanged,
+  }) {
+    return TextField(
+      controller: controller,
+      obscureText: obscure,
+      enabled: !_deleting,
+      onChanged: onChanged,
+      style: GoogleFonts.inter(color: kWhite, fontSize: 15),
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: hint,
+        hintStyle: GoogleFonts.inter(color: kLightGrey),
+        filled: true,
+        fillColor: const Color(0xFF2C2C2E),
+        suffixIcon: suffix,
+        suffixIconConstraints: const BoxConstraints(
+          minWidth: 44,
+          minHeight: 44,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 18,
+          vertical: 13,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(24),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(24),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(24),
+          borderSide:
+              BorderSide(color: kWhite.withValues(alpha: 0.45), width: 1),
+        ),
+      ),
+    );
+  }
+}
+
 class SecuritySettingsScreen extends StatefulWidget {
   const SecuritySettingsScreen({super.key});
 
@@ -432,21 +764,6 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     _showSnack(result.success
         ? 'Recovery unlocked and keys loaded'
         : result.error ?? 'Recovery unlock failed');
-  }
-
-  Future<void> _requestSecrets() async {
-    setState(() => _working = true);
-    try {
-      await _e2eeService.requestSecretsFromVerifiedDevices();
-      if (mounted) _showSnack('Requested keys from verified devices');
-    } catch (e) {
-      if (mounted) _showSnack('Unable to request keys: $e');
-    } finally {
-      if (mounted) {
-        setState(() => _working = false);
-        await _loadStatus();
-      }
-    }
   }
 
   Future<String?> _promptInput({
@@ -590,153 +907,250 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final status = _status;
+    final mediaQuery = MediaQuery.of(context);
     return Scaffold(
       backgroundColor: kBlack,
-      appBar: AppBar(
-        backgroundColor: kBlack,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: kWhite),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(
-          'Security',
-          style: GoogleFonts.inter(
-            color: kWhite,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
       body: _loading
           ? const Center(
               child: CircularProgressIndicator(color: kLimeGreen),
             )
           : ListView(
-              padding: const EdgeInsets.fromLTRB(22, 10, 22, 22),
-              children: [
-                _securityNavTile(
-                  icon: Icons.lock,
-                  title: 'App Lock',
-                  subtitle: 'PIN, biometrics, and automatic locking',
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const AppLockSettingsScreen(),
-                      ),
-                    );
-                  },
-                ),
-                _securityNavTile(
-                  icon: Icons.devices,
-                  title: 'Devices and Sessions',
-                  subtitle: 'Review and sign out Matrix sessions',
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const DeviceSessionsScreen(),
-                      ),
-                    );
-                  },
-                ),
-                _securityNavTile(
-                  icon: Icons.verified_user,
-                  title: 'Two-step verification',
-                  subtitle: 'Requires homeserver-enforced login support',
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const TwoFactorStatusScreen(),
-                      ),
-                    );
-                  },
-                ),
-                const Divider(color: Color(0xFF2C2C2E), height: 28),
-                _statusRow(
-                  'Encryption',
-                  status?.available == true ? 'Available' : 'Unavailable',
-                  status?.available == true,
-                ),
-                _statusRow(
-                  'Cross-signing',
-                  status?.crossSigningEnabled == true
-                      ? status?.crossSigningCached == true
-                          ? 'Ready'
-                          : 'Needs recovery unlock'
-                      : 'Not set up',
-                  status?.crossSigningEnabled == true &&
-                      status?.crossSigningCached == true,
-                ),
-                _statusRow(
-                  'Key backup',
-                  status?.keyBackupEnabled == true
-                      ? status?.keyBackupCached == true
-                          ? 'Ready'
-                          : 'Needs recovery unlock'
-                      : 'Not set up',
-                  status?.keyBackupEnabled == true &&
-                      status?.keyBackupCached == true,
-                ),
-                _detailRow('Device ID', status?.deviceId ?? 'Unknown'),
-                _detailRow('Recovery key ID',
-                    status?.defaultRecoveryKeyId ?? 'Not configured'),
-                _detailRow('Fingerprint', _shortKey(status?.fingerprintKey)),
-                _detailRow(
-                  'Production E2EE',
-                  E2eeVerificationChecklist.isProductionReady(const {})
-                      ? 'Verified'
-                      : 'Verification evidence required',
-                ),
-                const SizedBox(height: 18),
-                _actionButton(
-                  'Set up recovery and key backup',
-                  _working ? null : _setupRecovery,
-                ),
-                const SizedBox(height: 10),
-                _actionButton(
-                  'Unlock recovery',
-                  _working ? null : _unlockRecovery,
-                ),
-                const SizedBox(height: 10),
-                _actionButton(
-                  'Request keys from verified devices',
-                  _working ? null : _requestSecrets,
-                  secondary: true,
-                ),
-                if (_working) ...[
-                  const SizedBox(height: 20),
-                  const Center(
-                    child: CircularProgressIndicator(color: kLimeGreen),
-                  ),
-                ],
-              ],
+              padding: EdgeInsets.fromLTRB(
+                22,
+                mediaQuery.padding.top + 18,
+                22,
+                22 + mediaQuery.padding.bottom,
+              ),
+              children: _securityContent(status),
             ),
     );
   }
 
-  Widget _statusRow(String label, String value, bool ok) {
-    return ListTile(
-      dense: true,
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(
-        ok ? Icons.check_circle : Icons.info,
-        color: ok ? kLimeGreen : kLightGrey,
-        size: 19,
+  List<Widget> _securityContent(E2eeStatus? status) {
+    return [
+      Row(
+        children: [
+          _roundBackButton(),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Security',
+                  style: GoogleFonts.inter(
+                    color: kWhite,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'Manage how your account is protected',
+                  style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
-      title: Text(
-        label,
-        style: GoogleFonts.inter(
-          color: kWhite,
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-        ),
+      const SizedBox(height: 24),
+      _settingsPanel(
+        children: [
+          _securityNavTile(
+            icon: Icons.lock,
+            title: 'App Lock',
+            subtitle: 'PIN, biometrics, and automatic locking',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const AppLockSettingsScreen()),
+              );
+            },
+          ),
+          _panelDivider(),
+          _securityNavTile(
+            icon: Icons.devices,
+            title: 'Devices and Sessions',
+            subtitle: 'Review and sign out Matrix sessions',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const DeviceSessionsScreen()),
+              );
+            },
+          ),
+          _panelDivider(),
+          _securityNavTile(
+            icon: Icons.verified_user,
+            title: 'Two-step verification',
+            subtitle: 'Requires homeserver-enforced login support',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const TwoFactorStatusScreen()),
+              );
+            },
+          ),
+        ],
       ),
-      subtitle: Text(
-        value,
-        style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+      const SizedBox(height: 18),
+      _settingsPanel(
+        children: [
+          _statusRow(
+            icon: Icons.check_circle,
+            label: 'Encryption',
+            value: status?.available == true ? 'Available' : 'Unavailable',
+            ok: status?.available == true,
+          ),
+          _panelDivider(),
+          _statusRow(
+            icon: Icons.info,
+            label: 'Cross-signing',
+            value: status?.crossSigningEnabled == true
+                ? status?.crossSigningCached == true
+                    ? 'Ready'
+                    : 'Needs recovery unlock'
+                : 'Not set up',
+            ok: status?.crossSigningEnabled == true &&
+                status?.crossSigningCached == true,
+            actionLabel: status?.crossSigningEnabled == true
+                ? status?.crossSigningCached == true
+                    ? null
+                    : 'Unlock'
+                : 'Set up',
+            onAction: _working
+                ? null
+                : status?.crossSigningEnabled == true
+                    ? status?.crossSigningCached == true
+                        ? null
+                        : _unlockRecovery
+                    : _setupRecovery,
+          ),
+          _panelDivider(),
+          _statusRow(
+            icon: Icons.info,
+            label: 'Key backup',
+            value: status?.keyBackupEnabled == true
+                ? status?.keyBackupCached == true
+                    ? 'Ready'
+                    : 'Needs recovery unlock'
+                : 'Not set up',
+            ok: status?.keyBackupEnabled == true &&
+                status?.keyBackupCached == true,
+            actionLabel: status?.keyBackupEnabled == true
+                ? status?.keyBackupCached == true
+                    ? null
+                    : 'Unlock'
+                : 'Set up',
+            onAction: _working
+                ? null
+                : status?.keyBackupEnabled == true
+                    ? status?.keyBackupCached == true
+                        ? null
+                        : _unlockRecovery
+                    : _setupRecovery,
+          ),
+        ],
+      ),
+      const SizedBox(height: 18),
+      _actionButton(
+        'Set up recovery and key backup',
+        _working ? null : _setupRecovery,
+        icon: Icons.verified_user_outlined,
+      ),
+      const SizedBox(height: 10),
+      _actionButton(
+        'Unlock recovery',
+        _working ? null : _unlockRecovery,
+        icon: Icons.lock_open_outlined,
+        outlined: true,
+      ),
+      if (_working) ...[
+        const SizedBox(height: 20),
+        const Center(child: CircularProgressIndicator(color: kLimeGreen)),
+      ],
+    ];
+  }
+
+  Widget _roundBackButton() {
+    return IconButton(
+      onPressed: () => Navigator.pop(context),
+      icon: const Icon(
+        Icons.arrow_back,
+        color: kWhite,
+        size: 24,
+      ),
+    );
+  }
+
+  Widget _settingsPanel({required List<Widget> children}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF11171D),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: children),
+    );
+  }
+
+  Widget _panelDivider() {
+    return const Divider(
+      color: Color(0xFF242B33),
+      height: 1,
+      indent: 72,
+    );
+  }
+
+  Widget _statusRow({
+    required IconData icon,
+    required String label,
+    required String value,
+    required bool ok,
+    String? actionLabel,
+    VoidCallback? onAction,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      child: Row(
+        children: [
+          _securityIcon(
+            icon: icon,
+            limeIcon: ok,
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: GoogleFonts.inter(
+                    color: kWhite,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  style: GoogleFonts.inter(
+                    color: ok ? kLimeGreen : kLightGrey,
+                    fontSize: 11,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          if (actionLabel != null)
+            _miniActionButton(actionLabel, onAction)
+          else
+            const Icon(Icons.chevron_right, color: kLightGrey, size: 22),
+        ],
       ),
     );
   }
@@ -747,50 +1161,85 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     required String subtitle,
     required VoidCallback onTap,
   }) {
-    return ListTile(
-      dense: true,
-      contentPadding: EdgeInsets.zero,
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
       onTap: onTap,
-      leading: Icon(icon, color: kWhite, size: 20),
-      title: Text(
-        title,
-        style: GoogleFonts.inter(
-          color: kWhite,
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+        child: Row(
+          children: [
+            _securityIcon(icon: icon),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.inter(
+                      color: kWhite,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.chevron_right, color: kLightGrey, size: 24),
+          ],
         ),
       ),
-      subtitle: Text(
-        subtitle,
-        style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
-      ),
-      trailing: const Icon(Icons.chevron_right, color: kLightGrey),
     );
   }
 
-  Widget _detailRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label.toUpperCase(),
-            style: GoogleFonts.inter(
-              color: kLightGrey,
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.2,
-            ),
+  Widget _securityIcon({
+    required IconData icon,
+    bool active = false,
+    bool limeIcon = false,
+  }) {
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        color: active ? kLimeGreen.withOpacity(0.16) : const Color(0xFF252B33),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Icon(
+        icon,
+        color: active || limeIcon ? kLimeGreen : kWhite,
+        size: 21,
+      ),
+    );
+  }
+
+  Widget _miniActionButton(String label, VoidCallback? onPressed) {
+    return SizedBox(
+      height: 34,
+      child: OutlinedButton(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: kLimeGreen,
+          disabledForegroundColor: kLightGrey,
+          side: BorderSide(
+            color: onPressed == null ? kLightGrey : kLimeGreen,
           ),
-          const SizedBox(height: 5),
-          Text(
-            value,
-            style: GoogleFonts.inter(color: kWhite, fontSize: 13),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
           ),
-        ],
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700),
+        ),
       ),
     );
   }
@@ -799,33 +1248,66 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     String label,
     VoidCallback? onPressed, {
     bool secondary = false,
+    bool outlined = false,
+    IconData? icon,
   }) {
     return SizedBox(
-      height: 52,
-      child: ElevatedButton(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: secondary ? const Color(0xFF2C2C2E) : kWhite,
-          foregroundColor: secondary ? kWhite : kBlack,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-        ),
-        onPressed: onPressed,
-        child: Text(
-          label,
-          style: GoogleFonts.inter(
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
+      height: 44,
+      child: outlined
+          ? OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: kWhite,
+                disabledForegroundColor: kLightGrey,
+                side: const BorderSide(color: Color(0xFF58606B)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24),
+                ),
+              ),
+              onPressed: onPressed,
+              child: _actionButtonContent(label, icon, trailing: true),
+            )
+          : ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: secondary ? const Color(0xFF2C2C2E) : kWhite,
+                foregroundColor: secondary ? kWhite : kBlack,
+                disabledBackgroundColor: const Color(0xFF2C2C2E),
+                disabledForegroundColor: kLightGrey,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24),
+                ),
+              ),
+              onPressed: onPressed,
+              child: _actionButtonContent(label, icon, trailing: !secondary),
+            ),
     );
   }
 
-  String _shortKey(String? key) {
-    if (key == null || key.isEmpty) return 'Unavailable';
-    if (key.length <= 18) return key;
-    return '${key.substring(0, 9)}...${key.substring(key.length - 9)}';
+  Widget _actionButtonContent(
+    String label,
+    IconData? icon, {
+    bool trailing = false,
+  }) {
+    return Row(
+      children: [
+        if (icon != null) ...[
+          Icon(icon, size: 18),
+          const SizedBox(width: 10),
+        ],
+        Expanded(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        if (trailing) const Icon(Icons.chevron_right, size: 20),
+      ],
+    );
   }
 }
 
@@ -1120,92 +1602,121 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
           : ListView(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 18),
+              padding: const EdgeInsets.fromLTRB(22, 10, 22, 18),
               children: [
-                _accountVisibilityTile(),
-                _privacyTile(
-                  icon: Icons.account_circle,
-                  title: 'Profile Picture',
-                  subtitle: _privacySummary(
-                    _settings.profileAvatarAudience,
-                    _settings.profileAvatarUserIds,
-                  ),
-                  onTap: () => _openAudiencePicker(
-                    title: 'Profile Picture',
-                    audience: _settings.profileAvatarAudience,
-                    selectedUserIds: _settings.profileAvatarUserIds,
-                    apply: (settings) => _settings = settings,
-                    buildSettings: (audience, selectedUserIds) {
-                      return _settings.copyWith(
-                        profileAvatarAudience: audience,
-                        profileAvatarUserIds: selectedUserIds,
-                      );
-                    },
-                  ),
-                ),
-                _privacyTile(
-                  icon: Icons.auto_stories,
-                  title: 'Stories',
-                  subtitle: _privacySummary(
-                    _settings.storyAudience,
-                    _settings.storyUserIds,
-                  ),
-                  onTap: () => _openAudiencePicker(
-                    title: 'Stories',
-                    audience: _settings.storyAudience,
-                    selectedUserIds: _settings.storyUserIds,
-                    apply: (settings) => _settings = settings,
-                    buildSettings: (audience, selectedUserIds) {
-                      return _settings.copyWith(
-                        storyAudience: audience,
-                        storyUserIds: selectedUserIds,
-                      );
-                    },
-                  ),
+                _privacyPanel(
+                  children: [
+                    _accountVisibilityTile(),
+                    _privacyDivider(),
+                    _privacyTile(
+                      icon: Icons.account_circle,
+                      title: 'Profile Picture',
+                      subtitle: _privacySummary(
+                        _settings.profileAvatarAudience,
+                        _settings.profileAvatarUserIds,
+                      ),
+                      onTap: () => _openAudiencePicker(
+                        title: 'Profile Picture',
+                        audience: _settings.profileAvatarAudience,
+                        selectedUserIds: _settings.profileAvatarUserIds,
+                        apply: (settings) => _settings = settings,
+                        buildSettings: (audience, selectedUserIds) {
+                          return _settings.copyWith(
+                            profileAvatarAudience: audience,
+                            profileAvatarUserIds: selectedUserIds,
+                          );
+                        },
+                      ),
+                    ),
+                    _privacyDivider(),
+                    _privacyTile(
+                      icon: Icons.auto_stories,
+                      title: 'Stories',
+                      subtitle: _privacySummary(
+                        _settings.storyAudience,
+                        _settings.storyUserIds,
+                      ),
+                      onTap: () => _openAudiencePicker(
+                        title: 'Stories',
+                        audience: _settings.storyAudience,
+                        selectedUserIds: _settings.storyUserIds,
+                        apply: (settings) => _settings = settings,
+                        buildSettings: (audience, selectedUserIds) {
+                          return _settings.copyWith(
+                            storyAudience: audience,
+                            storyUserIds: selectedUserIds,
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
     );
   }
 
-  Widget _accountVisibilityTile() {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        dense: true,
-        visualDensity: const VisualDensity(horizontal: 0, vertical: -3),
-        leading: Icon(
-          _settings.accountIsPublic ? Icons.public : Icons.lock,
-          color: kWhite,
-          size: 19,
-        ),
-        title: Text(
-          'Account Visibility',
-          style: GoogleFonts.inter(
-            color: kWhite,
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        subtitle: Text(
-          _settings.accountIsPublic
-              ? 'Public account appears in XMO user search'
-              : 'Private account is hidden from XMO user search',
-          style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: Switch(
-          value: _settings.accountIsPublic,
-          activeThumbColor: kLimeGreen,
-          onChanged: _saving
-              ? null
-              : (value) {
-                  _save(_settings.copyWith(accountIsPublic: value));
-                },
-        ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+  Widget _privacyPanel({required List<Widget> children}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF11171D),
+        borderRadius: BorderRadius.circular(16),
       ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: children),
+    );
+  }
+
+  Widget _privacyDivider() {
+    return const Divider(
+      color: Color(0xFF242B33),
+      height: 1,
+      indent: 72,
+    );
+  }
+
+  Widget _privacyIconBox(IconData icon) {
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        color: const Color(0xFF252B33),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Icon(icon, color: kWhite, size: 21),
+    );
+  }
+
+  Widget _accountVisibilityTile() {
+    return SwitchListTile(
+      dense: true,
+      visualDensity: const VisualDensity(horizontal: 0, vertical: -2),
+      secondary: _privacyIconBox(
+        _settings.accountIsPublic ? Icons.public : Icons.lock,
+      ),
+      value: _settings.accountIsPublic,
+      activeThumbColor: kLimeGreen,
+      onChanged: _saving
+          ? null
+          : (value) {
+              _save(_settings.copyWith(accountIsPublic: value));
+            },
+      title: Text(
+        'Find me by @username',
+        style: GoogleFonts.inter(
+          color: kWhite,
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      subtitle: Text(
+        _settings.accountIsPublic
+            ? 'On: people can search your @username and start a chat'
+            : 'Off: your @username is hidden from public search',
+        style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
     );
   }
 
@@ -1230,28 +1741,27 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
     required String subtitle,
     required VoidCallback onTap,
   }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        dense: true,
-        visualDensity: const VisualDensity(horizontal: 0, vertical: -3),
-        onTap: onTap,
-        leading: Icon(icon, color: kWhite, size: 19),
-        title: Text(
-          title,
-          style: GoogleFonts.inter(
-            color: kWhite,
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-          ),
+    return ListTile(
+      dense: true,
+      visualDensity: const VisualDensity(horizontal: 0, vertical: -2),
+      onTap: onTap,
+      leading: _privacyIconBox(icon),
+      title: Text(
+        title,
+        style: GoogleFonts.inter(
+          color: kWhite,
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
         ),
-        subtitle: Text(
-          subtitle,
-          style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
-        ),
-        trailing: const Icon(Icons.chevron_right, color: kLightGrey, size: 20),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
       ),
+      subtitle: Text(
+        subtitle,
+        style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: const Icon(Icons.chevron_right, color: kLightGrey, size: 22),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
     );
   }
 }

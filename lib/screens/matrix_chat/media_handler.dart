@@ -11,6 +11,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
 import '../../providers/matrix_provider.dart';
+import '../../services/matrix_attachment_downloader.dart';
 import '../../services/matrix_service.dart';
 import '../web_video_view_stub.dart'
     if (dart.library.js_interop) '../web_video_view.dart' as web_video;
@@ -30,6 +31,8 @@ class MatrixDownloadCancelledException implements Exception {
 class MediaHandler {
   final MatrixProvider matrixProvider;
   final BuildContext context;
+  static const MatrixAttachmentDownloader _attachmentDownloader =
+      MatrixAttachmentDownloader();
 
   // Global in-memory image cache (persists across chat screen navigations)
   static final Map<String, Uint8List> _imageCache = {};
@@ -183,7 +186,8 @@ class MediaHandler {
             '[ImageLoad] Event type: ${event.type}, messageType: ${event.messageType}');
         debugPrint('[ImageLoad] Has thumbnail info: ${event.hasThumbnail}');
 
-        final matrixFile = await event.downloadAndDecryptAttachment(
+        final matrixFile = await _attachmentDownloader.download(
+          event,
           getThumbnail: getThumbnail,
           downloadCallback: authenticatedDownload(),
         );
@@ -200,7 +204,8 @@ class MediaHandler {
         if (getThumbnail) {
           try {
             debugPrint('[ImageLoad] Thumbnail failed, trying full attachment');
-            final matrixFile = await event.downloadAndDecryptAttachment(
+            final matrixFile = await _attachmentDownloader.download(
+              event,
               getThumbnail: false,
               downloadCallback: authenticatedDownload(),
             );
@@ -351,7 +356,8 @@ class MediaHandler {
         // ── Layer 1: Matrix SDK thumbnail (handles encrypted rooms) ──
         if (event.hasThumbnail) {
           try {
-            final matrixFile = await event.downloadAndDecryptAttachment(
+            final matrixFile = await _attachmentDownloader.download(
+              event,
               getThumbnail: true,
               downloadCallback: authenticatedDownload(),
             );

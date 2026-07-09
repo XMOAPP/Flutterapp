@@ -47,9 +47,9 @@ class _DonationScreenState extends State<DonationScreen> {
         donorDisplayName: provider.displayName,
       );
       if (!mounted) return;
-      final opened = await launchUrl(payment.link,
-              mode: LaunchMode.inAppWebView) ||
-          await launchUrl(payment.link, mode: LaunchMode.externalApplication);
+      final opened =
+          await launchUrl(payment.link, mode: LaunchMode.externalApplication) ||
+              await launchUrl(payment.link, mode: LaunchMode.platformDefault);
       if (!opened && mounted) {
         setState(() => _error = 'Could not open donation checkout.');
       }

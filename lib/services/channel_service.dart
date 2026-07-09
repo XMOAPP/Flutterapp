@@ -35,7 +35,7 @@ class ChannelService {
       name: room.name,
       description: room.topic,
       avatarUrl: room.avatar?.toString(),
-      isPublic: room.joinRules == JoinRules.public,
+      isPublic: RoomControlsService.isPublicUnencrypted(room),
       signMessages: signMessages,
       linkedDiscussionGroupId: linkedGroupId,
       allowComments: linkedGroupId != null,
@@ -65,14 +65,15 @@ class ChannelService {
       // Avatar update handled separately via setAvatar
     }
 
-    // Update join rules and public-directory visibility.
+    // Channel public/private security type is permanent after creation.
+    final immutableJoinMode = RoomControlsService.immutableJoinModeFor(room);
     await RoomControlsService.setChannelJoinMode(
       room,
-      settings.isPublic ? XmoJoinMode.public : XmoJoinMode.invite,
+      immutableJoinMode,
     );
     await RoomControlsService.setChannelDirectoryVisibility(
       room,
-      settings.isPublic ? XmoJoinMode.public : XmoJoinMode.invite,
+      immutableJoinMode,
     );
 
     // Update sign messages setting
