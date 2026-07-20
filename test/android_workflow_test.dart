@@ -79,5 +79,7 @@ void main() {
     expect(workflow, contains('run_android_integration:'));
     expect(workflow, contains('inputs.run_android_integration'));
     expect(workflow, contains('integration_test/chat_input_smoke_test.dart'));
+    expect(workflow, contains('android-actions/setup-android@'));
+    expect(workflow, contains('sdkmanager "platform-tools"'));
   });
 }
