@@ -125,6 +125,8 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+      - name: Reclaim runner disk for Android build
+        run: bash tools/ci/free_android_runner_disk.sh
       - name: Set up Android SDK command-line tools
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
         with:
@@ -152,6 +154,9 @@ jobs:
           bash tools/ci/run_with_timeout.sh 600 build/quality-logs/emulator-boot.log adb wait-for-device
           timeout 600 bash -c 'until [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" == "1" ]]; do sleep 5; done'
           adb shell input keyevent 82
+          available_kb="$(df --output=avail / | tail -n 1 | tr -d ' ')"
+          test "$available_kb" -ge 6291456
+          df -h /
       - name: Run deterministic Android smoke test
         run: >-
           bash tools/ci/run_with_timeout.sh 900 build/quality-logs/android-smoke.log

@@ -80,6 +80,7 @@ void main() {
     expect(workflow, contains('inputs.run_android_integration'));
     expect(workflow, contains('integration_test/chat_input_smoke_test.dart'));
     expect(workflow, contains('android-actions/setup-android@'));
+    expect(workflow, contains('tools/ci/free_android_runner_disk.sh'));
     expect(workflow, contains('sdkmanager "platform-tools"'));
     expect(
         workflow, contains(r'SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"'));
@@ -91,5 +92,6 @@ void main() {
         contains(
             r'"$SDK_ROOT/emulator/emulator" -list-avds | grep -Fx xmo_ci'));
     expect(workflow, contains(r'nohup "$SDK_ROOT/emulator/emulator"'));
+    expect(workflow, contains(r'test "$available_kb" -ge 6291456'));
   });
 }
