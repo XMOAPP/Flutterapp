@@ -4,9 +4,16 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   late final String workflow;
+  late final String analysisOptions;
 
   setUpAll(() {
     workflow = File('.github/workflows/android.yml').readAsStringSync();
+    analysisOptions = File('analysis_options.yaml').readAsStringSync();
+  });
+
+  test('Flutter analysis excludes the independently analyzed backend package',
+      () {
+    expect(analysisOptions, contains('auth_server/**'));
   });
 
   test('release workflow validates every signing secret before building', () {

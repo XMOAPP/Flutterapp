@@ -20,7 +20,7 @@ void main() {
     final credentials = EthPrivateKey.fromHex(
       '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
     );
-    final address = credentials.address.toString();
+    final address = credentials.address.with0x;
 
     final challenge = service.createChallenge(
       username: 'alice',
