@@ -103,6 +103,7 @@ class _StoryVideoPlayerState extends State<StoryVideoPlayer> {
         _controller = VideoPlayerController.networkUrl(
           Uri.parse(videoUrl),
           httpHeaders: widget.httpHeaders,
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
           viewType: _preferredVideoViewType,
         );
       } else if (videoBytes != null) {
@@ -114,6 +115,7 @@ class _StoryVideoPlayerState extends State<StoryVideoPlayer> {
         _previewFile = file;
         _controller = VideoPlayerController.file(
           file,
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
           viewType: _preferredVideoViewType,
         );
       } else {

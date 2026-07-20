@@ -50,6 +50,13 @@ class WalletAuthService {
 
   static const challengeTtl = Duration(minutes: 5);
 
+  void removeChallengesForUsername(String username) {
+    final cleanUsername = normalizeUsername(username);
+    _challenges.removeWhere(
+      (_, challenge) => challenge.username == cleanUsername,
+    );
+  }
+
   WalletAuthChallenge createChallenge({
     required String username,
     required String address,

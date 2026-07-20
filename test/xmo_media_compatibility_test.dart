@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xmo/services/xmo_media_compatibility.dart';
 
@@ -93,7 +95,7 @@ Map<String, dynamic> _validManifest() {
   return {
     'version': 1,
     'mime_type': 'video/mp4',
-    'size': 104857600,
+    'size': 2097152,
     'chunk_size': 2097152,
     'duration_ms': 65000,
     'qualities': {
@@ -102,12 +104,18 @@ Map<String, dynamic> _validManifest() {
           {
             'index': 0,
             'url': 'mxc://server/chunk0',
-            'key': 'chunk-key-0',
-            'iv': 'chunk-iv-0',
-            'sha256': 'chunk-hash-0',
+            'key': _encodedBytes(32, 0, urlSafe: true),
+            'iv': _encodedBytes(16, 1),
+            'sha256': _encodedBytes(32, 2),
           },
         ],
       },
     },
   };
+}
+
+String _encodedBytes(int length, int seed, {bool urlSafe = false}) {
+  final bytes = List<int>.generate(length, (index) => (seed + index) % 256);
+  final encoded = urlSafe ? base64Url.encode(bytes) : base64.encode(bytes);
+  return encoded.replaceAll('=', '');
 }

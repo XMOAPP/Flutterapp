@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:xmo/models/message_reply_reference.dart';
 import 'package:xmo/services/transfer_queue_service.dart';
 
 void main() {
@@ -8,6 +9,7 @@ void main() {
     int totalBytes = 100,
     int attempts = 0,
     DateTime? retryAt,
+    MessageReplyReference? replyReference,
   }) {
     final now = DateTime.utc(2026, 6, 21);
     return TransferJob(
@@ -26,15 +28,21 @@ void main() {
       createdAt: now,
       updatedAt: now,
       nextRetryAt: retryAt,
+      replyReference: replyReference,
     );
   }
 
   test('persists all transfer state needed for a resumed queue', () {
+    const replyReference = MessageReplyReference(
+      roomId: '!room:example.org',
+      eventId: r'$reply:example.org',
+    );
     final source = job(
       status: TransferStatus.failed,
       uploadedBytes: 25,
       attempts: 2,
       retryAt: DateTime.utc(2026, 6, 21, 0, 0, 4),
+      replyReference: replyReference,
     );
     final restored = TransferJob.fromJson(source.toJson());
 
@@ -42,6 +50,8 @@ void main() {
     expect(restored.status, TransferStatus.failed);
     expect(restored.progress, 0.25);
     expect(restored.shouldAutoRetry, isTrue);
+    expect(restored.replyReference?.eventId, replyReference.eventId);
+    expect(restored.replyReference?.roomId, replyReference.roomId);
   });
 
   test('cancelled and failed jobs are retryable, active jobs are cancellable',

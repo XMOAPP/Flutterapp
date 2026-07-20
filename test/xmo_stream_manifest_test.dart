@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xmo/models/xmo_stream_manifest.dart';
 
@@ -12,7 +14,7 @@ void main() {
       expect(manifest, isNotNull);
       expect(manifest!.version, 1);
       expect(manifest.mimeType, 'video/mp4');
-      expect(manifest.size, 104857600);
+      expect(manifest.size, 4194304);
       expect(manifest.chunkSize, 2097152);
       expect(manifest.durationMs, 65000);
       expect(manifest.sourceQuality, isNotNull);
@@ -23,9 +25,9 @@ void main() {
       );
       expect(manifest.sourceQuality!.chunks.first.index, 0);
       expect(manifest.sourceQuality!.chunks.first.url, 'mxc://server/chunk0');
-      expect(manifest.sourceQuality!.chunks.first.key, 'chunk-key-0');
-      expect(manifest.sourceQuality!.chunks.first.iv, 'chunk-iv-0');
-      expect(manifest.sourceQuality!.chunks.first.sha256, 'chunk-hash-0');
+      expect(manifest.sourceQuality!.chunks.first.key, _encodedKey(0));
+      expect(manifest.sourceQuality!.chunks.first.iv, _encodedIv(0));
+      expect(manifest.sourceQuality!.chunks.first.sha256, _encodedHash(0));
     });
 
     test('returns null when event content has no xmo_stream', () {
@@ -58,9 +60,16 @@ void main() {
           {
             'index': 0,
             'url': 'mxc://server/480p0',
-            'key': '480p-key-0',
-            'iv': '480p-iv-0',
-            'sha256': '480p-hash-0',
+            'key': _encodedKey(10),
+            'iv': _encodedIv(10),
+            'sha256': _encodedHash(10),
+          },
+          {
+            'index': 1,
+            'url': 'mxc://server/480p1',
+            'key': _encodedKey(11),
+            'iv': _encodedIv(11),
+            'sha256': _encodedHash(11),
           },
         ],
       };
@@ -71,9 +80,9 @@ void main() {
           {
             'index': 0,
             'url': 'mxc://server/240p0',
-            'key': '240p-key-0',
-            'iv': '240p-iv-0',
-            'sha256': '240p-hash-0',
+            'key': _encodedKey(20),
+            'iv': _encodedIv(20),
+            'sha256': _encodedHash(20),
           },
         ],
       };
@@ -166,6 +175,52 @@ void main() {
         throwsA(isA<XmoStreamManifestException>()),
       );
     });
+
+    test('rejects insecure http chunk urls', () {
+      final json = _manifestJson();
+      final chunks =
+          (json['qualities'] as Map)['source']['chunks'] as List<dynamic>;
+      (chunks[0] as Map)['url'] = 'http://example.org/chunk0';
+
+      expect(
+        () => XmoStreamManifest.fromJson(json),
+        throwsA(isA<XmoStreamManifestException>()),
+      );
+    });
+
+    test('rejects malformed crypto values', () {
+      final json = _manifestJson();
+      final chunks =
+          (json['qualities'] as Map)['source']['chunks'] as List<dynamic>;
+      (chunks[0] as Map)['sha256'] = 'not-a-valid-sha256';
+
+      expect(
+        () => XmoStreamManifest.fromJson(json),
+        throwsA(isA<XmoStreamManifestException>()),
+      );
+    });
+
+    test('rejects reused key and iv pairs', () {
+      final json = _manifestJson();
+      final chunks =
+          (json['qualities'] as Map)['source']['chunks'] as List<dynamic>;
+      (chunks[1] as Map)['key'] = (chunks[0] as Map)['key'];
+      (chunks[1] as Map)['iv'] = (chunks[0] as Map)['iv'];
+
+      expect(
+        () => XmoStreamManifest.fromJson(json),
+        throwsA(isA<XmoStreamManifestException>()),
+      );
+    });
+
+    test('rejects chunk count that does not match declared size', () {
+      final json = _manifestJson()..['size'] = 4194305;
+
+      expect(
+        () => XmoStreamManifest.fromJson(json),
+        throwsA(isA<XmoStreamManifestException>()),
+      );
+    });
   });
 }
 
@@ -173,7 +228,7 @@ Map<String, dynamic> _manifestJson() {
   return {
     'version': 1,
     'mime_type': 'video/mp4',
-    'size': 104857600,
+    'size': 4194304,
     'chunk_size': 2097152,
     'duration_ms': 65000,
     'qualities': {
@@ -182,19 +237,31 @@ Map<String, dynamic> _manifestJson() {
           {
             'index': 0,
             'url': 'mxc://server/chunk0',
-            'key': 'chunk-key-0',
-            'iv': 'chunk-iv-0',
-            'sha256': 'chunk-hash-0',
+            'key': _encodedKey(0),
+            'iv': _encodedIv(0),
+            'sha256': _encodedHash(0),
           },
           {
             'index': 1,
             'url': 'mxc://server/chunk1',
-            'key': 'chunk-key-1',
-            'iv': 'chunk-iv-1',
-            'sha256': 'chunk-hash-1',
+            'key': _encodedKey(1),
+            'iv': _encodedIv(1),
+            'sha256': _encodedHash(1),
           },
         ],
       },
     },
   };
+}
+
+String _encodedKey(int seed) => _encodedBytes(32, seed, urlSafe: true);
+
+String _encodedIv(int seed) => _encodedBytes(16, seed);
+
+String _encodedHash(int seed) => _encodedBytes(32, seed);
+
+String _encodedBytes(int length, int seed, {bool urlSafe = false}) {
+  final bytes = List<int>.generate(length, (index) => (seed + index) % 256);
+  final encoded = urlSafe ? base64Url.encode(bytes) : base64.encode(bytes);
+  return encoded.replaceAll('=', '');
 }

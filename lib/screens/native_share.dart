@@ -13,7 +13,7 @@ Future<void> shareFile(
     throw Exception('File is empty');
   }
 
-  final directory = await getTemporaryDirectory();
+  final directory = await _sharedTempDirectory();
   final resolvedMimeType =
       mimeType ?? lookupMimeType(fileName, headerBytes: bytes);
   final safeName = _safeFileName(
@@ -40,7 +40,7 @@ Future<void> openFile(
     throw Exception('File is empty');
   }
 
-  final directory = await getTemporaryDirectory();
+  final directory = await _sharedTempDirectory();
   final resolvedMimeType =
       mimeType ?? lookupMimeType(fileName, headerBytes: bytes);
   final safeName = _safeFileName(
@@ -104,4 +104,13 @@ String? _fileExtensionForMime(String? mimeType) {
 String _safeFileName(String value) {
   final trimmed = value.trim().isEmpty ? 'xmo_file' : value.trim();
   return trimmed.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]'), '_');
+}
+
+Future<Directory> _sharedTempDirectory() async {
+  final temporaryDirectory = await getTemporaryDirectory();
+  final directory = Directory('${temporaryDirectory.path}/xmo_shared');
+  if (!await directory.exists()) {
+    await directory.create(recursive: true);
+  }
+  return directory;
 }

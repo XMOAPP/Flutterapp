@@ -18,6 +18,7 @@ import 'package:video_thumbnail/video_thumbnail.dart';
 
 import '../providers/matrix_provider.dart';
 import '../providers/story_provider.dart';
+import '../config/app_config.dart';
 import '../services/app_settings_service.dart';
 import '../services/direct_chat_service.dart';
 import '../services/e2ee_service.dart';
@@ -47,6 +48,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   final _settingsService = AppSettingsService();
   AppSettings? _settings;
   bool _loading = true;
+  bool _fullScreenCallAlertsAvailable = true;
 
   @override
   void initState() {
@@ -55,12 +57,54 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
-    final settings = await _settingsService.load();
+    final results = await Future.wait<Object>([
+      _settingsService.load(),
+      PushNotificationService().canUseFullScreenCallAlerts(),
+    ]);
+    final settings = results[0] as AppSettings;
     if (!mounted) return;
     setState(() {
       _settings = settings;
+      _fullScreenCallAlertsAvailable = results[1] as bool;
       _loading = false;
     });
+  }
+
+  Future<void> _explainFullScreenCallAlerts() async {
+    final shouldOpen = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: kDarkerGrey,
+        title: const Text(
+          'Incoming call alerts',
+          style: TextStyle(color: kWhite),
+        ),
+        content: const Text(
+          'Android currently limits XMO to a heads-up notification for '
+          'incoming calls. Allow full-screen alerts if you want calls to '
+          'appear over the lock screen.',
+          style: TextStyle(color: kLightGrey),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Not now', style: TextStyle(color: kWhite)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Open settings', style: TextStyle(color: kWhite)),
+          ),
+        ],
+      ),
+    );
+    if (shouldOpen != true) return;
+    final opened =
+        await PushNotificationService().openFullScreenCallAlertSettings();
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open call alert settings')),
+      );
+    }
   }
 
   // ignore: unused_element
@@ -187,6 +231,13 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                   value: settings.notificationsEnabled,
                   onChanged: _setNotificationsEnabled,
                 ),
+                if (!_fullScreenCallAlertsAvailable)
+                  _navTile(
+                    icon: Icons.phone_in_talk,
+                    title: 'Incoming call alerts',
+                    subtitle: 'Full-screen alerts are not allowed by Android',
+                    onTap: _explainFullScreenCallAlerts,
+                  ),
                 _navTile(
                   icon: Icons.block,
                   title: 'Blocked Users',
@@ -439,6 +490,15 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
     );
   }
 
+  Future<void> _openExternalDeletionPage() async {
+    final uri = Uri.parse(AppConfig.accountDeletionWebUrl);
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication) ||
+        await launchUrl(uri, mode: LaunchMode.platformDefault);
+    if (!opened && mounted) {
+      _showError('Could not open the account deletion page.');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final service = context.read<MatrixProvider>().service;
@@ -474,7 +534,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
           ),
           const SizedBox(height: 10),
           Text(
-            'This permanently deactivates your Matrix account. You will not be able to log in again with this account.',
+            'This permanently deactivates your Matrix account and removes your XMO directory, recovery-email, and report records. You will not be able to log in again.',
             textAlign: TextAlign.center,
             style: GoogleFonts.inter(
               color: kLightGrey,
@@ -484,6 +544,13 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
           ),
           const SizedBox(height: 22),
           _warningBox(),
+          const SizedBox(height: 12),
+          TextButton.icon(
+            onPressed: _deleting ? null : _openExternalDeletionPage,
+            icon: const Icon(Icons.open_in_new, size: 18),
+            label: const Text('Delete without the app'),
+            style: TextButton.styleFrom(foregroundColor: kWhite),
+          ),
           const SizedBox(height: 18),
           SwitchListTile(
             value: _eraseContent,
@@ -594,6 +661,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
     final rows = [
       'Your local session, cached rooms, and device data will be cleared.',
       'Encrypted message recovery can be lost if you did not save your recovery key.',
+      'Delivered messages and uploaded media may remain on recipient devices or Matrix servers.',
       'This is different from logout and cannot be undone.',
     ];
     return Container(

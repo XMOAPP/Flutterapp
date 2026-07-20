@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 import '../models/group_models.dart';
+import '../models/matrix_mentions.dart';
 import 'matrix_service.dart';
 import 'room_controls_service.dart';
 
@@ -150,7 +151,12 @@ class GroupService {
 
     // Update avatar
     if (settings.avatarUrl != null) {
-      // TODO: Upload avatar and set
+      final avatarUrl = settings.avatarUrl!.trim();
+      await updateGroupAvatar(
+        roomId,
+        removeAvatar: avatarUrl.isEmpty,
+        avatarMxcUrl: avatarUrl.isEmpty ? null : avatarUrl,
+      );
     }
 
     // Group public/private security type is permanent after creation.
@@ -179,6 +185,91 @@ class GroupService {
       },
     );
     debugPrint('[GroupService] Group settings updated');
+  }
+
+  /// Uploads, assigns, or removes the standard Matrix room avatar.
+  ///
+  /// Exactly one avatar operation must be supplied. Existing avatar URLs must
+  /// be Matrix content URIs so arbitrary remote URLs are never stored as room
+  /// avatar state.
+  Future<void> updateGroupAvatar(
+    String roomId, {
+    Uint8List? avatarBytes,
+    String avatarFileName = 'avatar.jpg',
+    String? avatarMxcUrl,
+    bool removeAvatar = false,
+  }) async {
+    final room = _client.getRoomById(roomId);
+    if (room == null) throw Exception('Room not found: $roomId');
+    if (!room.canChangeStateEvent(EventTypes.RoomAvatar)) {
+      throw StateError('You do not have permission to change this avatar');
+    }
+
+    final hasBytes = avatarBytes != null;
+    final hasMxcUrl = avatarMxcUrl != null;
+    final operationCount =
+        (hasBytes ? 1 : 0) + (hasMxcUrl ? 1 : 0) + (removeAvatar ? 1 : 0);
+    if (operationCount != 1) {
+      throw ArgumentError(
+        'Provide exactly one avatar operation: bytes, MXC URL, or removal',
+      );
+    }
+
+    Uri? avatarUri;
+    if (hasBytes) {
+      if (avatarBytes.isEmpty) {
+        throw ArgumentError.value(
+            avatarBytes, 'avatarBytes', 'Cannot be empty');
+      }
+      avatarUri = await room.client.uploadContent(
+        avatarBytes,
+        filename: avatarFileName,
+        contentType: avatarContentTypeForFileName(avatarFileName),
+      );
+    } else if (hasMxcUrl) {
+      avatarUri = parseAvatarMxcUrl(avatarMxcUrl);
+    }
+
+    if (avatarUri == room.avatar || (removeAvatar && room.avatar == null)) {
+      return;
+    }
+
+    await room.client.setRoomStateWithKey(
+      roomId,
+      EventTypes.RoomAvatar,
+      '',
+      <String, dynamic>{
+        if (avatarUri != null) 'url': avatarUri.toString(),
+      },
+    );
+
+    await _recordAdminAction(
+      roomId,
+      AdminActionType.settingsChanged,
+      metadata: {'avatar': removeAvatar ? 'removed' : 'updated'},
+    );
+  }
+
+  @visibleForTesting
+  static String avatarContentTypeForFileName(String fileName) {
+    final lower = fileName.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    return 'image/jpeg';
+  }
+
+  @visibleForTesting
+  static Uri parseAvatarMxcUrl(String value) {
+    final uri = Uri.tryParse(value.trim());
+    if (uri == null ||
+        uri.scheme != 'mxc' ||
+        uri.host.isEmpty ||
+        uri.pathSegments.isEmpty ||
+        uri.pathSegments.every((segment) => segment.isEmpty)) {
+      throw const FormatException('Avatar URL must be a valid mxc:// URI');
+    }
+    return uri;
   }
 
   /// Gets current group settings
@@ -596,10 +687,20 @@ class GroupService {
     debugPrint(
         '[GroupService] Sending message with ${mentionedUserIds.length} mentions');
 
-    // Matrix mentions are embedded in the message content
-    await room.sendTextEvent(text);
+    final mentionContent = MatrixMentions.forUserIds(
+      mentionedUserIds,
+      ownUserId: _client.userID,
+    );
+    if (mentionContent.isEmpty) {
+      await room.sendTextEvent(text);
+      return;
+    }
 
-    // TODO: Add proper mention formatting with m.mentions
+    await room.sendEvent({
+      'msgtype': MessageTypes.Text,
+      'body': text,
+      ...mentionContent,
+    });
   }
 
   /// Gets the event a message is replying to

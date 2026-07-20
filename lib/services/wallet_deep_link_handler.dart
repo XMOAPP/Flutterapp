@@ -44,7 +44,7 @@ class WalletDeepLinkHandler {
     if (value == null || value.isEmpty) return;
 
     final appKitModal = _appKitModal;
-    if (appKitModal == null && _isWalletLink(value)) {
+    if (appKitModal == null && isSupportedWalletLink(value)) {
       _queueWalletLink(value);
       return;
     }
@@ -53,7 +53,7 @@ class WalletDeepLinkHandler {
     if (!handled && await CallLinkService.instance.handleLink(value)) {
       return;
     }
-    if (!handled && _isWalletLink(value)) {
+    if (!handled && isSupportedWalletLink(value)) {
       _queueWalletLink(value);
       return;
     }
@@ -84,11 +84,14 @@ class WalletDeepLinkHandler {
     debugPrint('[WalletDeepLink] Queued wallet link until AppKit is ready');
   }
 
-  static bool _isWalletLink(String value) {
-    final lower = value.toLowerCase();
-    return lower.startsWith('xmo://wallet') ||
-        lower.startsWith('wc:') ||
-        lower.contains('walletconnect') ||
-        lower.contains('wc%3a');
+  static bool isSupportedWalletLink(String value) {
+    final uri = Uri.tryParse(value.trim());
+    if (uri == null || uri.userInfo.isNotEmpty || uri.hasPort) return false;
+    final scheme = uri.scheme.toLowerCase();
+    if (scheme == 'wc') return value.trim().length > 3;
+    return scheme == 'xmo' &&
+        uri.host.toLowerCase() == 'wallet' &&
+        (uri.path.isEmpty || uri.path == '/') &&
+        uri.fragment.isEmpty;
   }
 }

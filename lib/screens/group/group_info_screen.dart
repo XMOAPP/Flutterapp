@@ -7,11 +7,13 @@ import '../../providers/matrix_provider.dart';
 import '../../services/group_service.dart';
 import '../../services/matrix_service.dart';
 import '../../services/voip_service.dart';
+import '../../services/report_service.dart';
+import '../../models/report_models.dart';
 import '../../models/group_models.dart';
 import '../../widgets/incoming_call_fullscreen_scope.dart';
 import '../../widgets/story/story_avatar.dart';
+import '../../widgets/report_sheet.dart';
 import '../direct_chat/shared_media_screen.dart';
-import '../direct_chat/search_in_chat_screen.dart';
 import 'member_list_screen.dart';
 import 'group_settings_screen.dart';
 import 'add_members_screen.dart';
@@ -19,6 +21,8 @@ import 'admin_panel_screen.dart';
 import 'invite_links_screen.dart';
 
 /// Group Info Screen - Shows group details, members, and settings
+enum GroupInfoResult { searchMessages }
+
 class GroupInfoScreen extends StatefulWidget {
   final Room room;
 
@@ -209,6 +213,12 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
           label: 'Leave Group',
           destructive: true,
         ),
+      _buildMenuItem(
+        value: 'report',
+        icon: Icons.flag_outlined,
+        label: 'Report Group',
+        destructive: true,
+      ),
     ];
   }
 
@@ -268,6 +278,25 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
           ),
         ).then((_) => _loadGroupData());
         break;
+      case 'report':
+        final service = context.read<MatrixProvider>().service;
+        final submitted = await showXmoReportSheet(
+          context: context,
+          reportService: ReportService(service),
+          targetType: XmoReportTargetType.group,
+          contextType: XmoReportContextType.group,
+          title: 'Report group',
+          roomId: widget.room.id,
+        );
+        if (submitted && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Report submitted'),
+              backgroundColor: kLimeGreen,
+            ),
+          );
+        }
+        break;
     }
   }
 
@@ -313,15 +342,11 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   }
 
   void _openSearch() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => SearchInChatScreen(room: widget.room),
-      ),
-    );
+    Navigator.pop(context, GroupInfoResult.searchMessages);
   }
 
   Future<void> _confirmLeaveGroup() async {
+    final provider = context.read<MatrixProvider>();
     final confirmed = await _confirmAction(
       title: 'Leave Group?',
       message: 'Leave this group?',
@@ -331,7 +356,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
 
     try {
       await widget.room.leave();
-      final provider = context.read<MatrixProvider>();
       try {
         await provider.service.client.oneShotSync();
       } catch (_) {}

@@ -8,6 +8,7 @@ import '../../services/group_service.dart';
 import '../../models/group_models.dart';
 import '../../widgets/story/story_avatar.dart';
 import 'admin_log_screen.dart';
+import '../moderation/moderator_reports_screen.dart';
 
 /// Admin Panel Screen - Manage admins and permissions
 class AdminPanelScreen extends StatefulWidget {
@@ -253,6 +254,16 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
           ),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.flag_outlined, color: kWhite),
+            tooltip: 'Review reports',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ModeratorReportsScreen(room: widget.room),
+              ),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.history, color: kLimeGreen),
             tooltip: 'Admin log',

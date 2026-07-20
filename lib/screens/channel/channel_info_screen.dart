@@ -6,9 +6,12 @@ import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/channel_service.dart';
 import '../../services/matrix_service.dart';
+import '../../services/report_service.dart';
+import '../../models/report_models.dart';
 import '../../models/channel_models.dart';
 import '../../widgets/incoming_call_fullscreen_scope.dart';
 import '../../widgets/story/story_avatar.dart';
+import '../../widgets/report_sheet.dart';
 import '../direct_chat/shared_media_screen.dart';
 import 'channel_settings_screen.dart';
 import 'subscriber_list_screen.dart';
@@ -175,6 +178,12 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
     if (!_isAdmin) {
       return [
         _buildMenuItem(
+          value: 'report',
+          icon: Icons.flag_outlined,
+          label: 'Report Channel',
+          destructive: true,
+        ),
+        _buildMenuItem(
           value: 'leave',
           icon: Icons.logout,
           label: 'Leave Channel',
@@ -198,6 +207,12 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
         value: 'delete',
         icon: Icons.delete,
         label: 'Delete Channel',
+        destructive: true,
+      ),
+      _buildMenuItem(
+        value: 'report',
+        icon: Icons.flag_outlined,
+        label: 'Report Channel',
         destructive: true,
       ),
     ];
@@ -252,6 +267,29 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
           ),
         ).then((_) => _loadChannelData());
         break;
+      case 'report':
+        _reportChannel();
+        break;
+    }
+  }
+
+  Future<void> _reportChannel() async {
+    final service = context.read<MatrixProvider>().service;
+    final submitted = await showXmoReportSheet(
+      context: context,
+      reportService: ReportService(service),
+      targetType: XmoReportTargetType.channel,
+      contextType: XmoReportContextType.channel,
+      title: 'Report channel',
+      roomId: widget.room.id,
+    );
+    if (submitted && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Report submitted'),
+          backgroundColor: kLimeGreen,
+        ),
+      );
     }
   }
 
@@ -265,6 +303,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
 
     try {
       await widget.room.leave();
+      if (!mounted) return;
       final provider = context.read<MatrixProvider>();
       try {
         await provider.service.client.oneShotSync();

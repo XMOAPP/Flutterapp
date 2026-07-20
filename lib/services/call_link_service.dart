@@ -25,10 +25,10 @@ class CallLinkService {
     }
   }
 
-  bool isCallLink(String link) => _roomIdFromLink(link) != null;
+  bool isCallLink(String link) => roomIdFromLink(link) != null;
 
   Future<bool> handleLink(String link) async {
-    final roomId = _roomIdFromLink(link);
+    final roomId = roomIdFromLink(link);
     if (roomId == null) return false;
 
     if (_navigatorKey?.currentState == null ||
@@ -95,27 +95,52 @@ class CallLinkService {
     );
   }
 
-  String? _roomIdFromLink(String link) {
+  static String? roomIdFromLink(String link) {
     final uri = Uri.tryParse(link.trim());
     if (uri == null) return null;
 
-    if (uri.scheme == 'xmo' && uri.host == 'call') {
-      final queryRoomId = uri.queryParameters['room_id']?.trim();
-      if (queryRoomId != null && queryRoomId.isNotEmpty) return queryRoomId;
-      if (uri.pathSegments.isNotEmpty) return uri.pathSegments.first;
+    if (uri.userInfo.isNotEmpty || uri.hasPort || uri.fragment.isNotEmpty) {
       return null;
     }
 
-    if ((uri.scheme == 'https' || uri.scheme == 'http') &&
-        uri.host == 'xmo.dpdns.org' &&
+    final keys = uri.queryParametersAll.keys.toSet();
+    if (keys.any((key) => key != 'room_id')) return null;
+    if ((uri.queryParametersAll['room_id']?.length ?? 0) > 1) return null;
+
+    if (uri.scheme.toLowerCase() == 'xmo' && uri.host.toLowerCase() == 'call') {
+      if (uri.pathSegments.length > 1) return null;
+      final queryRoomId = uri.queryParameters['room_id']?.trim();
+      if (_isValidRoomId(queryRoomId)) return queryRoomId;
+      if (uri.queryParameters.containsKey('room_id')) return null;
+      if (uri.pathSegments.isNotEmpty &&
+          _isValidRoomId(uri.pathSegments.first)) {
+        return uri.pathSegments.first;
+      }
+      return null;
+    }
+
+    if (uri.scheme.toLowerCase() == 'https' &&
+        uri.host.toLowerCase() == 'xmo.dpdns.org' &&
         uri.pathSegments.isNotEmpty &&
         uri.pathSegments.first == 'call') {
+      if (uri.pathSegments.length > 2) return null;
       final queryRoomId = uri.queryParameters['room_id']?.trim();
-      if (queryRoomId != null && queryRoomId.isNotEmpty) return queryRoomId;
-      if (uri.pathSegments.length > 1) return uri.pathSegments[1];
+      if (_isValidRoomId(queryRoomId)) return queryRoomId;
+      if (uri.queryParameters.containsKey('room_id')) return null;
+      if (uri.pathSegments.length == 2 && _isValidRoomId(uri.pathSegments[1])) {
+        return uri.pathSegments[1];
+      }
     }
 
     return null;
+  }
+
+  static bool _isValidRoomId(String? value) {
+    if (value == null || value.length < 4 || value.length > 512) return false;
+    if (!value.startsWith('!')) return false;
+    final separator = value.indexOf(':');
+    if (separator <= 1 || separator == value.length - 1) return false;
+    return !RegExp(r'[\x00-\x20\x7F\\/?#]').hasMatch(value);
   }
 
   void _showMessage(BuildContext context, String message) {

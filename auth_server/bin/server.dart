@@ -1,5 +1,6 @@
 library xmo_auth_server;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -15,10 +16,13 @@ import 'package:xmo_auth_server/src/structured_logger.dart';
 import 'package:xmo_auth_server/src/wallet_auth_service.dart';
 
 part '../lib/src/handlers/azure_blob_handler.dart';
+part '../lib/src/handlers/account_deletion_handler.dart';
+part '../lib/src/handlers/channel_analytics_handler.dart';
 part '../lib/src/handlers/donation_handler.dart';
 part '../lib/src/handlers/otp_handler.dart';
 part '../lib/src/handlers/password_reset_handler.dart';
 part '../lib/src/handlers/push_handler.dart';
+part '../lib/src/handlers/report_handler.dart';
 part '../lib/src/handlers/user_directory_handler.dart';
 part '../lib/src/handlers/wallet_handler.dart';
 
@@ -50,6 +54,8 @@ final _walletAuthService = WalletAuthService(
   config: WalletAuthConfig.fromEnvironment(Platform.environment),
 );
 final _azureBlobConfig = AzureBlobConfig.fromEnvironment(Platform.environment);
+final _reportConfig = ReportConfig.fromEnvironment(Platform.environment);
+final _accountDeletionStore = <String, _AccountDeletionRecord>{};
 const _otpEndpoints = OtpEndpointModule(send: _sendOtp, verify: _verifyOtp);
 const _passwordResetEndpoints = PasswordResetEndpointModule(
   linkEmail: _linkPasswordResetEmail,
@@ -67,6 +73,21 @@ const _azureBlobEndpoints = AzureBlobEndpointModule(
 const _userDirectoryEndpoints = UserDirectoryEndpointModule(
   upsert: _upsertUserDirectoryEntry,
   search: _searchUserDirectory,
+);
+const _reportEndpoints = ReportEndpointModule(
+  submit: _submitReport,
+  list: _listReports,
+  update: _updateReport,
+);
+const _accountDeletionEndpoints = AccountDeletionEndpointModule(
+  deleteData: _deleteXmoAccountData,
+  requestExternal: _requestExternalAccountDeletion,
+  confirmExternal: _confirmExternalAccountDeletion,
+);
+const _channelAnalyticsEndpoints = ChannelAnalyticsEndpointModule(
+  view: _recordChannelView,
+  forward: _recordChannelForward,
+  stats: _getChannelAnalytics,
 );
 const _pushEndpoints = PushGatewayEndpointModule(_handleMatrixPush);
 
@@ -124,8 +145,51 @@ Future<void> _handleRequest(HttpRequest request) async {
               _firebaseServiceAccountFile.isNotEmpty,
           azureBlobConfigured: _azureBlobConfig.isConfigured,
           userDirectoryConfigured: _userDirectoryConfig.isConfigured,
+          reportsConfigured: _reportConfig.isConfigured,
+          accountDeletionConfigured:
+              _passwordResetConfig.isConfigured && _emailService.isConfigured,
+          channelAnalyticsConfigured: _channelAnalyticsConfig.isConfigured,
         ),
       );
+      return;
+    }
+
+    if (request.method == 'GET' && request.uri.path == '/account-deletion') {
+      await _serveAccountDeletionPage(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _accountDeletionEndpoints.handlesDeleteData(request.uri.path)) {
+      await _accountDeletionEndpoints.deleteData(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _channelAnalyticsEndpoints.handlesView(request.uri.path)) {
+      await _channelAnalyticsEndpoints.view(request);
+      return;
+    }
+    if (request.method == 'POST' &&
+        _channelAnalyticsEndpoints.handlesForward(request.uri.path)) {
+      await _channelAnalyticsEndpoints.forward(request);
+      return;
+    }
+    if (request.method == 'POST' &&
+        _channelAnalyticsEndpoints.handlesStats(request.uri.path)) {
+      await _channelAnalyticsEndpoints.stats(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _accountDeletionEndpoints.handlesExternalRequest(request.uri.path)) {
+      await _accountDeletionEndpoints.requestExternal(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _accountDeletionEndpoints.handlesExternalConfirm(request.uri.path)) {
+      await _accountDeletionEndpoints.confirmExternal(request);
       return;
     }
 
@@ -192,6 +256,24 @@ Future<void> _handleRequest(HttpRequest request) async {
     if (request.method == 'POST' &&
         _userDirectoryEndpoints.handlesSearch(request.uri.path)) {
       await _userDirectoryEndpoints.search(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _reportEndpoints.handlesSubmit(request.uri.path)) {
+      await _reportEndpoints.submit(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _reportEndpoints.handlesList(request.uri.path)) {
+      await _reportEndpoints.list(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _reportEndpoints.handlesUpdate(request.uri.path)) {
+      await _reportEndpoints.update(request);
       return;
     }
 

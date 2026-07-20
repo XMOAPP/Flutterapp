@@ -201,7 +201,7 @@ class _OtpScreenState extends State<OtpScreen>
       if (widget.isRegister && widget.username != null) {
         await OtpService().linkPasswordResetEmail(
           username: widget.username!,
-          email: widget.email!,
+          email: widget.email,
         );
         if (!mounted) return;
       }

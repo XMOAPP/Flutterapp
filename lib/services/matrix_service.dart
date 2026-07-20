@@ -11,8 +11,10 @@ import 'package:path_provider/path_provider.dart';
 import '../config/app_config.dart';
 import '../models/invite_link_models.dart';
 import 'azure_blob_chunk_storage_service.dart';
+import 'channel_analytics_service.dart';
 import 'matrix_encrypted_media_helper.dart';
 import 'matrix_media_helper.dart';
+import 'message_draft_service.dart';
 import 'repositories/matrix_repository_contracts.dart';
 import 'repositories/matrix_sdk_repositories.dart';
 import 'room_controls_service.dart';
@@ -288,6 +290,7 @@ class MatrixService implements MatrixRepositoryApi {
 
     // Open credential storage box
     _authBox = await Hive.openBox(_authBoxName);
+    await _removeReusablePasswordsFromAuthBox();
     _savedMessagesRoomId = _authBox.get(_savedMessagesRoomIdKey) as String?;
 
     // Open channel ID cache (survives restarts — instant channel detection)
@@ -303,6 +306,7 @@ class MatrixService implements MatrixRepositoryApi {
     await Hive.openBox('xmo_call_history');
     await Hive.openBox('xmo_shared_media_index');
     await Hive.openBox(TransferQueueService.boxName);
+    await Hive.openBox(MessageDraftService.boxName);
     await TransferQueueService.instance.init();
 
     _client = Client(
@@ -328,7 +332,7 @@ class MatrixService implements MatrixRepositoryApi {
     await _client.init();
   }
 
-  // ─── Phone-based Auth (primary flow) ─────────────────────────────────────
+  // Phone identifiers are kept for contact discovery/recovery metadata.
 
   /// Derives a stable Matrix username from a phone number.
   String phoneToUsername(String phone) {
@@ -336,29 +340,38 @@ class MatrixService implements MatrixRepositoryApi {
     return 'xmo$digits';
   }
 
-  /// Derives a deterministic password from the phone number.
-  /// Not security-critical for local dev; use secure storage in production.
-  String _phoneToPassword(String phone) {
-    final digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
-    final bytes = utf8.encode('xmo_v1_${digits}_synapse_local');
-    return base64Url.encode(bytes);
-  }
-
   /// Checks if credentials for [phone] are cached locally.
   bool hasStoredCredentials(String phone) {
     return _authBox.containsKey('phone_$phone');
   }
 
-  /// Logs in or registers a user by phone number.
-  /// Call this only after OTP is verified.
+  /// Legacy cached phone-login migration path.
+  ///
+  /// This does not create users and does not derive a Matrix password from
+  /// the phone number. It only uses credentials already cached on this device
+  /// when explicitly enabled for migration.
   Future<void> loginOrRegisterWithPhone(String phone, String email) async {
+    if (!AppConfig.enableLegacyPhonePasswordAuth) {
+      throw const MatrixAccountDeactivationException(
+        'Phone login is no longer supported. Sign in with your username and '
+        'password, use password reset, or use wallet login.',
+      );
+    }
+
     await _client.checkHomeserver(Uri.parse(homeserverUrl));
 
     final username = phoneToUsername(phone);
-    final password = _phoneToPassword(phone);
+    final stored = _authBox.get('phone_$phone');
+    final password = stored?['password'] as String?;
+    if (password == null || password.isEmpty) {
+      throw const MatrixAccountDeactivationException(
+        'This phone account needs recovery. Use password reset with your '
+        'verified email.',
+      );
+    }
 
     if (hasStoredCredentials(phone)) {
-      // Returning user — just log in
+      // Legacy cached credential migration only.
       try {
         await _client.login(
           LoginType.mLoginPassword,
@@ -367,32 +380,15 @@ class MatrixService implements MatrixRepositoryApi {
         );
         return;
       } catch (_) {
-        // Credentials stale? Fall through to register
+        // Credentials are stale; require normal account recovery.
       }
     }
 
-    // New user — register first, then persist credentials
-    try {
-      await _client.register(username: username, password: password);
-    } on MatrixException catch (e) {
-      if (e.errcode == 'M_USER_IN_USE') {
-        // Username exists — someone re-installed; just log in
-        await _client.login(
-          LoginType.mLoginPassword,
-          identifier: AuthenticationUserIdentifier(user: username),
-          password: password,
-        );
-      } else {
-        rethrow;
-      }
-    }
-
-    // Cache credentials so future logins skip registration
-    await _authBox.put('phone_$phone', {
-      'username': username,
-      'password': password,
-      'email': email,
-    });
+    // No phone-based registration is allowed.
+    throw const MatrixAccountDeactivationException(
+      'This phone account needs recovery. Use password reset with your '
+      'verified email.',
+    );
   }
 
   /// Stored email for the current phone number.
@@ -457,7 +453,9 @@ class MatrixService implements MatrixRepositoryApi {
   }
 
   Future<void> logout() async {
+    final accountUserId = userId;
     await _client.logout();
+    await _clearLocalDrafts(accountUserId);
   }
 
   Future<void> deactivateAccount({
@@ -465,6 +463,7 @@ class MatrixService implements MatrixRepositoryApi {
     bool erase = true,
   }) async {
     final token = accessToken;
+    final accountUserId = userId;
     final loginUser = currentLoginUsername;
     final authPassword = password?.trim().isNotEmpty == true
         ? password!.trim()
@@ -480,6 +479,8 @@ class MatrixService implements MatrixRepositoryApi {
         'Enter your account password to delete this account.',
       );
     }
+
+    await _deleteXmoBackendAccountData(token);
 
     final session = await _sendDeactivateAccountRequest(
       token: token,
@@ -499,7 +500,65 @@ class MatrixService implements MatrixRepositoryApi {
     }
 
     await _removeStoredCredentialsForCurrentUser();
+    await _clearLocalDrafts(accountUserId);
     await _client.clear();
+  }
+
+  Future<void> _clearLocalDrafts(String? accountUserId) async {
+    if (accountUserId == null || accountUserId.isEmpty) return;
+    try {
+      await MessageDraftService().clearAccount(accountUserId);
+    } catch (_) {
+      // Local cleanup failure must not leave the user logged in.
+    }
+  }
+
+  Future<void> _deleteXmoBackendAccountData(String token) async {
+    final base = AppConfig.accountDeletionServerUrl.trim();
+    if (base.isEmpty) {
+      throw const MatrixAccountDeactivationException(
+        'Account deletion service is not configured.',
+      );
+    }
+    final uri = Uri.parse(
+      '${base.replaceFirst(RegExp(r'/+$'), '')}/account/delete-data',
+    );
+    final httpClient = io.HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10);
+    try {
+      final request = await httpClient.postUrl(uri);
+      request.headers
+        ..set(io.HttpHeaders.authorizationHeader, 'Bearer $token')
+        ..set(io.HttpHeaders.contentTypeHeader, 'application/json');
+      request.write('{}');
+      final response = await request.close().timeout(
+            const Duration(seconds: 20),
+          );
+      final responseBody = await utf8.decodeStream(response);
+      if (response.statusCode >= 200 && response.statusCode < 300) return;
+
+      var message = 'Could not remove XMO account data.';
+      try {
+        final decoded = jsonDecode(responseBody);
+        if (decoded is Map && decoded['error'] is String) {
+          final serverMessage = (decoded['error'] as String).trim();
+          if (serverMessage.isNotEmpty) message = serverMessage;
+        }
+      } catch (_) {}
+      throw MatrixAccountDeactivationException(message);
+    } on MatrixAccountDeactivationException {
+      rethrow;
+    } on TimeoutException {
+      throw const MatrixAccountDeactivationException(
+        'Account deletion service timed out. Try again.',
+      );
+    } catch (_) {
+      throw const MatrixAccountDeactivationException(
+        'Could not contact the account deletion service. Try again.',
+      );
+    } finally {
+      httpClient.close(force: true);
+    }
   }
 
   Future<String?> _sendDeactivateAccountRequest({
@@ -581,6 +640,21 @@ class MatrixService implements MatrixRepositoryApi {
       }
     }
     return null;
+  }
+
+  Future<void> _removeReusablePasswordsFromAuthBox() async {
+    final sanitizedEntries = <dynamic, Map<dynamic, dynamic>>{};
+    for (final key in _authBox.keys) {
+      final value = _authBox.get(key);
+      if (value is Map && value.containsKey('password')) {
+        final sanitized = Map<dynamic, dynamic>.from(value);
+        sanitized.remove('password');
+        sanitizedEntries[key] = sanitized;
+      }
+    }
+    for (final entry in sanitizedEntries.entries) {
+      await _authBox.put(entry.key, entry.value);
+    }
   }
 
   Future<void> _removeStoredCredentialsForCurrentUser() async {
@@ -1008,6 +1082,15 @@ class MatrixService implements MatrixRepositoryApi {
 
   /// Returns true if this room is known to be a channel (from persistent cache).
   bool isKnownChannel(String roomId) => _channelIdCache.contains(roomId);
+
+  bool isChannelRoom(Room room) {
+    final kind = classifyRoomKind(
+      typeContent: room.getState(roomTypeStateType)?.content,
+      powerLevelsContent: room.getState(EventTypes.RoomPowerLevels)?.content,
+      isDirectChat: room.isDirectChat,
+    );
+    return kind == XmoRoomKind.channel || isKnownChannel(room.id);
+  }
 
   /// Returns true if this room is known to be a group (from persistent cache).
   bool isKnownGroup(String roomId) => _groupIdCache.contains(roomId);
@@ -1548,6 +1631,7 @@ class MatrixService implements MatrixRepositoryApi {
     required Uint8List bytes,
     required String fileName,
     required String mimeType,
+    Event? inReplyTo,
   }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
@@ -1577,13 +1661,14 @@ class MatrixService implements MatrixRepositoryApi {
         'mimetype': mimeType,
         'size': bytes.length,
       },
-    }, type: EventTypes.Sticker);
+    }, type: EventTypes.Sticker, inReplyTo: inReplyTo);
   }
 
   Future<void> sendPoll({
     required String roomId,
     required String question,
     required List<String> options,
+    Event? inReplyTo,
   }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
@@ -1619,7 +1704,7 @@ class MatrixService implements MatrixRepositoryApi {
       'm.text': cleanQuestion,
       'org.matrix.msc3381.poll.start': pollStart,
       'm.poll.start': pollStart,
-    }, type: 'm.poll.start');
+    }, type: 'm.poll.start', inReplyTo: inReplyTo);
   }
 
   Future<void> sendPollResponse({
@@ -1829,6 +1914,7 @@ class MatrixService implements MatrixRepositoryApi {
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
     Map<String, dynamic>? xmoStream,
+    Event? inReplyTo,
   }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
@@ -1868,6 +1954,7 @@ class MatrixService implements MatrixRepositoryApi {
         },
         xmoStream: xmoStream,
       ),
+      inReplyTo: inReplyTo,
     );
   }
 
@@ -1889,7 +1976,19 @@ class MatrixService implements MatrixRepositoryApi {
     }
 
     final content = _forwardableContent(event);
-    await targetRoom.sendEvent(content, type: event.type);
+    final targetEventId = await targetRoom.sendEvent(content, type: event.type);
+    if (targetEventId != null && isChannelRoom(event.room)) {
+      try {
+        await ChannelAnalyticsService(_client).recordForward(
+          roomId: event.room.id,
+          eventId: event.eventId,
+          targetRoomId: targetRoomId,
+          targetEventId: targetEventId,
+        );
+      } catch (error) {
+        debugPrint('[ChannelAnalytics] Forward tracking failed: $error');
+      }
+    }
   }
 
   Map<String, dynamic> _forwardableContent(Event event) {
@@ -1956,6 +2055,8 @@ class MatrixService implements MatrixRepositoryApi {
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
     Map<String, dynamic>? xmoStream,
+    Map<String, dynamic>? xmoContact,
+    Event? inReplyTo,
   }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
@@ -1989,9 +2090,11 @@ class MatrixService implements MatrixRepositoryApi {
             'mimetype': mimeType,
             'size': bytes.length,
           },
+          if (xmoContact != null) 'com.xmo.contact': xmoContact,
         },
         xmoStream: xmoStream,
       ),
+      inReplyTo: inReplyTo,
     );
   }
 
@@ -2001,9 +2104,13 @@ class MatrixService implements MatrixRepositoryApi {
     required String fileName,
     required String mimeType,
     String caption = '',
+    Uint8List? thumbnailBytes,
+    int? thumbnailWidth,
+    int? thumbnailHeight,
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
     Map<String, dynamic>? xmoStream,
+    Event? inReplyTo,
   }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
@@ -2023,6 +2130,46 @@ class MatrixService implements MatrixRepositoryApi {
     );
     _throwIfCancelled(isCancelled);
     final cleanCaption = caption.trim();
+    final info = <String, dynamic>{
+      'mimetype': mimeType,
+      'size': bytes.length,
+    };
+
+    if (thumbnailBytes != null && thumbnailBytes.isNotEmpty) {
+      try {
+        _throwIfCancelled(isCancelled);
+        final preparedThumbnail = await _prepareMediaUpload(
+          room,
+          bytes: thumbnailBytes,
+          fileName: '${fileName}_thumb.png',
+          mimeType: 'image/png',
+        );
+        final thumbnailMxc = await _client.uploadContent(
+          preparedThumbnail.bytes,
+          filename: '${fileName}_thumb.png',
+          contentType: preparedThumbnail.contentType,
+        );
+        if (preparedThumbnail.encryptedFile == null) {
+          info['thumbnail_url'] = thumbnailMxc.toString();
+        } else {
+          info['thumbnail_file'] = _encryptedFileContent(
+            preparedThumbnail.encryptedFile!,
+            thumbnailMxc,
+            mimeType: 'image/png',
+          );
+        }
+        info['thumbnail_info'] = {
+          'mimetype': 'image/png',
+          'size': thumbnailBytes.length,
+          if (thumbnailWidth != null && thumbnailWidth > 0) 'w': thumbnailWidth,
+          if (thumbnailHeight != null && thumbnailHeight > 0)
+            'h': thumbnailHeight,
+        };
+      } catch (error) {
+        if (error is MatrixUploadCancelledException) rethrow;
+        debugPrint('[sendImage] Thumbnail upload failed (non-fatal): $error');
+      }
+    }
 
     await room.sendEvent(
       XmoMediaCompatibility.withOptionalStream(
@@ -2036,13 +2183,11 @@ class MatrixService implements MatrixRepositoryApi {
             'file': _encryptedFileContent(
                 preparedImage.encryptedFile!, imageMxc,
                 mimeType: mimeType),
-          'info': {
-            'mimetype': mimeType,
-            'size': bytes.length,
-          },
+          'info': info,
         },
         xmoStream: xmoStream,
       ),
+      inReplyTo: inReplyTo,
     );
   }
 
@@ -2066,6 +2211,7 @@ class MatrixService implements MatrixRepositoryApi {
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
     Map<String, dynamic>? xmoStream,
+    Event? inReplyTo,
   }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
@@ -2199,6 +2345,7 @@ class MatrixService implements MatrixRepositoryApi {
         },
         xmoStream: effectiveXmoStream,
       ),
+      inReplyTo: inReplyTo,
     );
     debugPrint('[sendVideo] Event sent.');
   }

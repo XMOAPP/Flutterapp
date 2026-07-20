@@ -181,7 +181,7 @@ _PushPreview _notificationPreview(
   final lowerEventType = eventType.toLowerCase();
   final lowerMsgType = msgType.toLowerCase();
   if (lowerEventType.contains('encrypted')) {
-    return const _PushPreview(kind: 'encrypted', label: 'Encrypted message');
+    return const _PushPreview(kind: 'encrypted', label: 'New message');
   }
 
   if (lowerMsgType.contains('image')) {
@@ -265,7 +265,7 @@ String _notificationBody(
   final contentBody = content['body']?.toString().trim();
   final lowerEventType = eventType.toLowerCase();
   final lowerMsgType = msgType.toLowerCase();
-  if (lowerEventType.contains('encrypted')) return 'New encrypted message';
+  if (lowerEventType.contains('encrypted')) return 'New message';
 
   if (lowerMsgType.contains('image')) {
     return _captionOrLabel(content, 'Photo');

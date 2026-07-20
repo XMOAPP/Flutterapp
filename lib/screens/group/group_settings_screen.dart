@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:provider/provider.dart';
 import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
+import '../../services/group_service.dart';
 import '../../services/matrix_service.dart';
 import '../../services/room_controls_service.dart';
 import '../../widgets/story/story_avatar.dart';
@@ -337,6 +338,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
   }
 
   Future<void> _saveSettings() async {
+    final groupService = GroupService(context.read<MatrixProvider>().service);
     setState(() => _loading = true);
     try {
       // Update group name
@@ -350,19 +352,16 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
       }
 
       if (_removeAvatar) {
-        await widget.room.client.setRoomStateWithKey(
+        await groupService.updateGroupAvatar(
           widget.room.id,
-          'm.room.avatar',
-          '',
-          <String, dynamic>{},
+          removeAvatar: true,
         );
       } else if (_selectedAvatarBytes != null) {
-        final matrixFile = MatrixFile(
-          bytes: _selectedAvatarBytes!,
-          name: _selectedAvatarName ?? 'avatar.jpg',
-          mimeType: _imageContentTypeForName(_selectedAvatarName),
+        await groupService.updateGroupAvatar(
+          widget.room.id,
+          avatarBytes: _selectedAvatarBytes!,
+          avatarFileName: _selectedAvatarName ?? 'avatar.jpg',
         );
-        await widget.room.setAvatar(matrixFile);
       }
 
       final immutableJoinMode =
@@ -414,14 +413,6 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-  }
-
-  String _imageContentTypeForName(String? fileName) {
-    final lower = fileName?.toLowerCase() ?? '';
-    if (lower.endsWith('.png')) return 'image/png';
-    if (lower.endsWith('.webp')) return 'image/webp';
-    if (lower.endsWith('.gif')) return 'image/gif';
-    return 'image/jpeg';
   }
 
   Widget _buildAvatarPreview() {

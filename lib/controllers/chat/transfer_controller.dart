@@ -51,7 +51,8 @@ class ChatTransferSnapshot {
 class ChatTransferController extends ChangeNotifier {
   final Map<String, ChatTransferSnapshot> _transfers = {};
 
-  List<ChatTransferSnapshot> get transfers => List.unmodifiable(_transfers.values);
+  List<ChatTransferSnapshot> get transfers =>
+      List.unmodifiable(_transfers.values);
 
   ChatTransferSnapshot? byId(String id) => _transfers[id];
 

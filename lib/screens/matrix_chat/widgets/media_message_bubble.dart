@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import '../../../theme.dart';
 import 'image_content.dart';
+import 'message_reply_context.dart';
 import 'video_content.dart';
 
 /// Media message bubble (images and videos) with overlay timestamp
@@ -22,6 +23,7 @@ class MediaMessageBubble extends StatelessWidget {
   final VoidCallback? onForward;
   final VoidCallback? onPin;
   final VoidCallback? onDelete;
+  final ValueChanged<String>? onReplyTap;
   final bool isPinned;
   final void Function(Uint8List, String, Event) openFullscreenImage;
   final Widget Function(Event) buildMessageStatus;
@@ -43,6 +45,7 @@ class MediaMessageBubble extends StatelessWidget {
     this.onForward,
     this.onPin,
     this.onDelete,
+    this.onReplyTap,
     this.isPinned = false,
     required this.openFullscreenImage,
     required this.buildMessageStatus,
@@ -73,6 +76,14 @@ class MediaMessageBubble extends StatelessWidget {
               ),
             ),
           ),
+        MessageReplyContext(
+          event: event,
+          isMe: isMe,
+          loadImageBytes: loadImageBytes,
+          loadVideoThumbnail: loadVideoThumbnail,
+          onTap: onReplyTap,
+        ),
+        if (hasMatrixReply(event)) const SizedBox(height: 4),
         Stack(
           children: [
             if (isImage)

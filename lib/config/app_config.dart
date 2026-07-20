@@ -19,6 +19,27 @@ class AppConfig {
     defaultValue: 'https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp',
   );
 
+  static const reportServerUrl = String.fromEnvironment(
+    'XMO_REPORT_SERVER_URL',
+    defaultValue: 'https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp',
+  );
+
+  static const accountDeletionServerUrl = String.fromEnvironment(
+    'XMO_ACCOUNT_DELETION_SERVER_URL',
+    defaultValue: 'https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp',
+  );
+
+  static const channelAnalyticsServerUrl = String.fromEnvironment(
+    'XMO_CHANNEL_ANALYTICS_SERVER_URL',
+    defaultValue: 'https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp',
+  );
+
+  static const accountDeletionWebUrl = String.fromEnvironment(
+    'XMO_ACCOUNT_DELETION_WEB_URL',
+    defaultValue:
+        'https://xmo-matrix.centralindia.cloudapp.azure.com/account-deletion',
+  );
+
   static const walletAuthServerUrl = String.fromEnvironment(
     'XMO_WALLET_AUTH_SERVER_URL',
     defaultValue:
@@ -33,6 +54,11 @@ class AppConfig {
   static const requireEmailOtp = bool.fromEnvironment(
     'XMO_REQUIRE_EMAIL_OTP',
     defaultValue: true,
+  );
+
+  static const enableLegacyPhonePasswordAuth = bool.fromEnvironment(
+    'XMO_ENABLE_LEGACY_PHONE_PASSWORD_AUTH',
+    defaultValue: false,
   );
 
   static const reownProjectId = String.fromEnvironment(

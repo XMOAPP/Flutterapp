@@ -70,6 +70,7 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
 
       final controller = VideoPlayerController.file(
         tempFile,
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
         viewType: _preferredVideoViewType,
       );
       await controller.initialize();

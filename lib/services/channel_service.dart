@@ -3,13 +3,17 @@ import 'package:matrix/matrix.dart';
 import '../models/channel_models.dart';
 import 'matrix_service.dart';
 import 'room_controls_service.dart';
+import 'channel_analytics_service.dart';
 
 /// Service for managing channel-specific features
 /// Channels are broadcast-only rooms where only admins can post
 class ChannelService {
   final MatrixService _matrixService;
+  late final ChannelAnalyticsService _analyticsService;
 
-  ChannelService(this._matrixService);
+  ChannelService(this._matrixService) {
+    _analyticsService = ChannelAnalyticsService(_matrixService.client);
+  }
 
   Client get _client => _matrixService.client;
 
@@ -249,12 +253,23 @@ class ChannelService {
     final postsLast7days =
         posts.where((e) => e.originServerTs.isAfter(last7days)).length;
 
+    var averageViews = 0;
+    try {
+      final analytics = await _analyticsService.getStatistics(
+        roomId,
+        eventIds: posts.map((post) => post.eventId),
+      );
+      averageViews = analytics.averageViews.round();
+    } catch (error) {
+      debugPrint('[ChannelService] Analytics unavailable: $error');
+    }
+
     return ChannelStatistics(
       totalSubscribers: subscriberCount,
       totalPosts: posts.length,
       postsLast24h: postsLast24h,
       postsLast7days: postsLast7days,
-      averageViews: 0, // Would need custom tracking
+      averageViews: averageViews,
       createdAt: DateTime.fromMillisecondsSinceEpoch(
         room
                 .getState(EventTypes.RoomCreate)
@@ -274,11 +289,20 @@ class ChannelService {
     final event = await room.getEventById(eventId);
     if (event == null) return null;
 
-    // Note: Views and forwards would need custom tracking
+    var analytics = const ChannelPostAnalytics(views: 0, forwards: 0);
+    try {
+      analytics = (await _analyticsService.getStatistics(
+        roomId,
+        eventIds: [eventId],
+      ))
+          .analyticsFor(eventId);
+    } catch (error) {
+      debugPrint('[ChannelService] Post analytics unavailable: $error');
+    }
     return PostStatistics(
       eventId: eventId,
-      views: 0, // Would need custom tracking
-      forwards: 0, // Would need custom tracking
+      views: analytics.views,
+      forwards: analytics.forwards,
       postedAt: event.originServerTs,
       postedBy: event.senderId,
     );

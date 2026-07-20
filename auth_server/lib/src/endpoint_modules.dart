@@ -102,6 +102,81 @@ class UserDirectoryEndpointModule {
       path == '/auth/otp/users/search';
 }
 
+class ReportEndpointModule {
+  const ReportEndpointModule({
+    required this.submit,
+    required this.list,
+    required this.update,
+  });
+
+  final EndpointHandler submit;
+  final EndpointHandler list;
+  final EndpointHandler update;
+
+  bool handlesSubmit(String path) =>
+      path == '/reports/submit' ||
+      path == '/auth/reports/submit' ||
+      path == '/auth/otp/reports/submit';
+
+  bool handlesList(String path) =>
+      path == '/reports/review/list' ||
+      path == '/auth/reports/review/list' ||
+      path == '/auth/otp/reports/review/list';
+
+  bool handlesUpdate(String path) =>
+      path == '/reports/review/update' ||
+      path == '/auth/reports/review/update' ||
+      path == '/auth/otp/reports/review/update';
+}
+
+class AccountDeletionEndpointModule {
+  const AccountDeletionEndpointModule({
+    required this.deleteData,
+    required this.requestExternal,
+    required this.confirmExternal,
+  });
+
+  final EndpointHandler deleteData;
+  final EndpointHandler requestExternal;
+  final EndpointHandler confirmExternal;
+
+  bool handlesDeleteData(String path) =>
+      path == '/account/delete-data' ||
+      path == '/auth/account/delete-data' ||
+      path == '/auth/otp/account/delete-data';
+
+  bool handlesExternalRequest(String path) =>
+      path == '/account-deletion/request';
+
+  bool handlesExternalConfirm(String path) =>
+      path == '/account-deletion/confirm';
+}
+
+class ChannelAnalyticsEndpointModule {
+  const ChannelAnalyticsEndpointModule({
+    required this.view,
+    required this.forward,
+    required this.stats,
+  });
+
+  final EndpointHandler view;
+  final EndpointHandler forward;
+  final EndpointHandler stats;
+
+  bool handlesView(String path) =>
+      path == '/channel/analytics/view' ||
+      path == '/auth/channel/analytics/view' ||
+      path == '/auth/otp/channel/analytics/view';
+  bool handlesForward(String path) =>
+      path == '/channel/analytics/forward' ||
+      path == '/auth/channel/analytics/forward' ||
+      path == '/auth/otp/channel/analytics/forward';
+  bool handlesStats(String path) =>
+      path == '/channel/analytics/stats' ||
+      path == '/auth/channel/analytics/stats' ||
+      path == '/auth/otp/channel/analytics/stats';
+}
+
 class PushGatewayEndpointModule {
   const PushGatewayEndpointModule(this.forward);
   final EndpointHandler forward;

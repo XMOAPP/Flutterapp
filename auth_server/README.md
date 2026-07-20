@@ -14,6 +14,11 @@ push notification forwarding to Firebase Cloud Messaging.
 - `POST /wallet/verify` or `POST /auth/wallet/verify`
 - `POST /users/upsert`, `POST /auth/users/upsert`, or `POST /auth/otp/users/upsert`
 - `POST /users/search`, `POST /auth/users/search`, or `POST /auth/otp/users/search`
+- `POST /reports/submit`, `POST /auth/reports/submit`, or `POST /auth/otp/reports/submit`
+- `POST /reports/review/list` and `POST /reports/review/update` (with the same `/auth` aliases)
+- `POST /account/delete-data` (authenticated XMO-owned data cleanup)
+- `GET /account-deletion` (external account deletion page)
+- `POST /account-deletion/request` and `POST /account-deletion/confirm`
 - `POST /_matrix/push/v1/notify` for Matrix push gateway delivery
 - `POST /push` or `POST /auth/otp/push` for manual/internal tests only
 
@@ -36,8 +41,14 @@ XMO_HOMESERVER_URL=http://synapse:8008
 XMO_MATRIX_SERVER_NAME=xmo-matrix.centralindia.cloudapp.azure.com
 XMO_SYNAPSE_ADMIN_TOKEN=your-synapse-admin-access-token
 XMO_AUTH_DATA_FILE=/app/data/auth_data.json
+# Optional; defaults beside XMO_AUTH_DATA_FILE as reports.json:
+XMO_REPORT_DATA_FILE=/app/data/reports.json
 # Optional; defaults beside XMO_AUTH_DATA_FILE as user_directory.json:
 XMO_USER_DIRECTORY_DATA_FILE=/app/data/user_directory.json
+# Recommended in production; generate independently from other secrets:
+XMO_CHANNEL_ANALYTICS_SECRET=your-random-32-byte-or-longer-analytics-secret
+# Optional; defaults beside XMO_AUTH_DATA_FILE:
+XMO_CHANNEL_ANALYTICS_DATA_FILE=/app/data/channel_analytics.json
 XMO_FIREBASE_SERVICE_ACCOUNT_FILE=/run/secrets/firebase-service-account.json
 # Or use one of these instead of the file path:
 # XMO_FIREBASE_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'
@@ -67,6 +78,36 @@ User directory search stores only users who publish XMO account visibility from
 the app. `/users/upsert` requires the user's Matrix access token and verifies it
 with `/account/whoami` before updating the record. `/users/search` is intended
 for exact `@username` lookup and only returns records marked public.
+
+Reports are authenticated with the reporting user's Matrix access token. The
+report store contains target identifiers, a reason code, optional user-entered
+details, and review state; it does not copy decrypted message bodies or media.
+Message reports are also forwarded to Matrix's standard event-report endpoint.
+Room moderators with power level 50 or higher can review group and channel
+reports for their room. A Synapse server admin can review the global queue,
+including direct-chat and user reports. Global review uses
+`XMO_SYNAPSE_ADMIN_TOKEN` only inside this backend; never expose that token to
+Flutter.
+
+Account deletion has two supported paths. The app calls
+`/account/delete-data` with the current Matrix access token before using the
+Matrix account-deactivation API. The external `/account-deletion` page verifies
+the account's linked recovery email with a short-lived code, then uses the
+backend-only Synapse admin deactivation endpoint with `erase: true`. Both paths
+remove the XMO directory entry, linked recovery email, pending OTP/reset and
+wallet challenges, reports associated with the user, and media uploaded to the
+local Synapse media repository. Matrix events and media already delivered to
+other users, federated servers, or external media repositories cannot be
+guaranteed deleted.
+
+The reverse proxy must expose the external page without exposing the Synapse
+Admin API:
+
+```caddy
+handle /account-deletion* {
+    reverse_proxy xmo-auth:3000
+}
+```
 
 Donation checkout creation is server-side only because Thirdweb requires a
 secret key for `/v1/bridge/payments`. Do not put the Thirdweb secret key in the

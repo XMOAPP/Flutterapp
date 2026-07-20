@@ -7,13 +7,14 @@ import 'package:matrix/matrix.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../theme.dart';
 import '../../../models/group_models.dart';
+import '../../../models/xmo_contact_card.dart';
 import '../../../providers/matrix_provider.dart';
 import '../../../providers/story_provider.dart';
 import '../../../services/matrix_media_helper.dart';
-import '../../../services/matrix_service.dart';
 import '../../story/story_viewer_screen.dart';
 import '../media_handler.dart';
 import 'audio_message_bubble.dart';
+import 'message_reply_context.dart';
 import 'tappable_file_chip.dart';
 import 'package:provider/provider.dart';
 
@@ -74,16 +75,34 @@ class TextOrFileMessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final contact = XmoContactCard.fromEventContent(event.content);
     final storyReply = _storyReplyContent(event);
     final displayBody = _storyReplyDisplayBody(
       _stripReplyFallback(event.body),
       storyReply,
     );
+    final hasReply = hasMatrixReply(event);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final audioBubbleWidth = math.min(
+      330.0,
+      math.max(160.0, screenWidth * 0.78),
+    );
+    final fileBubbleWidth = math.min(
+      238.0,
+      math.max(180.0, screenWidth * 0.66),
+    );
+    final replyContextWidth = isAudio
+        ? audioBubbleWidth
+        : isFile
+            ? fileBubbleWidth
+            : null;
 
     return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: 14,
-        vertical: isAudio ? 3 : 10,
+      padding: EdgeInsets.fromLTRB(
+        14,
+        isAudio && !hasReply ? 3 : 10,
+        14,
+        isAudio ? 3 : 10,
       ),
       decoration: BoxDecoration(
         color: isMe ? const Color(0xFF1A2A1A) : const Color(0xFF2C2C2E),
@@ -109,6 +128,15 @@ class TextOrFileMessageBubble extends StatelessWidget {
                 ),
               ),
             ),
+          MessageReplyContext(
+            event: event,
+            isMe: isMe,
+            loadImageBytes: loadImageBytes,
+            loadVideoThumbnail: loadVideoThumbnail,
+            onTap: onReplyTap,
+            width: replyContextWidth,
+          ),
+          if (hasReply) const SizedBox(height: 6),
           // Audio message
           if (isAudio)
             Column(
@@ -169,12 +197,76 @@ class TextOrFileMessageBubble extends StatelessWidget {
               ],
             )
           // File message
+          else if (isFile && contact != null)
+            SizedBox(
+              width: fileBubbleWidth,
+              child: Stack(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2, right: 34),
+                    child: _ContactMessageCard(
+                      contact: contact,
+                      isMe: isMe,
+                      onTap: () {
+                        final open = openAttachmentExternally;
+                        if (open != null) {
+                          open(event);
+                        } else {
+                          downloadAndOpenFile(event);
+                        }
+                      },
+                    ),
+                  ),
+                  Positioned(
+                    top: -2,
+                    right: -8,
+                    child: _FileMessageMenu(
+                      isMe: isMe,
+                      onDownload: () => downloadAndOpenFile(event),
+                      onShare: shareAttachment == null
+                          ? null
+                          : () => shareAttachment!(event),
+                      onOpenWith: openAttachmentExternally == null
+                          ? null
+                          : () => openAttachmentExternally!(event),
+                      onReply: onReply,
+                      onForward: onForward,
+                      onPin: onPin,
+                      onDelete: onDelete,
+                      isPinned: isPinned,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 66),
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            time,
+                            style: GoogleFonts.inter(
+                              color: isMe
+                                  ? kLimeGreen.withValues(alpha: 0.6)
+                                  : kLightGrey,
+                              fontSize: 10,
+                            ),
+                          ),
+                          if (isMe) ...[
+                            const SizedBox(width: 4),
+                            buildMessageStatus(event),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          // File message
           else if (isFile)
             SizedBox(
-              width: math.min(
-                238.0,
-                math.max(180.0, MediaQuery.sizeOf(context).width * 0.66),
-              ),
+              width: fileBubbleWidth,
               child: Stack(
                 children: [
                   Padding(
@@ -264,13 +356,6 @@ class TextOrFileMessageBubble extends StatelessWidget {
                     storyReply: storyReply,
                     isMe: isMe,
                   ),
-                  _ReplyContextPreview(
-                    event: event,
-                    isMe: isMe,
-                    loadImageBytes: loadImageBytes,
-                    loadVideoThumbnail: loadVideoThumbnail,
-                    onReplyTap: onReplyTap,
-                  ),
                   _PrivateReplyContextPreview(
                     event: event,
                     isMe: isMe,
@@ -278,9 +363,7 @@ class TextOrFileMessageBubble extends StatelessWidget {
                     loadVideoThumbnail: loadVideoThumbnail,
                     onTap: onPrivateReplyTap,
                   ),
-                  if (storyReply != null ||
-                      _replyToEventId(event) != null ||
-                      _privateReplyContent(event) != null)
+                  if (storyReply != null || _privateReplyContent(event) != null)
                     const SizedBox(height: 6),
                   _MentionAwareText(
                     text: displayBody,
@@ -329,6 +412,79 @@ class TextOrFileMessageBubble extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _ContactMessageCard extends StatelessWidget {
+  final XmoContactCard contact;
+  final bool isMe;
+  final VoidCallback onTap;
+
+  const _ContactMessageCard({
+    required this.contact,
+    required this.isMe,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = isMe ? kLimeGreen : kWhite;
+    return Material(
+      color: isMe
+          ? kLimeGreen.withValues(alpha: 0.1)
+          : kWhite.withValues(alpha: 0.07),
+      borderRadius: BorderRadius.circular(10),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: foreground.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.person_outline, color: foreground, size: 25),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      contact.displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        color: foreground,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      contact.phoneNumber,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        color: isMe
+                            ? kLimeGreen.withValues(alpha: 0.68)
+                            : kLightGrey,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -447,17 +603,6 @@ class _FileMessageMenu extends StatelessWidget {
       ),
     );
   }
-}
-
-String? _replyToEventId(Event event) {
-  final relatesTo = event.content['m.relates_to'];
-  if (relatesTo is! Map) return null;
-
-  final inReplyTo = relatesTo['m.in_reply_to'];
-  if (inReplyTo is! Map) return null;
-
-  final eventId = inReplyTo['event_id'];
-  return eventId is String && eventId.isNotEmpty ? eventId : null;
 }
 
 String _stripReplyFallback(String body) {
@@ -1308,218 +1453,6 @@ class _StoryReplyThumbFallback extends StatelessWidget {
   Widget build(BuildContext context) {
     return Icon(
       storyReply.fallbackIcon,
-      color: isMe ? kLimeGreen : kLightGrey,
-      size: 20,
-    );
-  }
-}
-
-class _ReplyContextPreview extends StatelessWidget {
-  final Event event;
-  final bool isMe;
-  final Future<Uint8List?> Function(Event, {bool getThumbnail})? loadImageBytes;
-  final Future<Uint8List?> Function(Event)? loadVideoThumbnail;
-  final ValueChanged<String>? onReplyTap;
-
-  const _ReplyContextPreview({
-    required this.event,
-    required this.isMe,
-    required this.loadImageBytes,
-    required this.loadVideoThumbnail,
-    required this.onReplyTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final replyEventId = _replyToEventId(event);
-    if (replyEventId == null) return const SizedBox.shrink();
-
-    return FutureBuilder<Event?>(
-      future: _cachedReplyPreviewEvent(event.room, replyEventId),
-      builder: (context, snapshot) {
-        final replyEvent = snapshot.data;
-        final sender = replyEvent == null
-            ? 'Message'
-            : MatrixService.cleanName(replyEvent.senderId);
-        final preview = replyEvent == null
-            ? 'Original message'
-            : _replyPreviewText(replyEvent);
-
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => onReplyTap?.call(replyEventId),
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 230),
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: isMe
-                  ? const Color(0xFF29452B)
-                  : Colors.white.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 3,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: isMe ? kLimeGreen : const Color(0xFF72B7F2),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(width: 7),
-                _ReplyMediaThumb(
-                  event: replyEvent,
-                  isMe: isMe,
-                  loadImageBytes: loadImageBytes,
-                  loadVideoThumbnail: loadVideoThumbnail,
-                ),
-                if (_hasMediaThumb(replyEvent)) const SizedBox(width: 7),
-                Flexible(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        sender,
-                        style: GoogleFonts.inter(
-                          color: isMe ? kLimeGreen : const Color(0xFF72B7F2),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        preview,
-                        style: GoogleFonts.inter(
-                          color: isMe
-                              ? kLimeGreen.withValues(alpha: 0.72)
-                              : kLightGrey,
-                          fontSize: 12,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  String _replyPreviewText(Event event) {
-    switch (event.messageType) {
-      case MessageTypes.Image:
-        return 'Photo';
-      case MessageTypes.Video:
-        return 'Video';
-      case MessageTypes.Audio:
-        return 'Audio';
-      case MessageTypes.File:
-        return event.body.isEmpty ? 'File' : event.body;
-      default:
-        return _stripReplyFallback(event.body);
-    }
-  }
-}
-
-bool _hasMediaThumb(Event? event) {
-  return event != null &&
-      (event.messageType == MessageTypes.Image ||
-          event.messageType == MessageTypes.Video);
-}
-
-class _ReplyMediaThumb extends StatelessWidget {
-  final Event? event;
-  final bool isMe;
-  final Future<Uint8List?> Function(Event, {bool getThumbnail})? loadImageBytes;
-  final Future<Uint8List?> Function(Event)? loadVideoThumbnail;
-
-  const _ReplyMediaThumb({
-    required this.event,
-    required this.isMe,
-    required this.loadImageBytes,
-    required this.loadVideoThumbnail,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (!_hasMediaThumb(event)) return const SizedBox.shrink();
-
-    final isImage = event!.messageType == MessageTypes.Image;
-    final cachedBytes = _cachedReplyPreviewMediaBytes(event!, isImage);
-    final thumbFuture = cachedBytes != null
-        ? null
-        : _cachedReplyPreviewMediaFuture(
-            event!,
-            isImage,
-            loadImageBytes,
-            loadVideoThumbnail,
-          );
-
-    return Container(
-      width: 38,
-      height: 38,
-      decoration: BoxDecoration(
-        color: isMe ? const Color(0xFF1A2A1A) : kDarkGrey,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: FutureBuilder<Uint8List?>(
-        initialData: cachedBytes,
-        future: thumbFuture,
-        builder: (context, snapshot) {
-          final bytes = snapshot.data;
-          if (bytes != null && bytes.isNotEmpty) {
-            return Stack(
-              fit: StackFit.expand,
-              children: [
-                Image.memory(
-                  bytes,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) =>
-                      _ReplyThumbFallback(isImage: isImage, isMe: isMe),
-                ),
-                if (!isImage)
-                  Container(
-                    color: Colors.black.withValues(alpha: 0.18),
-                    child: const Icon(
-                      Icons.play_arrow_rounded,
-                      color: Colors.white,
-                      size: 20,
-                    ),
-                  ),
-              ],
-            );
-          }
-
-          return _ReplyThumbFallback(isImage: isImage, isMe: isMe);
-        },
-      ),
-    );
-  }
-}
-
-class _ReplyThumbFallback extends StatelessWidget {
-  final bool isImage;
-  final bool isMe;
-
-  const _ReplyThumbFallback({
-    required this.isImage,
-    required this.isMe,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Icon(
-      isImage ? Icons.image_outlined : Icons.play_arrow_rounded,
       color: isMe ? kLimeGreen : kLightGrey,
       size: 20,
     );

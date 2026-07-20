@@ -11,9 +11,7 @@ import '../services/matrix_service.dart';
 import '../services/privacy_service.dart';
 import 'home/new_chat_fab.dart';
 import 'home/category_filters.dart';
-import 'home/calls_view.dart';
 import 'home/chat_list.dart';
-import 'home/stories_view.dart';
 import 'home/xmo_drawer.dart';
 import 'home/matrix_room_tile.dart';
 import 'auth_choice_screen.dart';
@@ -312,19 +310,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Expanded(
             child: _isSearching && _searchController.text.isNotEmpty
                 ? _buildCombinedResults()
-                : Consumer<ChatFilterProvider>(
-                    builder: (context, filterProvider, _) {
-                      // Show Stories view when Stories tab is selected
-                      if (filterProvider.filter == ChatFilter.stories) {
-                        return const StoriesView();
-                      }
-                      if (filterProvider.filter == ChatFilter.calls) {
-                        return const CallsView();
-                      }
-                      // Show regular chat list for other tabs
-                      return const ChatList();
-                    },
-                  ),
+                : const ChatList(),
           ),
         ],
       ),

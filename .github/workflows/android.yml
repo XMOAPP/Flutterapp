@@ -5,54 +5,185 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_android_integration:
+        description: Run the deterministic Android emulator smoke test
+        required: false
+        type: boolean
+        default: false
+      build_release:
+        description: Build and retain the signed production AAB
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+concurrency:
+  group: xmo-android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.41.7
+  JAVA_VERSION: "17"
+  DART_DISABLE_ANALYTICS: "true"
+
 jobs:
   quality:
-    name: Format, analyze, and test
+    name: Flutter format, analyze, and test
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-      - run: flutter pub get
-      - run: dart format --set-exit-if-changed lib test integration_test
-      - run: flutter analyze lib test integration_test
-      - run: flutter test
+          cache: true
+      - name: Create log directory
+        run: mkdir -p build/quality-logs
+      - name: Resolve Flutter dependencies
+        run: bash tools/ci/run_with_timeout.sh 300 build/quality-logs/flutter-pub-get.log flutter pub get
+      - name: Check Flutter formatting
+        run: bash tools/ci/run_with_timeout.sh 180 build/quality-logs/flutter-format.log dart format --output=none --set-exit-if-changed lib test integration_test
+      - name: Analyze Flutter source
+        run: bash tools/ci/run_with_timeout.sh 420 build/quality-logs/flutter-analyze.log flutter analyze --no-pub
+      - name: Run Flutter tests
+        run: bash tools/ci/run_with_timeout.sh 600 build/quality-logs/flutter-test.log flutter test --no-pub --reporter expanded
+      - name: Redact retained logs
+        if: always()
+        run: bash tools/ci/redact_logs.sh build/quality-logs/*.log
+      - name: Upload Flutter quality logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-quality-logs
+          path: build/quality-logs
+          if-no-files-found: warn
+          retention-days: 14
 
   backend:
-    name: Auth server analyze
+    name: Auth server format, analyze, and test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-      - run: dart pub get
+          cache: true
+      - name: Create log directory
+        run: mkdir -p build/quality-logs
+      - name: Resolve auth server dependencies
         working-directory: auth_server
-      - run: dart format --set-exit-if-changed bin lib
+        run: bash ../tools/ci/run_with_timeout.sh 300 ../build/quality-logs/auth-pub-get.log dart pub get
+      - name: Check auth server formatting
         working-directory: auth_server
+        run: bash ../tools/ci/run_with_timeout.sh 180 ../build/quality-logs/auth-format.log dart format --output=none --set-exit-if-changed bin lib test
       - name: Analyze auth server
-        run: |
-          set -euo pipefail
-          DART_BIN="$(dirname "$(which flutter)")/cache/dart-sdk/bin/dart"
-          "$DART_BIN" analyze
         working-directory: auth_server
+        run: |
+          DART_BIN="$(dirname "$(which flutter)")/cache/dart-sdk/bin/dart"
+          bash ../tools/ci/run_with_timeout.sh 420 ../build/quality-logs/auth-analyze.log "$DART_BIN" analyze
+      - name: Test auth server
+        working-directory: auth_server
+        run: |
+          DART_BIN="$(dirname "$(which flutter)")/cache/dart-sdk/bin/dart"
+          bash ../tools/ci/run_with_timeout.sh 600 ../build/quality-logs/auth-test.log "$DART_BIN" test --reporter expanded
+      - name: Redact retained logs
+        if: always()
+        run: bash tools/ci/redact_logs.sh build/quality-logs/*.log
+      - name: Upload auth server quality logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-server-quality-logs
+          path: build/quality-logs
+          if-no-files-found: warn
+          retention-days: 14
+
+  android-integration:
+    name: Android emulator smoke
+    needs: [quality, backend]
+    if: github.event_name == 'workflow_dispatch' && inputs.run_android_integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Create log directory
+        run: mkdir -p build/quality-logs
+      - name: Resolve Flutter dependencies
+        run: bash tools/ci/run_with_timeout.sh 300 build/quality-logs/integration-pub-get.log flutter pub get
+      - name: Enable Android emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Create and start emulator
+        run: |
+          bash tools/ci/run_with_timeout.sh 600 build/quality-logs/emulator-setup.log sdkmanager "platform-tools" "platforms;android-35" "system-images;android-35;google_apis;x86_64" "emulator"
+          echo no | avdmanager create avd --force --name xmo_ci --package "system-images;android-35;google_apis;x86_64"
+          nohup emulator -avd xmo_ci -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect > build/quality-logs/emulator.log 2>&1 &
+          bash tools/ci/run_with_timeout.sh 600 build/quality-logs/emulator-boot.log adb wait-for-device
+          timeout 600 bash -c 'until [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" == "1" ]]; do sleep 5; done'
+          adb shell input keyevent 82
+      - name: Run deterministic Android smoke test
+        run: >-
+          bash tools/ci/run_with_timeout.sh 900 build/quality-logs/android-smoke.log
+          flutter test integration_test/chat_input_smoke_test.dart -d emulator-5554
+          --dart-define=XMO_HOMESERVER_URL=https://xmo-matrix.centralindia.cloudapp.azure.com
+          --dart-define=XMO_MATRIX_SERVER_NAME=xmo-matrix.centralindia.cloudapp.azure.com
+      - name: Redact retained logs
+        if: always()
+        run: bash tools/ci/redact_logs.sh build/quality-logs/*.log
+      - name: Stop emulator
+        if: always()
+        run: adb emu kill || true
+      - name: Upload Android smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-integration-logs
+          path: build/quality-logs
+          if-no-files-found: warn
+          retention-days: 14
 
   release-bundle:
-    name: Signed release app bundle
+    name: Signed production app bundle
     needs: [quality, backend]
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.build_release
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-      - run: flutter pub get
+          cache: true
+      - name: Create log directory
+        run: mkdir -p build/quality-logs
+      - name: Resolve Flutter dependencies
+        run: bash tools/ci/run_with_timeout.sh 300 build/quality-logs/release-pub-get.log flutter pub get
       - name: Configure signing key
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -76,14 +207,50 @@ jobs:
         env:
           XMO_HOMESERVER_URL: ${{ vars.XMO_HOMESERVER_URL }}
           XMO_MATRIX_SERVER_NAME: ${{ vars.XMO_MATRIX_SERVER_NAME }}
+          XMO_WALLET_AUTH_SERVER_URL: ${{ vars.XMO_WALLET_AUTH_SERVER_URL }}
+          XMO_STREAM_CHUNK_STORAGE: ${{ vars.XMO_STREAM_CHUNK_STORAGE }}
+          XMO_AZURE_CHUNK_SIGN_URL: ${{ vars.XMO_AZURE_CHUNK_SIGN_URL }}
+          XMO_ACCOUNT_DELETION_SERVER_URL: ${{ vars.XMO_ACCOUNT_DELETION_SERVER_URL }}
+          XMO_ACCOUNT_DELETION_WEB_URL: ${{ vars.XMO_ACCOUNT_DELETION_WEB_URL }}
         run: |
           set -euo pipefail
-          test -n "$XMO_HOMESERVER_URL"
-          test -n "$XMO_MATRIX_SERVER_NAME"
-          flutter build appbundle --release \
+          for variable in \
+            XMO_HOMESERVER_URL \
+            XMO_MATRIX_SERVER_NAME \
+            XMO_WALLET_AUTH_SERVER_URL \
+            XMO_STREAM_CHUNK_STORAGE \
+            XMO_AZURE_CHUNK_SIGN_URL \
+            XMO_ACCOUNT_DELETION_SERVER_URL \
+            XMO_ACCOUNT_DELETION_WEB_URL; do
+            test -n "${!variable}"
+          done
+          bash tools/ci/run_with_timeout.sh 1800 build/quality-logs/release-build.log \
+            flutter build appbundle --release \
             --dart-define=XMO_HOMESERVER_URL="$XMO_HOMESERVER_URL" \
-            --dart-define=XMO_MATRIX_SERVER_NAME="$XMO_MATRIX_SERVER_NAME"
-      - uses: actions/upload-artifact@v4
+            --dart-define=XMO_MATRIX_SERVER_NAME="$XMO_MATRIX_SERVER_NAME" \
+            --dart-define=XMO_WALLET_AUTH_SERVER_URL="$XMO_WALLET_AUTH_SERVER_URL" \
+            --dart-define=XMO_STREAM_CHUNK_STORAGE="$XMO_STREAM_CHUNK_STORAGE" \
+            --dart-define=XMO_AZURE_CHUNK_SIGN_URL="$XMO_AZURE_CHUNK_SIGN_URL" \
+            --dart-define=XMO_ACCOUNT_DELETION_SERVER_URL="$XMO_ACCOUNT_DELETION_SERVER_URL" \
+            --dart-define=XMO_ACCOUNT_DELETION_WEB_URL="$XMO_ACCOUNT_DELETION_WEB_URL"
+      - name: Redact retained logs
+        if: always()
+        run: bash tools/ci/redact_logs.sh build/quality-logs/*.log
+      - name: Remove signing material
+        if: always()
+        run: rm -f android/upload-keystore.jks android/key.properties
+      - name: Upload release logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-build-logs
+          path: build/quality-logs
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload release bundle
+        uses: actions/upload-artifact@v4
         with:
           name: xmo-release-aab
           path: build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 30

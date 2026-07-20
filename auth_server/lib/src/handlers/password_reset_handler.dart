@@ -230,6 +230,13 @@ Future<void> _rememberPasswordResetEmail({
   if (_passwordResetConfig.dataFile.isEmpty) return;
   final entries = await _readRememberedPasswordResetEmails();
   entries[username] = email;
+  await _writeRememberedPasswordResetEmails(entries);
+}
+
+Future<void> _writeRememberedPasswordResetEmails(
+  Map<String, String> entries,
+) async {
+  if (_passwordResetConfig.dataFile.isEmpty) return;
   final file = File(_passwordResetConfig.dataFile);
   await file.parent.create(recursive: true);
   await file.writeAsString(jsonEncode(entries));
@@ -295,10 +302,14 @@ Future<void> _synapseResetPassword(String userId, String newPassword) async {
 Future<_SynapseResponse> _synapseRequest({
   required String method,
   required List<String> pathSegments,
+  Map<String, String>? queryParameters,
   Map<String, dynamic>? body,
 }) async {
   final base = Uri.parse(_passwordResetConfig.homeserverUrl);
-  final uri = base.replace(pathSegments: pathSegments);
+  final uri = base.replace(
+    pathSegments: pathSegments,
+    queryParameters: queryParameters,
+  );
   final client = HttpClient();
   client.connectionTimeout = const Duration(seconds: 10);
   try {

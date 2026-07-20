@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -34,12 +35,12 @@ class XmoLocalPlaybackHandle {
 }
 
 class LocalPlaybackProxyService {
-  LocalPlaybackProxyService();
-
-  static int _nextToken = 0;
+  LocalPlaybackProxyService({Random? random})
+      : _random = random ?? Random.secure();
 
   final Map<String, XmoStreamingMediaSession> _sessions =
       <String, XmoStreamingMediaSession>{};
+  final Random _random;
 
   HttpServer? _server;
 
@@ -97,15 +98,25 @@ class LocalPlaybackProxyService {
   }
 
   String _registerSession(XmoStreamingMediaSession session) {
-    final token = '${DateTime.now().microsecondsSinceEpoch}_${_nextToken++}';
+    final token = _newToken();
     _sessions[token] = session;
     return token;
+  }
+
+  String _newToken() {
+    final bytes = List<int>.generate(32, (_) => _random.nextInt(256));
+    return base64Url.encode(bytes).replaceAll('=', '');
   }
 
   Future<void> _handleRequest(HttpRequest request) async {
     try {
       if (request.method != 'GET' && request.method != 'HEAD') {
+        request.response.headers.set(HttpHeaders.allowHeader, 'GET, HEAD');
         await _sendEmpty(request, HttpStatus.methodNotAllowed);
+        return;
+      }
+      if (!_isAllowedHost(request)) {
+        await _sendEmpty(request, HttpStatus.forbidden);
         return;
       }
 
@@ -115,7 +126,13 @@ class LocalPlaybackProxyService {
         return;
       }
 
-      final session = _sessions[segments[1]];
+      final token = segments[1];
+      if (!_isValidToken(token)) {
+        await _sendEmpty(request, HttpStatus.notFound);
+        return;
+      }
+
+      final session = _sessions[token];
       if (session == null) {
         await _sendEmpty(request, HttpStatus.notFound);
         return;
@@ -156,6 +173,7 @@ class LocalPlaybackProxyService {
     response.statusCode = isPartial ? HttpStatus.partialContent : HttpStatus.ok;
     response.headers
       ..set(HttpHeaders.acceptRangesHeader, 'bytes')
+      ..set(HttpHeaders.cacheControlHeader, 'no-store')
       ..set(HttpHeaders.contentTypeHeader, session.mimeType)
       ..set(HttpHeaders.contentLengthHeader, range.length);
     if (isPartial) {
@@ -254,13 +272,40 @@ class LocalPlaybackProxyService {
     response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
     response.headers
       ..set(HttpHeaders.acceptRangesHeader, 'bytes')
+      ..set(HttpHeaders.cacheControlHeader, 'no-store')
       ..set(HttpHeaders.contentRangeHeader, 'bytes */$totalSize');
     await response.close();
   }
 
   Future<void> _sendEmpty(HttpRequest request, int statusCode) async {
     request.response.statusCode = statusCode;
+    request.response.headers.set(HttpHeaders.cacheControlHeader, 'no-store');
     await request.response.close();
+  }
+
+  bool _isAllowedHost(HttpRequest request) {
+    final hostHeader = request.headers.value(HttpHeaders.hostHeader);
+    if (hostHeader == null || hostHeader.trim().isEmpty) return false;
+    final host = _hostWithoutPort(hostHeader.trim()).toLowerCase();
+    return host == InternetAddress.loopbackIPv4.address ||
+        host == 'localhost' ||
+        host == InternetAddress.loopbackIPv6.address;
+  }
+
+  String _hostWithoutPort(String value) {
+    if (value.startsWith('[')) {
+      final end = value.indexOf(']');
+      return end > 0 ? value.substring(1, end) : value;
+    }
+    final colonCount = ':'.allMatches(value).length;
+    if (colonCount == 1) return value.substring(0, value.indexOf(':'));
+    return value;
+  }
+
+  bool _isValidToken(String value) {
+    return value.length >= 32 &&
+        value.length <= 64 &&
+        RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(value);
   }
 }
 

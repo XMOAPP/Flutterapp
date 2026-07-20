@@ -6,6 +6,9 @@ Map<String, dynamic> buildHealthStatus({
   required bool pushConfigured,
   required bool azureBlobConfigured,
   required bool userDirectoryConfigured,
+  required bool reportsConfigured,
+  required bool accountDeletionConfigured,
+  required bool channelAnalyticsConfigured,
 }) =>
     {
       'ok': true,
@@ -18,5 +21,10 @@ Map<String, dynamic> buildHealthStatus({
         'push': pushConfigured ? 'ready' : 'not_configured',
         'azureBlob': azureBlobConfigured ? 'ready' : 'not_configured',
         'userDirectory': userDirectoryConfigured ? 'ready' : 'not_configured',
+        'reports': reportsConfigured ? 'ready' : 'not_configured',
+        'accountDeletion':
+            accountDeletionConfigured ? 'ready' : 'not_configured',
+        'channelAnalytics':
+            channelAnalyticsConfigured ? 'ready' : 'not_configured',
       },
     };

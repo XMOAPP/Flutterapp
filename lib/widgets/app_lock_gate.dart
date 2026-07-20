@@ -275,8 +275,8 @@ class _AppLockScreenState extends State<_AppLockScreen> {
             height: 136,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: kLimeGreen.withOpacity(0.05),
-              border: Border.all(color: kLimeGreen.withOpacity(0.16)),
+              color: kLimeGreen.withValues(alpha: 0.05),
+              border: Border.all(color: kLimeGreen.withValues(alpha: 0.16)),
             ),
           ),
           Container(
@@ -285,7 +285,7 @@ class _AppLockScreenState extends State<_AppLockScreen> {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: const Color(0xFF101710),
-              border: Border.all(color: kLimeGreen.withOpacity(0.38)),
+              border: Border.all(color: kLimeGreen.withValues(alpha: 0.38)),
             ),
           ),
           const Icon(Icons.lock_outline, color: kLimeGreen, size: 54),

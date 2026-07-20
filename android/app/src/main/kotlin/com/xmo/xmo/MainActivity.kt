@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.provider.Settings
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -86,11 +87,20 @@ class MainActivity : FlutterFragmentActivity() {
 
         MethodChannel(messenger, callNotificationMethodsChannel)
             .setMethodCallHandler { call, result ->
-                if (call.method == "initialCallAction") {
-                    result.success(initialCallAction)
-                    initialCallAction = null
-                } else {
-                    result.notImplemented()
+                when (call.method) {
+                    "initialCallAction" -> {
+                        result.success(initialCallAction)
+                        initialCallAction = null
+                    }
+                    "canUseFullScreenIntent" -> {
+                        result.success(
+                            XmoCallNotificationHelper.canUseFullScreenIntent(applicationContext),
+                        )
+                    }
+                    "openFullScreenIntentSettings" -> {
+                        result.success(openFullScreenIntentSettings())
+                    }
+                    else -> result.notImplemented()
                 }
             }
 
@@ -222,6 +232,7 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun notificationPayloadFromIntent(intent: Intent?): Map<String, String>? {
         val extras = intent?.extras ?: return null
         val roomId = extras.getString("room_id") ?: extras.getString("roomId")
@@ -306,7 +317,7 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     private fun shareFile(filePath: String, fileName: String, mimeType: String) {
-        val file = File(filePath)
+        val file = validatedSharedFile(filePath)
         if (!file.exists() || file.length() == 0L) {
             throw IllegalArgumentException("Share file is missing or empty")
         }
@@ -332,7 +343,7 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     private fun openFile(filePath: String, fileName: String, mimeType: String) {
-        val file = File(filePath)
+        val file = validatedSharedFile(filePath)
         if (!file.exists() || file.length() == 0L) {
             throw IllegalArgumentException("Open file is missing or empty")
         }
@@ -353,5 +364,30 @@ class MainActivity : FlutterFragmentActivity() {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         startActivity(chooser)
+    }
+
+    private fun validatedSharedFile(filePath: String): File {
+        val shareRoot = File(cacheDir, "xmo_shared").canonicalFile
+        val file = File(filePath).canonicalFile
+        val rootPath = shareRoot.path + File.separator
+        if (!file.path.startsWith(rootPath)) {
+            throw SecurityException("File is outside the XMO sharing directory")
+        }
+        return file
+    }
+
+    private fun openFullScreenIntentSettings(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            return false
+        }
+        val intent = Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+            data = Uri.parse("package:$packageName")
+        }
+        return try {
+            startActivity(intent)
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 }

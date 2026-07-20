@@ -33,6 +33,9 @@ class MediaRepository {
     required String fileName,
     required String mimeType,
     String caption = '',
+    Uint8List? thumbnailBytes,
+    int? thumbnailWidth,
+    int? thumbnailHeight,
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
   }) =>
@@ -42,6 +45,9 @@ class MediaRepository {
         fileName: fileName,
         mimeType: mimeType,
         caption: caption,
+        thumbnailBytes: thumbnailBytes,
+        thumbnailWidth: thumbnailWidth,
+        thumbnailHeight: thumbnailHeight,
         onUploadProgress: onUploadProgress,
         isCancelled: isCancelled,
       );

@@ -204,6 +204,36 @@ class PushNotificationService {
     });
   }
 
+  Future<bool> canUseFullScreenCallAlerts() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return true;
+    try {
+      return await _nativeCallMethods.invokeMethod<bool>(
+            'canUseFullScreenIntent',
+          ) ??
+          false;
+    } on PlatformException catch (e) {
+      debugPrint(
+        '[PushNotificationService] Full-screen call status failed: ${e.code}',
+      );
+      return false;
+    }
+  }
+
+  Future<bool> openFullScreenCallAlertSettings() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return false;
+    try {
+      return await _nativeCallMethods.invokeMethod<bool>(
+            'openFullScreenIntentSettings',
+          ) ??
+          false;
+    } on PlatformException catch (e) {
+      debugPrint(
+        '[PushNotificationService] Could not open call alert settings: ${e.code}',
+      );
+      return false;
+    }
+  }
+
   Future<void> _handleNativeCallAction(Map<dynamic, dynamic> payload) async {
     final normalized = payload.map(
       (key, value) => MapEntry(key.toString(), value?.toString() ?? ''),
@@ -587,6 +617,9 @@ class PushNotificationService {
         previewLabel.isNotEmpty &&
         previewKind != null &&
         previewKind.isNotEmpty) {
+      if (previewKind.toLowerCase() == 'encrypted') {
+        return 'New message';
+      }
       final genericRoomUpdate = previewKind.toLowerCase() == 'room' &&
           previewLabel.toLowerCase() == 'room updated';
       if (!genericRoomUpdate) {
@@ -603,7 +636,9 @@ class PushNotificationService {
         (message.data['msgtype'] ?? message.data['message_type'] ?? '')
             .toString()
             .toLowerCase();
-    if (eventType.contains('encrypted')) return '🔒 New encrypted message';
+    if (eventType.contains('encrypted')) {
+      return 'New message';
+    }
     if (msgType.contains('image')) return '🖼️ Photo';
     if (msgType.contains('video')) return '▶ Video';
     if (msgType.contains('audio')) {
@@ -695,15 +730,24 @@ class PushNotificationService {
   }
 
   int _notificationId(RemoteMessage message) {
-    final seed = message.messageId ??
-        message.data['event_id']?.toString() ??
-        message.data['eventId']?.toString() ??
-        message.data['call_id']?.toString() ??
-        message.data['callId']?.toString() ??
-        message.data['group_call_id']?.toString() ??
-        message.data['groupCallId']?.toString() ??
-        message.sentTime?.millisecondsSinceEpoch.toString() ??
-        DateTime.now().millisecondsSinceEpoch.toString();
+    final isCall = _looksLikeCall(message);
+    final seed = isCall
+        ? message.data['call_id']?.toString() ??
+            message.data['callId']?.toString() ??
+            message.data['group_call_id']?.toString() ??
+            message.data['groupCallId']?.toString() ??
+            message.data['event_id']?.toString() ??
+            message.data['eventId']?.toString() ??
+            message.messageId ??
+            message.sentTime?.millisecondsSinceEpoch.toString() ??
+            DateTime.now().millisecondsSinceEpoch.toString()
+        : message.messageId ??
+            message.data['event_id']?.toString() ??
+            message.data['eventId']?.toString() ??
+            message.data['room_id']?.toString() ??
+            message.data['roomId']?.toString() ??
+            message.sentTime?.millisecondsSinceEpoch.toString() ??
+            DateTime.now().millisecondsSinceEpoch.toString();
     return seed.hashCode & 0x7fffffff;
   }
 

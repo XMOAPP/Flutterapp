@@ -14,6 +14,7 @@ import '../../services/group_service.dart';
 import '../../services/matrix_service.dart';
 import '../../widgets/story/story_avatar.dart';
 import '../app_settings_screen.dart';
+import '../archived_chats_screen.dart';
 import '../auth_choice_screen.dart';
 import '../donation_screen.dart';
 import '../matrix_chat_screen.dart';
@@ -62,6 +63,7 @@ class XmoDrawer extends StatelessWidget {
       {'icon': Icons.contacts, 'label': 'Contacts'},
       {'icon': Icons.phone, 'label': 'Calls'},
       {'icon': Icons.bookmark, 'label': 'Saved Messages'},
+      {'icon': Icons.archive_outlined, 'label': 'Archived Chats'},
       {'icon': Icons.settings, 'label': 'Settings'},
       {'icon': Icons.volunteer_activism, 'label': 'Donation'},
     ];
@@ -138,6 +140,13 @@ class XmoDrawer extends StatelessWidget {
               context,
               MaterialPageRoute(
                 builder: (_) => const AppSettingsScreen(),
+              ),
+            );
+          } else if (label == 'Archived Chats') {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const ArchivedChatsScreen(),
               ),
             );
           } else if (label == 'Donation') {

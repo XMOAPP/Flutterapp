@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../models/message_reply_reference.dart';
+
 enum TransferDirection { upload, download }
 
 enum TransferKind { photo, video, audio, voice, file }
@@ -30,6 +32,7 @@ class TransferJob {
   final DateTime updatedAt;
   final String? error;
   final DateTime? nextRetryAt;
+  final MessageReplyReference? replyReference;
 
   const TransferJob({
     required this.id,
@@ -50,6 +53,7 @@ class TransferJob {
     this.maxAttempts = 3,
     this.error,
     this.nextRetryAt,
+    this.replyReference,
   });
 
   double? get progress {
@@ -90,6 +94,7 @@ class TransferJob {
     DateTime? nextRetryAt,
     bool clearError = false,
     bool clearNextRetryAt = false,
+    MessageReplyReference? replyReference,
   }) {
     return TransferJob(
       id: id,
@@ -110,6 +115,7 @@ class TransferJob {
       updatedAt: updatedAt ?? DateTime.now(),
       error: clearError ? null : error ?? this.error,
       nextRetryAt: clearNextRetryAt ? null : nextRetryAt ?? this.nextRetryAt,
+      replyReference: replyReference ?? this.replyReference,
     );
   }
 
@@ -133,6 +139,7 @@ class TransferJob {
       'updatedAt': updatedAt.toIso8601String(),
       'error': error,
       'nextRetryAt': nextRetryAt?.toIso8601String(),
+      'replyReference': replyReference?.toJson(),
     };
   }
 
@@ -172,6 +179,11 @@ class TransferJob {
           DateTime.now(),
       error: json['error'] as String?,
       nextRetryAt: DateTime.tryParse(json['nextRetryAt'] as String? ?? ''),
+      replyReference: json['replyReference'] is Map
+          ? MessageReplyReference.fromJson(
+              json['replyReference'] as Map<dynamic, dynamic>,
+            )
+          : null,
     );
   }
 }
@@ -230,6 +242,7 @@ class TransferQueueService {
     required String mimeType,
     required TransferKind kind,
     String? id,
+    MessageReplyReference? replyReference,
   }) async {
     await init();
     final now = DateTime.now();
@@ -258,6 +271,7 @@ class TransferQueueService {
       status: TransferStatus.queued,
       createdAt: now,
       updatedAt: now,
+      replyReference: replyReference,
     );
     await _save(job);
     return job;

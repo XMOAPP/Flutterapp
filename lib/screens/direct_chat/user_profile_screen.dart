@@ -7,12 +7,13 @@ import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/direct_chat_service.dart';
 import '../../services/voip_service.dart';
+import '../../services/report_service.dart';
+import '../../models/report_models.dart';
 import '../../models/direct_chat_models.dart';
 import '../../widgets/incoming_call_fullscreen_scope.dart';
 import '../../widgets/story/story_avatar.dart';
+import '../../widgets/report_sheet.dart';
 import 'shared_media_screen.dart';
-
-const String _hiddenChatTag = 'u.xmo.hidden';
 
 /// User Profile Screen for Direct Chats
 class UserProfileScreen extends StatefulWidget {
@@ -108,6 +109,33 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           ),
         );
       }
+    }
+  }
+
+  Future<void> _reportUser() async {
+    final matrixService = context.read<MatrixProvider>().service;
+    final submitted = await showXmoReportSheet(
+      context: context,
+      reportService: ReportService(matrixService),
+      targetType: XmoReportTargetType.user,
+      contextType: XmoReportContextType.direct,
+      title: 'Report user',
+      reportedUserId: widget.userId,
+      roomId: widget.room.id,
+      blockUser: _isBlocked
+          ? null
+          : () async {
+              await _directChatService.blockUser(widget.userId);
+              if (mounted) setState(() => _isBlocked = true);
+            },
+    );
+    if (submitted && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Report submitted'),
+          backgroundColor: kLimeGreen,
+        ),
+      );
     }
   }
 
@@ -238,26 +266,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     );
   }
 
-  Future<void> _hideChat() async {
-    try {
-      await widget.room.addTag(_hiddenChatTag);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Chat hidden'),
-          backgroundColor: kLimeGreen,
-        ),
-      );
-      Navigator.pop(context);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
+  void _archiveChat() {
+    Navigator.pop(context, true);
   }
 
   void _handleMenuAction(String value) {
@@ -265,11 +275,14 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       case 'share':
         _shareContact();
         break;
-      case 'hide':
-        _hideChat();
+      case 'archive':
+        _archiveChat();
         break;
       case 'block':
         _toggleBlock();
+        break;
+      case 'report':
+        _reportUser();
         break;
       case 'clear':
         _clearChat();
@@ -312,14 +325,20 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         label: 'Share Contact',
       ),
       _buildMenuItem(
-        value: 'hide',
-        icon: Icons.visibility_off,
-        label: 'Hide Chat',
+        value: 'archive',
+        icon: Icons.archive_outlined,
+        label: 'Archive Chat',
       ),
       _buildMenuItem(
         value: 'block',
         icon: _isBlocked ? Icons.check_circle : Icons.block,
         label: _isBlocked ? 'Unblock User' : 'Block User',
+        destructive: true,
+      ),
+      _buildMenuItem(
+        value: 'report',
+        icon: Icons.flag_outlined,
+        label: 'Report User',
         destructive: true,
       ),
       _buildMenuItem(

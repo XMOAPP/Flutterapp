@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
@@ -8,17 +10,20 @@ import '../../services/matrix_service.dart';
 import '../../services/matrix_media_helper.dart';
 import '../../widgets/story/story_avatar.dart';
 import '../matrix_chat/widgets/tappable_file_chip.dart';
+import '../matrix_chat/media_handler.dart';
 import '../matrix_chat_screen.dart';
 
 /// Matrix room tile for displaying Matrix rooms in the chat list
 class MatrixRoomTile extends StatefulWidget {
   final Room room;
   final bool showUnreadBadge;
+  final Widget? trailing;
 
   const MatrixRoomTile({
     super.key,
     required this.room,
     this.showUnreadBadge = true,
+    this.trailing,
   });
 
   @override
@@ -112,13 +117,13 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
         ],
       ),
       subtitle: preview,
-      trailing:
-          lastEventTime != null || (widget.showUnreadBadge && unreadCount > 0)
+      trailing: widget.trailing ??
+          (lastEventTime != null || (widget.showUnreadBadge && unreadCount > 0)
               ? _RoomMeta(
                   time: lastEventTime,
                   unreadCount: widget.showUnreadBadge ? unreadCount : 0,
                 )
-              : null,
+              : null),
       onTap: () async {
         final matrixProvider = context.read<MatrixProvider>();
         await Navigator.push(
@@ -236,7 +241,9 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
     final preview = _lastMessagePreviewData(event, matrixService);
     final textStyle = unread ? _unreadSubtitleStyle : _subtitleStyle;
 
-    if (preview.thumbnailRequest == null && preview.icon == null) {
+    if (preview.thumbnailRequest == null &&
+        preview.encryptedThumbnailEvent == null &&
+        preview.icon == null) {
       return Text(
         preview.text,
         maxLines: 1,
@@ -250,6 +257,13 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
         if (preview.thumbnailRequest != null)
           _PreviewThumbnail(
             mediaRequest: preview.thumbnailRequest!,
+            isVideo: preview.isVideo,
+            fallbackIcon: preview.icon ?? Icons.image_rounded,
+          )
+        else if (preview.encryptedThumbnailEvent != null)
+          _EncryptedPreviewThumbnail(
+            key: ValueKey(preview.encryptedThumbnailEvent!.eventId),
+            event: preview.encryptedThumbnailEvent!,
             isVideo: preview.isVideo,
             fallbackIcon: preview.icon ?? Icons.image_rounded,
           )
@@ -329,6 +343,7 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
         return _LastMessagePreview(
           text: _captionOrLabel(event, 'Photo'),
           thumbnailRequest: _mediaThumbnailRequest(event, matrixService),
+          encryptedThumbnailEvent: event.isAttachmentEncrypted ? event : null,
           icon: Icons.image_rounded,
           iconColor: kAudioBlue,
           accentText: true,
@@ -337,6 +352,10 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
         return _LastMessagePreview(
           text: _captionOrLabel(event, 'Video'),
           thumbnailRequest: _mediaThumbnailRequest(event, matrixService),
+          encryptedThumbnailEvent:
+              event.isThumbnailEncrypted || event.isAttachmentEncrypted
+                  ? event
+                  : null,
           icon: Icons.videocam_rounded,
           iconColor: kAudioBlue,
           isVideo: true,
@@ -500,6 +519,7 @@ class _LastMessagePreview {
   final IconData? icon;
   final Color iconColor;
   final MatrixMediaRequest? thumbnailRequest;
+  final Event? encryptedThumbnailEvent;
   final bool isVideo;
   final bool accentText;
 
@@ -508,9 +528,108 @@ class _LastMessagePreview {
     this.icon,
     this.iconColor = kLightGrey,
     this.thumbnailRequest,
+    this.encryptedThumbnailEvent,
     this.isVideo = false,
     this.accentText = false,
   });
+}
+
+class _EncryptedPreviewThumbnail extends StatefulWidget {
+  final Event event;
+  final bool isVideo;
+  final IconData fallbackIcon;
+
+  const _EncryptedPreviewThumbnail({
+    super.key,
+    required this.event,
+    required this.isVideo,
+    required this.fallbackIcon,
+  });
+
+  @override
+  State<_EncryptedPreviewThumbnail> createState() =>
+      _EncryptedPreviewThumbnailState();
+}
+
+class _EncryptedPreviewThumbnailState
+    extends State<_EncryptedPreviewThumbnail> {
+  late Future<Uint8List?> _thumbnailFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _thumbnailFuture = _loadThumbnail();
+  }
+
+  @override
+  void didUpdateWidget(covariant _EncryptedPreviewThumbnail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.event.eventId != widget.event.eventId ||
+        oldWidget.isVideo != widget.isVideo) {
+      _thumbnailFuture = _loadThumbnail();
+    }
+  }
+
+  Uint8List? _cachedThumbnail() {
+    if (widget.isVideo) {
+      return MediaHandler.getCachedThumbnail(widget.event.eventId);
+    }
+    return MediaHandler.getCachedRoomPreview(widget.event.eventId);
+  }
+
+  Future<Uint8List?> _loadThumbnail() {
+    final matrixProvider = context.read<MatrixProvider>();
+    final mediaHandler = MediaHandler(
+      matrixProvider: matrixProvider,
+      context: context,
+    );
+    return widget.isVideo
+        ? mediaHandler.loadVideoThumbnail(widget.event)
+        : mediaHandler.loadRoomPreviewThumbnail(widget.event);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cached = _cachedThumbnail();
+    return FutureBuilder<Uint8List?>(
+      initialData: cached,
+      future: cached == null ? _thumbnailFuture : null,
+      builder: (context, snapshot) {
+        final bytes = snapshot.data;
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(3),
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: bytes == null || bytes.isEmpty
+                ? _ThumbnailFallback(icon: widget.fallbackIcon)
+                : Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.memory(
+                        bytes,
+                        fit: BoxFit.cover,
+                        cacheWidth: 40,
+                        cacheHeight: 40,
+                        errorBuilder: (_, __, ___) =>
+                            _ThumbnailFallback(icon: widget.fallbackIcon),
+                      ),
+                      if (widget.isVideo)
+                        Container(
+                          color: Colors.black.withValues(alpha: 0.24),
+                          child: const Icon(
+                            Icons.play_arrow_rounded,
+                            color: kWhite,
+                            size: 15,
+                          ),
+                        ),
+                    ],
+                  ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _PreviewThumbnail extends StatelessWidget {

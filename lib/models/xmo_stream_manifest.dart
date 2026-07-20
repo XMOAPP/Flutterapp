@@ -1,4 +1,20 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 const String xmoStreamContentKey = 'xmo_stream';
+
+const int _expectedChunkKeyBytes = 32;
+const int _expectedChunkIvBytes = 16;
+const int _expectedChunkHashBytes = 32;
+const int _maxManifestJsonBytes = 128 * 1024;
+const int _maxMimeTypeLength = 128;
+const int _maxQualityNameLength = 32;
+const int _maxQualityCount = 4;
+const int _maxChunkCountPerQuality = 4096;
+const int _maxChunkUrlLength = 4096;
+const int _maxChunkSizeBytes = 8 * 1024 * 1024;
+const int _maxStreamSizeBytes = 4 * 1024 * 1024 * 1024;
+final RegExp _qualityNamePattern = RegExp(r'^[a-zA-Z0-9_-]+$');
 
 class XmoStreamManifestException implements Exception {
   const XmoStreamManifestException(this.message);
@@ -62,6 +78,7 @@ class XmoStreamManifest {
   }
 
   factory XmoStreamManifest.fromJson(Map<dynamic, dynamic> json) {
+    _validateManifestEncodedSize(json);
     final version = _requiredInt(json, 'version');
     if (version != supportedVersion) {
       throw XmoStreamManifestException(
@@ -70,13 +87,21 @@ class XmoStreamManifest {
     }
 
     final mimeType = _requiredString(json, 'mime_type');
+    _validateMimeType(mimeType, 'mime_type');
     final size = _requiredPositiveInt(json, 'size');
     final chunkSize = _requiredPositiveInt(json, 'chunk_size');
+    _validateSizeLimit(size, 'size');
+    _validateChunkSize(chunkSize, 'chunk_size');
     final durationMs = _optionalNonNegativeInt(json, 'duration_ms');
     final rawQualities = json['qualities'];
     if (rawQualities is! Map || rawQualities.isEmpty) {
       throw const XmoStreamManifestException(
         'xmo_stream qualities must be a non-empty object.',
+      );
+    }
+    if (rawQualities.length > _maxQualityCount) {
+      throw const XmoStreamManifestException(
+        'xmo_stream can contain at most $_maxQualityCount qualities.',
       );
     }
 
@@ -88,6 +113,12 @@ class XmoStreamManifest {
           'xmo_stream quality name cannot be empty.',
         );
       }
+      if (name.length > _maxQualityNameLength ||
+          !_qualityNamePattern.hasMatch(name)) {
+        throw XmoStreamManifestException(
+          'xmo_stream quality "$name" has an invalid name.',
+        );
+      }
       final value = entry.value;
       if (value is! Map) {
         throw XmoStreamManifestException(
@@ -96,6 +127,18 @@ class XmoStreamManifest {
       }
       qualities[name] = XmoStreamQuality.fromJson(value, name: name);
     }
+    if (!qualities.containsKey('source')) {
+      throw const XmoStreamManifestException(
+        'xmo_stream must include a source quality.',
+      );
+    }
+
+    _validateQualitySizes(
+      qualities,
+      inheritedSize: size,
+      inheritedChunkSize: chunkSize,
+    );
+    _validateChunkUniqueness(qualities);
 
     return XmoStreamManifest(
       version: version,
@@ -147,6 +190,14 @@ class XmoStreamQuality {
     final size = _optionalPositiveInt(json, 'size');
     final chunkSize = _optionalPositiveInt(json, 'chunk_size');
     final mimeType = _optionalString(json, 'mime_type');
+    if (size != null) _validateSizeLimit(size, '$name size');
+    if (chunkSize != null) _validateChunkSize(chunkSize, '$name chunk_size');
+    if (mimeType != null) _validateMimeType(mimeType, '$name mime_type');
+    if (rawChunks.length > _maxChunkCountPerQuality) {
+      throw XmoStreamManifestException(
+        'xmo_stream quality "$name" has too many chunks.',
+      );
+    }
 
     final chunks = <XmoStreamChunk>[];
     final seenIndexes = <int>{};
@@ -245,21 +296,42 @@ class XmoStreamChunk {
 
     final url = _requiredString(json, 'url');
     final uri = Uri.tryParse(url);
-    if (uri == null ||
-        !(uri.isScheme('mxc') ||
-            uri.isScheme('https') ||
-            uri.isScheme('http'))) {
+    if (url.length > _maxChunkUrlLength || uri == null) {
       throw const XmoStreamManifestException(
-        'xmo_stream chunk url must be mxc, https, or http.',
+        'xmo_stream chunk url is invalid.',
       );
     }
+    if (uri.isScheme('mxc')) {
+      if (uri.host.isEmpty || uri.pathSegments.isEmpty) {
+        throw const XmoStreamManifestException(
+          'xmo_stream mxc chunk url is invalid.',
+        );
+      }
+    } else if (uri.isScheme('https')) {
+      if (uri.host.isEmpty) {
+        throw const XmoStreamManifestException(
+          'xmo_stream https chunk url is invalid.',
+        );
+      }
+    } else {
+      throw const XmoStreamManifestException(
+        'xmo_stream chunk url must be mxc or https.',
+      );
+    }
+
+    final key = _requiredString(json, 'key');
+    final iv = _requiredString(json, 'iv');
+    final sha256 = _requiredString(json, 'sha256');
+    _requireDecodedLength(key, _expectedChunkKeyBytes, 'chunk key');
+    _requireDecodedLength(iv, _expectedChunkIvBytes, 'chunk iv');
+    _requireDecodedLength(sha256, _expectedChunkHashBytes, 'chunk sha256');
 
     return XmoStreamChunk(
       index: index,
       url: url,
-      key: _requiredString(json, 'key'),
-      iv: _requiredString(json, 'iv'),
-      sha256: _requiredString(json, 'sha256'),
+      key: key,
+      iv: iv,
+      sha256: sha256,
     );
   }
 
@@ -324,4 +396,98 @@ String? _optionalString(Map<dynamic, dynamic> json, String key) {
   throw XmoStreamManifestException(
     'xmo_stream $key must be a non-empty string.',
   );
+}
+
+void _validateManifestEncodedSize(Map<dynamic, dynamic> json) {
+  try {
+    final bytes = utf8.encode(jsonEncode(json)).length;
+    if (bytes > _maxManifestJsonBytes) {
+      throw const XmoStreamManifestException(
+        'xmo_stream manifest is too large.',
+      );
+    }
+  } on JsonUnsupportedObjectError {
+    throw const XmoStreamManifestException(
+      'xmo_stream manifest contains unsupported values.',
+    );
+  }
+}
+
+void _validateMimeType(String mimeType, String field) {
+  if (mimeType.length > _maxMimeTypeLength ||
+      mimeType.contains(RegExp(r'[\r\n]')) ||
+      !mimeType.contains('/')) {
+    throw XmoStreamManifestException('xmo_stream $field is invalid.');
+  }
+}
+
+void _validateSizeLimit(int value, String field) {
+  if (value > _maxStreamSizeBytes) {
+    throw XmoStreamManifestException('xmo_stream $field is too large.');
+  }
+}
+
+void _validateChunkSize(int value, String field) {
+  if (value > _maxChunkSizeBytes) {
+    throw XmoStreamManifestException('xmo_stream $field is too large.');
+  }
+}
+
+void _validateQualitySizes(
+  Map<String, XmoStreamQuality> qualities, {
+  required int inheritedSize,
+  required int inheritedChunkSize,
+}) {
+  for (final entry in qualities.entries) {
+    final quality = entry.value;
+    final size = quality.size ?? inheritedSize;
+    final chunkSize = quality.chunkSize ?? inheritedChunkSize;
+    final expectedChunks = (size + chunkSize - 1) ~/ chunkSize;
+    if (quality.chunks.length != expectedChunks) {
+      throw XmoStreamManifestException(
+        'xmo_stream quality "${entry.key}" chunk count does not match its size.',
+      );
+    }
+  }
+}
+
+void _validateChunkUniqueness(Map<String, XmoStreamQuality> qualities) {
+  final seenKeyIvPairs = <String>{};
+  for (final quality in qualities.values) {
+    final seenUrls = <String>{};
+    for (final chunk in quality.chunks) {
+      if (!seenUrls.add(chunk.url)) {
+        throw const XmoStreamManifestException(
+          'xmo_stream contains duplicate chunk URLs.',
+        );
+      }
+      if (!seenKeyIvPairs.add('${chunk.key}:${chunk.iv}')) {
+        throw const XmoStreamManifestException(
+          'xmo_stream contains reused chunk key and IV.',
+        );
+      }
+    }
+  }
+}
+
+void _requireDecodedLength(String value, int expectedLength, String field) {
+  final decoded = _decodeBase64Like(value);
+  if (decoded == null || decoded.length != expectedLength) {
+    throw XmoStreamManifestException('xmo_stream $field is invalid.');
+  }
+}
+
+Uint8List? _decodeBase64Like(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty ||
+      !RegExp(r'^[A-Za-z0-9+/_-]+={0,2}$').hasMatch(trimmed)) {
+    return null;
+  }
+  final normalized = trimmed.replaceAll('-', '+').replaceAll('_', '/');
+  final padding = (4 - normalized.length % 4) % 4;
+  try {
+    return Uint8List.fromList(base64.decode(normalized + ('=' * padding)));
+  } on FormatException {
+    return null;
+  }
 }

@@ -92,7 +92,7 @@ object XmoCallNotificationHelper {
             pendingIntentFlags(),
         )
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.sym_action_call)
             .setContentTitle(displayTitle)
             .setContentText(displayBody)
@@ -107,7 +107,6 @@ object XmoCallNotificationHelper {
             .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))
             .setVibrate(longArrayOf(0, 900, 450, 900, 450, 900))
             .setContentIntent(openPendingIntent)
-            .setFullScreenIntent(openPendingIntent, true)
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
                 "Decline",
@@ -118,7 +117,12 @@ object XmoCallNotificationHelper {
                 "Answer",
                 answerPendingIntent,
             )
-            .build()
+
+        if (canUseFullScreenIntent(context)) {
+            builder.setFullScreenIntent(openPendingIntent, true)
+        }
+
+        val notification = builder.build()
 
         NotificationManagerCompat.from(context).notify(notificationId, notification)
     }
@@ -127,6 +131,15 @@ object XmoCallNotificationHelper {
         NotificationManagerCompat.from(context).cancel(notificationId(data))
     }
 
+    fun canUseFullScreenIntent(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            return true
+        }
+        val manager = context.getSystemService(NotificationManager::class.java)
+        return manager?.canUseFullScreenIntent() == true
+    }
+
+    @Suppress("DEPRECATION")
     fun extrasFromIntent(intent: Intent?): Map<String, String>? {
         if (intent == null) return null
         if (intent.getBooleanExtra(EXTRA_IS_CALL_NOTIFICATION, false) != true) {

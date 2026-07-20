@@ -3,9 +3,10 @@ import 'package:matrix/matrix.dart';
 import 'package:provider/provider.dart';
 import '../../providers/chat_filter_provider.dart';
 import '../../providers/matrix_provider.dart';
+import '../../services/chat_archive_service.dart';
+import 'calls_view.dart';
 import 'matrix_room_tile.dart';
-
-const String _hiddenChatTag = 'u.xmo.hidden';
+import 'stories_view.dart';
 
 /// Main chat list body with filtering and search - Matrix only
 class ChatList extends StatelessWidget {
@@ -29,7 +30,8 @@ class ChatList extends StatelessWidget {
                     : matrixService.isDirectRoom(room)
                         ? 'd'
                         : 'u';
-            return '${room.id}:${room.membership.name}:$typeCode';
+            final archiveCode = ChatArchiveService.isArchived(room) ? 'a' : '-';
+            return '${room.id}:${room.membership.name}:$typeCode:$archiveCode';
           }).join('|'),
           roomPreviewSignature: matrixProvider.rooms.map((room) {
             final lastEvent = room.lastEvent;
@@ -54,14 +56,11 @@ class ChatList extends StatelessWidget {
       },
       shouldRebuild: (prev, next) => prev != next,
       builder: (context, data, _) {
-        // Stories feature removed - was demo only
         if (data.filter == ChatFilter.stories) {
-          return const Center(
-            child: Text(
-              'Stories feature coming soon',
-              style: TextStyle(color: Colors.white54),
-            ),
-          );
+          return const StoriesView();
+        }
+        if (data.filter == ChatFilter.calls) {
+          return const CallsView();
         }
 
         if (!data.isLoggedIn) {
@@ -88,7 +87,7 @@ class ChatList extends StatelessWidget {
         final activeRooms = matrixRooms.where((room) {
           final isActive = room.membership == Membership.join ||
               room.membership == Membership.invite;
-          return isActive && !room.tags.containsKey(_hiddenChatTag);
+          return isActive && !ChatArchiveService.isArchived(room);
         }).toList();
 
         // Filter by type based on selected filter

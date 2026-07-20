@@ -809,7 +809,6 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
   Widget _buildPublicRoomTile(PublicRoomsChunk room) {
     final provider = context.read<MatrixProvider>();
     final joinedRoom = provider.service.getJoinedRoomById(room.roomId);
-    final isJoined = joinedRoom != null;
     final isJoining = _joiningRoomIds.contains(room.roomId);
     final isChannel =
         joinedRoom?.isChannel ?? _publicRoomChannelFlags[room.roomId] ?? false;
@@ -880,24 +879,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                 strokeWidth: 2,
               ),
             )
-          : TextButton(
-              onPressed: () => _openOrJoinPublicRoom(room),
-              style: TextButton.styleFrom(
-                backgroundColor: isJoined ? kDarkGrey : kLimeGreen,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: Text(
-                isJoined ? 'Open' : 'Join',
-                style: GoogleFonts.inter(
-                  color: isJoined ? kLimeGreen : kBlack,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
+          : null,
       onTap: isJoining ? null : () => _openOrJoinPublicRoom(room),
     );
   }

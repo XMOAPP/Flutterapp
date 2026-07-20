@@ -276,6 +276,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       final video = await controller.stopVideoRecording();
       final previewController = VideoPlayerController.file(
         File(video.path),
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
         viewType: _preferredVideoViewType,
       );
       await previewController.initialize();

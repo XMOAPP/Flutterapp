@@ -1,8 +1,8 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
-import '../../theme.dart';
 import '../../services/matrix_service.dart';
+import '../../widgets/direct_chat/read_receipt.dart';
 import 'message_widgets.dart';
 
 /// Builds a message bubble for different message types (text, image, video, file, audio)
@@ -57,10 +57,8 @@ class MessageBubble extends StatelessWidget {
   }
 
   Widget _buildMessageStatus(Event event) {
-    // Single tick for sent messages (simplified - can be enhanced with read receipts)
-    return Icon(
-      Icons.done,
-      color: kLimeGreen.withValues(alpha: 0.6),
+    return ReadReceipt(
+      status: resolveReadReceiptStatus(event.status),
       size: 14,
     );
   }

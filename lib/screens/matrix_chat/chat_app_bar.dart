@@ -11,7 +11,6 @@ import '../../widgets/story/story_avatar.dart';
 import '../group/group_info_screen.dart';
 import '../channel/channel_info_screen.dart';
 import '../direct_chat/saved_messages_info_screen.dart';
-import '../direct_chat/search_in_chat_screen.dart';
 import '../direct_chat/user_profile_screen.dart';
 
 /// Builds the app bar for the Matrix chat screen
@@ -21,7 +20,9 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   final Future<void> Function() onDeleteChat;
   final Future<void> Function()? onLeaveRoom;
   final Future<void> Function()? onDeleteGroup;
+  final Future<void> Function() onArchiveChat;
   final MatrixProvider? matrixProvider;
+  final VoidCallback onSearch;
 
   const ChatAppBar({
     super.key,
@@ -30,7 +31,9 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
     required this.onDeleteChat,
     this.onLeaveRoom,
     this.onDeleteGroup,
+    required this.onArchiveChat,
     this.matrixProvider,
+    required this.onSearch,
   });
 
   @override
@@ -42,9 +45,9 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   bool get _isSavedMessages => MatrixService().isSavedMessagesRoom(room);
   bool get _supportsCalls => !_isSavedMessages && (_isDirect || !_isChannel);
 
-  void _openGroupInfo(BuildContext context) {
+  Future<void> _openGroupInfo(BuildContext context) async {
     if (_isSavedMessages) {
-      Navigator.push(
+      await Navigator.push<void>(
         context,
         MaterialPageRoute(
           builder: (_) => SavedMessagesInfoScreen(room: room),
@@ -53,28 +56,31 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
       return;
     }
     if (_isChannel) {
-      Navigator.push(
+      await Navigator.push<void>(
         context,
         MaterialPageRoute(
           builder: (_) => ChannelInfoScreen(room: room),
         ),
       );
     } else {
-      Navigator.push(
+      final result = await Navigator.push<GroupInfoResult>(
         context,
         MaterialPageRoute(
           builder: (_) => GroupInfoScreen(room: room),
         ),
       );
+      if (result == GroupInfoResult.searchMessages && context.mounted) {
+        onSearch();
+      }
     }
   }
 
-  void _openUserProfile(BuildContext context) {
+  Future<void> _openUserProfile(BuildContext context) async {
     // Get the other user's ID in direct chat
     final otherUserId = MatrixService().getDirectPeerUserId(room);
     if (otherUserId == null) return;
 
-    Navigator.push(
+    final shouldArchive = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (_) => UserProfileScreen(
@@ -83,6 +89,9 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
         ),
       ),
     );
+    if (shouldArchive == true && context.mounted) {
+      await onArchiveChat();
+    }
   }
 
   Future<void> _startRoomCall(BuildContext context, bool video) async {
@@ -245,6 +254,12 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
         kWhite,
       ));
       items.add(_buildMenuItem(
+        'archive',
+        Icons.archive_outlined,
+        'Archive Chat',
+        kWhite,
+      ));
+      items.add(_buildMenuItem(
         'delete_chat',
         Icons.delete_outline,
         'Delete Chat',
@@ -264,6 +279,12 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
             ? Icons.notifications_active_outlined
             : Icons.notifications_off_outlined,
         muted ? 'Unmute' : 'Mute',
+        kWhite,
+      ));
+      items.add(_buildMenuItem(
+        'archive',
+        Icons.archive_outlined,
+        _isChannel ? 'Archive Channel' : 'Archive Group',
         kWhite,
       ));
 
@@ -311,16 +332,15 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   Future<void> _handleMenuAction(BuildContext context, String action) async {
     switch (action) {
       case 'search':
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => SearchInChatScreen(room: room),
-          ),
-        );
+        onSearch();
         break;
 
       case 'mute':
         await _toggleRoomMute(context);
+        break;
+
+      case 'archive':
+        await onArchiveChat();
         break;
 
       case 'saved_info':

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Matrix sessions, E2EE state, recovery material, local media caches, and transfer state must not leave the device in Android backups. -->
+    <exclude domain="root" path="app_flutter/matrix_xmo/" />
+    <exclude domain="root" path="files/matrix_xmo/" />
+    <exclude domain="file" path="matrix_xmo/" />
+    <exclude domain="database" path="matrix_xmo" />
+
+    <exclude domain="root" path="app_flutter/xmo_auth.hive" />
+    <exclude domain="root" path="app_flutter/xmo_auth.lock" />
+    <exclude domain="root" path="app_flutter/xmo_channels.hive" />
+    <exclude domain="root" path="app_flutter/xmo_channels.lock" />
+    <exclude domain="root" path="app_flutter/xmo_groups.hive" />
+    <exclude domain="root" path="app_flutter/xmo_groups.lock" />
+    <exclude domain="root" path="app_flutter/xmo_media_cache.hive" />
+    <exclude domain="root" path="app_flutter/xmo_media_cache.lock" />
+    <exclude domain="root" path="app_flutter/xmo_app_settings.hive" />
+    <exclude domain="root" path="app_flutter/xmo_app_settings.lock" />
+    <exclude domain="root" path="app_flutter/xmo_call_history.hive" />
+    <exclude domain="root" path="app_flutter/xmo_call_history.lock" />
+    <exclude domain="root" path="app_flutter/xmo_shared_media_index.hive" />
+    <exclude domain="root" path="app_flutter/xmo_shared_media_index.lock" />
+    <exclude domain="root" path="app_flutter/xmo_transfer_queue.hive" />
+    <exclude domain="root" path="app_flutter/xmo_transfer_queue.lock" />
+    <exclude domain="root" path="app_flutter/xmo_message_drafts.hive" />
+    <exclude domain="root" path="app_flutter/xmo_message_drafts.lock" />
+    <exclude domain="root" path="app_flutter/xmo_story_timeline_cache.hive" />
+    <exclude domain="root" path="app_flutter/xmo_story_timeline_cache.lock" />
+
+    <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+    <exclude domain="sharedpref" path="flutter_secure_storage.xml" />
+    <exclude domain="external" path="." />
+</full-backup-content>

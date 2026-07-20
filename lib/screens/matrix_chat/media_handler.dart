@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -71,6 +72,10 @@ class MediaHandler {
   }) {
     final key = '${eventId}_$getThumbnail';
     return _imageCache[key];
+  }
+
+  static Uint8List? getCachedRoomPreview(String eventId) {
+    return _imageCache['${eventId}_room_preview'];
   }
 
   /// Helper to save to both caches
@@ -220,6 +225,38 @@ class MediaHandler {
         }
       }
       return null;
+    }();
+
+    _imageLoading[cacheKey] = future;
+    return future;
+  }
+
+  Future<Uint8List?> loadRoomPreviewThumbnail(Event event) async {
+    final cacheKey = '${event.eventId}_room_preview';
+    final cached = _imageCache[cacheKey];
+    if (cached != null) return cached;
+    final loading = _imageLoading[cacheKey];
+    if (loading != null) return loading;
+
+    final future = () async {
+      try {
+        final matrixFile = await _attachmentDownloader.download(
+          event,
+          getThumbnail: true,
+          downloadCallback: authenticatedDownload(),
+        );
+        if (matrixFile.bytes.isEmpty) return null;
+
+        final preview = await createImagePreviewThumbnail(matrixFile.bytes) ??
+            matrixFile.bytes;
+        _imageCache[cacheKey] = preview;
+        return preview;
+      } catch (error) {
+        debugPrint('[RoomPreview] Failed to load image thumbnail: $error');
+        return null;
+      } finally {
+        _imageLoading.remove(cacheKey);
+      }
     }();
 
     _imageLoading[cacheKey] = future;
@@ -601,20 +638,32 @@ class MediaHandler {
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
     bool rethrowErrors = false,
+    Event? inReplyTo,
   }) async {
     if (bytes.isEmpty) return;
 
     setUploading(true);
 
     try {
+      Uint8List? thumbnailBytes = precomputedThumbnailBytes;
+      if (thumbnailBytes == null || thumbnailBytes.isEmpty) {
+        thumbnailBytes = await createImagePreviewThumbnail(bytes);
+      }
+      final thumbnailDimensions = thumbnailBytes == null
+          ? null
+          : await _decodeImageDimensions(thumbnailBytes);
       await matrixProvider.service.sendImageWithCaption(
         roomId: roomId,
         bytes: bytes,
         fileName: fileName,
         mimeType: mimeType,
         caption: caption,
+        thumbnailBytes: thumbnailBytes,
+        thumbnailWidth: thumbnailDimensions?.width,
+        thumbnailHeight: thumbnailDimensions?.height,
         onUploadProgress: onUploadProgress,
         isCancelled: isCancelled,
+        inReplyTo: inReplyTo,
       );
     } catch (e) {
       if (e is MatrixUploadCancelledException) rethrow;
@@ -646,6 +695,7 @@ class MediaHandler {
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
     bool rethrowErrors = false,
+    Event? inReplyTo,
   }) async {
     if (bytes.isEmpty) return;
 
@@ -688,6 +738,7 @@ class MediaHandler {
         caption: caption,
         onUploadProgress: onUploadProgress,
         isCancelled: isCancelled,
+        inReplyTo: inReplyTo,
       );
     } catch (e) {
       if (e is MatrixUploadCancelledException) rethrow;
@@ -710,6 +761,50 @@ class MediaHandler {
     String mimeType,
   ) {
     return _generateVideoThumbnail(bytes, mimeType);
+  }
+
+  Future<Uint8List?> createImagePreviewThumbnail(Uint8List bytes) async {
+    if (bytes.isEmpty) return null;
+    ui.Codec? sourceCodec;
+    ui.Codec? thumbnailCodec;
+    ui.Image? sourceImage;
+    ui.Image? thumbnailImage;
+    try {
+      sourceCodec = await ui.instantiateImageCodec(bytes);
+      final sourceFrame = await sourceCodec.getNextFrame();
+      sourceImage = sourceFrame.image;
+
+      const maxDimension = 160.0;
+      final scale = math.min(
+        1.0,
+        math.min(
+          maxDimension / sourceImage.width,
+          maxDimension / sourceImage.height,
+        ),
+      );
+      final targetWidth = math.max(1, (sourceImage.width * scale).round());
+      final targetHeight = math.max(1, (sourceImage.height * scale).round());
+
+      thumbnailCodec = await ui.instantiateImageCodec(
+        bytes,
+        targetWidth: targetWidth,
+        targetHeight: targetHeight,
+      );
+      final thumbnailFrame = await thumbnailCodec.getNextFrame();
+      thumbnailImage = thumbnailFrame.image;
+      final data = await thumbnailImage.toByteData(
+        format: ui.ImageByteFormat.png,
+      );
+      return data?.buffer.asUint8List();
+    } catch (error) {
+      debugPrint('[ImageThumb] Failed to generate thumbnail: $error');
+      return null;
+    } finally {
+      thumbnailImage?.dispose();
+      sourceImage?.dispose();
+      thumbnailCodec?.dispose();
+      sourceCodec?.dispose();
+    }
   }
 
   Future<({int? width, int? height, int? durationMs})?>

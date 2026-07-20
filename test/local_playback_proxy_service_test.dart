@@ -48,7 +48,7 @@ void main() {
     tearDown(() async {
       await proxy.stop();
       if (await tempRoot.exists()) {
-        await tempRoot.delete(recursive: true);
+        await _deleteDirectoryWithRetry(tempRoot);
       }
     });
 
@@ -64,8 +64,26 @@ void main() {
 
       expect(response.statusCode, HttpStatus.ok);
       expect(response.headers.value(HttpHeaders.acceptRangesHeader), 'bytes');
+      expect(
+          response.headers.value(HttpHeaders.cacheControlHeader), 'no-store');
       expect(response.headers.contentLength, 10);
       expect(utf8.decode(response.body), 'abcdefghij');
+
+      await handle.close();
+    });
+
+    test('uses an unguessable local stream token', () async {
+      final handle = await _openHandle(
+        proxy,
+        tempRoot,
+        encryptedMediaHelper,
+        ['abcd'],
+      );
+
+      final token = handle.uri.pathSegments.last;
+      expect(token, hasLength(43));
+      expect(token, matches(RegExp(r'^[A-Za-z0-9_-]+$')));
+      expect(token, isNot(startsWith('stream_')));
 
       await handle.close();
     });
@@ -185,6 +203,56 @@ void main() {
       await handle.close();
     });
 
+    test('rejects unsupported HTTP methods', () async {
+      final handle = await _openHandle(
+        proxy,
+        tempRoot,
+        encryptedMediaHelper,
+        ['abcd'],
+      );
+
+      final response = await _request(handle.uri, 'POST');
+
+      expect(response.statusCode, HttpStatus.methodNotAllowed);
+      expect(response.headers.value(HttpHeaders.allowHeader), 'GET, HEAD');
+
+      await handle.close();
+    });
+
+    test('rejects invalid stream tokens', () async {
+      final handle = await _openHandle(
+        proxy,
+        tempRoot,
+        encryptedMediaHelper,
+        ['abcd'],
+      );
+
+      final response = await _get(
+        handle.uri.replace(pathSegments: <String>['stream', 'short']),
+      );
+
+      expect(response.statusCode, HttpStatus.notFound);
+
+      await handle.close();
+    });
+
+    test('serves HEAD metadata without a response body', () async {
+      final handle = await _openHandle(
+        proxy,
+        tempRoot,
+        encryptedMediaHelper,
+        ['abcd', 'efgh'],
+      );
+
+      final response = await _request(handle.uri, 'HEAD');
+
+      expect(response.statusCode, HttpStatus.ok);
+      expect(response.headers.contentLength, 8);
+      expect(response.body, isEmpty);
+
+      await handle.close();
+    });
+
     test('waits for a requested chunk while it downloads', () async {
       final fixture = await _buildFixture(
         encryptedMediaHelper,
@@ -253,6 +321,21 @@ void main() {
   });
 }
 
+Future<void> _deleteDirectoryWithRetry(Directory directory) async {
+  const attempts = 5;
+  for (var attempt = 0; attempt < attempts; attempt++) {
+    try {
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+      return;
+    } on FileSystemException {
+      if (attempt == attempts - 1) rethrow;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+  }
+}
+
 Future<XmoLocalPlaybackHandle> _openHandle(
   LocalPlaybackProxyService proxy,
   Directory tempRoot,
@@ -291,10 +374,18 @@ StreamingMediaService _streamingService(
 Future<_HttpTestResponse> _get(
   Uri uri, {
   Map<String, String> headers = const <String, String>{},
+}) {
+  return _request(uri, 'GET', headers: headers);
+}
+
+Future<_HttpTestResponse> _request(
+  Uri uri,
+  String method, {
+  Map<String, String> headers = const <String, String>{},
 }) async {
   final client = HttpClient();
   try {
-    final request = await client.getUrl(uri);
+    final request = await client.openUrl(method, uri);
     headers.forEach(request.headers.set);
     final response = await request.close();
     final body = <int>[];

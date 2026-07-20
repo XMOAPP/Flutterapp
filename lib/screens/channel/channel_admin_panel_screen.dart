@@ -7,6 +7,7 @@ import '../../providers/matrix_provider.dart';
 import '../../services/channel_service.dart';
 import '../../models/channel_models.dart';
 import '../../widgets/story/story_avatar.dart';
+import '../moderation/moderator_reports_screen.dart';
 
 /// Channel Admin Panel - Manage channel admins and permissions
 class ChannelAdminPanelScreen extends StatefulWidget {
@@ -225,6 +226,18 @@ class _ChannelAdminPanelScreenState extends State<ChannelAdminPanelScreen> {
             fontWeight: FontWeight.w600,
           ),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.flag_outlined, color: kWhite),
+            tooltip: 'Review reports',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ModeratorReportsScreen(room: widget.room),
+              ),
+            ),
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: kLimeGreen))

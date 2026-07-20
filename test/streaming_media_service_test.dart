@@ -348,7 +348,8 @@ Future<_StreamFixture> _buildFixture(
         0,
         (total, chunk) => total + utf8.encode(chunk).length,
       ),
-      chunkSize: 4,
+      chunkSize:
+          clearChunks.map((chunk) => utf8.encode(chunk).length).reduce(max),
       qualities: {
         'source': XmoStreamQuality(chunks: streamChunks),
       },

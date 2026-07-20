@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:bs58/bs58.dart';
 import 'package:cryptography/cryptography.dart';
@@ -19,7 +20,7 @@ void main() {
     final credentials = EthPrivateKey.fromHex(
       '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
     );
-    final address = credentials.address.hexEip55;
+    final address = credentials.address.toString();
 
     final challenge = service.createChallenge(
       username: 'alice',
@@ -68,7 +69,7 @@ void main() {
       (index) => index + 1,
     ));
     final publicKey = await keyPair.extractPublicKey();
-    final address = base58.encode(publicKey.bytes);
+    final address = base58.encode(Uint8List.fromList(publicKey.bytes));
 
     final challenge = service.createChallenge(
       username: 'alice',
@@ -86,7 +87,7 @@ void main() {
       username: 'alice',
       address: address,
       message: challenge.message,
-      signature: base58.encode(signature.bytes),
+      signature: base58.encode(Uint8List.fromList(signature.bytes)),
       mode: 'login',
       walletType: WalletAuthTypes.solana,
     );

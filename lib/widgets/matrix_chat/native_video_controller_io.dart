@@ -27,9 +27,13 @@ Future<VideoPlayerController> createNativeVideoController({
   final controller = await _initializeController(
     () => VideoPlayerController.file(
       file,
+      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
       viewType: _preferredVideoViewType,
     ),
-    fallbackFactory: () => VideoPlayerController.file(file),
+    fallbackFactory: () => VideoPlayerController.file(
+      file,
+      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+    ),
   );
   await controller.play();
   return controller;
@@ -43,11 +47,13 @@ Future<VideoPlayerController> createNativeNetworkVideoController({
     () => VideoPlayerController.networkUrl(
       url,
       httpHeaders: headers,
+      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
       viewType: _preferredVideoViewType,
     ),
     fallbackFactory: () => VideoPlayerController.networkUrl(
       url,
       httpHeaders: headers,
+      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
     ),
   );
   await controller.play();

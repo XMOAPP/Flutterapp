@@ -7,6 +7,7 @@ import '../../providers/chat_filter_provider.dart';
 import '../../providers/matrix_provider.dart';
 import '../../providers/story_provider.dart';
 import '../../services/call_history_service.dart';
+import '../../services/chat_archive_service.dart';
 
 /// Category filter chips for filtering chats
 class CategoryFilters extends StatelessWidget {
@@ -19,8 +20,9 @@ class CategoryFilters extends StatelessWidget {
         FilterData>(
       selector: (_, filterProvider, matrixProvider, storyProvider) {
         final activeRooms = matrixProvider.rooms.where((room) {
-          return room.membership == Membership.join ||
+          final active = room.membership == Membership.join ||
               room.membership == Membership.invite;
+          return active && !ChatArchiveService.isArchived(room);
         }).toList();
 
         // Count stories (my stories + contact stories with unviewed)

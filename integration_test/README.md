@@ -33,3 +33,16 @@ flutter test integration_test/real_matrix_auth_e2ee_test.dart -d <device-id> `
 ```
 
 If `XMO_TEST_USERNAME` or `XMO_TEST_PASSWORD` is missing, the test skips itself so CI can keep running the deterministic widget integration test without secrets.
+
+## GitHub Actions gate
+
+The `Android CI` workflow always runs bounded Flutter and auth-server format,
+analysis, and test gates. To run the Android emulator smoke test, open the
+workflow in GitHub Actions, select **Run workflow**, and enable
+`run_android_integration`. The emulator gate is deliberately opt-in because it
+is slower than the deterministic host tests.
+
+The emulator job runs only `chat_input_smoke_test.dart`; it does not claim to
+verify live Matrix, E2EE interoperability, calls, FCM delivery, or locked-screen
+behavior. Run the disposable-account and real-device checklists above before a
+beta release.

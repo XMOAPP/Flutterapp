@@ -64,11 +64,7 @@ object XmoMessageNotificationHelper {
             .setAutoCancel(true)
             .setColor(Color.rgb(47, 128, 237))
             .setContentIntent(openPendingIntent)
-            .apply {
-                if (largeIcon != null) {
-                    setLargeIcon(largeIcon)
-                }
-            }
+            .setLargeIcon(largeIcon)
             .build()
 
         NotificationManagerCompat.from(context).notify(notificationId, notification)
@@ -93,6 +89,9 @@ object XmoMessageNotificationHelper {
     private fun bodyFromPayload(data: Map<String, String>, rawBody: String?): String {
         val explicitPreview = data["preview_label"]?.takeIf { it.isDisplayableText() }
         val previewKind = (data["preview_kind"] ?: "").lowercase()
+        if (previewKind == "encrypted") {
+            return "New message"
+        }
         if (explicitPreview != null && previewKind.isNotBlank()) {
             return previewPrefix(previewKind) + explicitPreview
         }
@@ -119,7 +118,7 @@ object XmoMessageNotificationHelper {
                     ?: "File")
             msgType.contains("m.location") || msgType.contains("location") -> "📍 Location"
             msgType.contains("m.room.encrypted") || msgType.contains("encrypted") ->
-                "🔒 New encrypted message"
+                "New message"
             else -> data["content"]?.takeIf { it.isDisplayableText() }
                 ?: data["body"]?.takeIf { it.isDisplayableText() }
                 ?: rawBody?.takeIf { it.isDisplayableText() }
