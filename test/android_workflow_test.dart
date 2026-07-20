@@ -83,7 +83,13 @@ void main() {
     expect(workflow, contains('sdkmanager "platform-tools"'));
     expect(
         workflow, contains(r'SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"'));
+    expect(workflow,
+        contains(r'export ANDROID_AVD_HOME="$RUNNER_TEMP/android-avd"'));
     expect(workflow, contains(r'test -x "$SDK_ROOT/emulator/emulator"'));
+    expect(
+        workflow,
+        contains(
+            r'"$SDK_ROOT/emulator/emulator" -list-avds | grep -Fx xmo_ci'));
     expect(workflow, contains(r'nohup "$SDK_ROOT/emulator/emulator"'));
   });
 }
