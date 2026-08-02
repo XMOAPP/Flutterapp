@@ -12,6 +12,8 @@ push notification forwarding to Firebase Cloud Messaging.
 - `POST /donations/create`, `POST /auth/donations/create`, or `POST /auth/otp/donations/create`
 - `POST /wallet/nonce` or `POST /auth/wallet/nonce`
 - `POST /wallet/verify` or `POST /auth/wallet/verify`
+- `POST /auth/media/chunks/azure/sign-upload` (authenticated encrypted chunk upload signing)
+- `GET /auth/media/chunks/azure/download?ref=...` (authenticated short-lived chunk download)
 - `POST /users/upsert`, `POST /auth/users/upsert`, or `POST /auth/otp/users/upsert`
 - `POST /users/search`, `POST /auth/users/search`, or `POST /auth/otp/users/search`
 - `POST /reports/submit`, `POST /auth/reports/submit`, or `POST /auth/otp/reports/submit`
@@ -19,6 +21,9 @@ push notification forwarding to Firebase Cloud Messaging.
 - `POST /account/delete-data` (authenticated XMO-owned data cleanup)
 - `GET /account-deletion` (external account deletion page)
 - `POST /account-deletion/request` and `POST /account-deletion/confirm`
+- `POST /invites/create`, `POST /invites/list`, and `POST /invites/revoke` (authenticated room admins)
+- `GET /invites/{token}/preview` (public limited preview)
+- `POST /invites/{token}/redeem` (authenticated join or join-request redemption)
 - `POST /_matrix/push/v1/notify` for Matrix push gateway delivery
 - `POST /push` or `POST /auth/otp/push` for manual/internal tests only
 
@@ -49,13 +54,44 @@ XMO_USER_DIRECTORY_DATA_FILE=/app/data/user_directory.json
 XMO_CHANNEL_ANALYTICS_SECRET=your-random-32-byte-or-longer-analytics-secret
 # Optional; defaults beside XMO_AUTH_DATA_FILE:
 XMO_CHANNEL_ANALYTICS_DATA_FILE=/app/data/channel_analytics.json
+# Required for branded group/channel invite links. Generate an independent
+# 32-byte secret, for example with: openssl rand -hex 32
+XMO_INVITE_TOKEN_SECRET=your-random-32-byte-invite-secret
+XMO_INVITE_WEB_BASE_URL=https://xmo.dpdns.org
+# Optional; defaults beside XMO_AUTH_DATA_FILE:
+XMO_INVITE_DATA_FILE=/app/data/invite_links.json
 XMO_FIREBASE_SERVICE_ACCOUNT_FILE=/run/secrets/firebase-service-account.json
 # Or use one of these instead of the file path:
 # XMO_FIREBASE_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'
 # XMO_FIREBASE_SERVICE_ACCOUNT_BASE64=base64-encoded-service-account-json
 # Optional if the service account JSON has project_id:
 # XMO_FIREBASE_PROJECT_ID=xmoapp-6ef05
+XMO_AZURE_BLOB_ACCOUNT=your-storage-account
+XMO_AZURE_BLOB_CONTAINER=your-private-container
+XMO_AZURE_BLOB_ACCOUNT_KEY=your-rotated-storage-account-key
+# Public HTTPS origin of this backend. Falls back to XMO_WALLET_AUTH_URI.
+XMO_PUBLIC_BASE_URL=https://xmo-matrix.centralindia.cloudapp.azure.com
+# Optional, defaults shown:
+XMO_AZURE_BLOB_UPLOAD_TTL_MINUTES=15
+XMO_AZURE_BLOB_DOWNLOAD_TTL_MINUTES=10
+XMO_AZURE_BLOB_MAX_CHUNK_BYTES=8388608
 PORT=3000
+```
+
+Azure chunk signing requires a valid Matrix access token and verifies that the
+caller is currently joined to the requested room. The permanent Matrix event
+contains a signed opaque backend reference, not an Azure SAS URL. Playback uses
+that reference to obtain a short-lived, read-only SAS through the authenticated
+download endpoint. Upload SAS values are write-only and short-lived. Keep the
+Azure container private, never expose the account key to Flutter, and rotate
+the account key after upgrading from the older anonymous signing endpoint.
+
+The reverse proxy must route both Azure paths to this backend:
+
+```caddy
+handle /auth/media/* {
+    reverse_proxy xmo-auth:3000
+}
 ```
 
 Brevo is the production email provider. `EMAIL_USER` and
@@ -108,6 +144,11 @@ handle /account-deletion* {
     reverse_proxy xmo-auth:3000
 }
 ```
+
+Invite endpoints also accept the `/auth/otp` prefix used by the Flutter app.
+Invite previews intentionally omit the internal room ID. Redeeming a public
+unencrypted-room invite returns a join action; redeeming an encrypted private
+room invite returns a join-request action and does not bypass room approval.
 
 Donation checkout creation is server-side only because Thirdweb requires a
 secret key for `/v1/bridge/payments`. Do not put the Thirdweb secret key in the

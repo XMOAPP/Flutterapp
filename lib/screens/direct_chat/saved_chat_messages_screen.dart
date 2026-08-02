@@ -8,6 +8,7 @@ import '../../providers/matrix_provider.dart';
 import '../../services/matrix_attachment_downloader.dart';
 import '../../services/matrix_service.dart';
 import '../../theme.dart';
+import '../../utils/message_presentation.dart';
 import '../../widgets/incoming_call_fullscreen_scope.dart';
 import '../../widgets/matrix_chat/fullscreen_image_viewer.dart';
 import '../../widgets/matrix_chat/fullscreen_video_player.dart';
@@ -101,7 +102,7 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
     final query = _query.trim().toLowerCase();
     if (query.isEmpty) return _events;
     return _events.where((event) {
-      return event.body.toLowerCase().contains(query) ||
+      return matrixVisibleBody(event).toLowerCase().contains(query) ||
           (event.senderFromMemoryOrFallback.displayName ?? event.senderId)
               .toLowerCase()
               .contains(query);
@@ -329,7 +330,7 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
         event.messageType != MessageTypes.Notice) {
       return null;
     }
-    final text = event.body.trim();
+    final text = matrixVisibleBody(event).trim();
     return text.isEmpty ? null : text;
   }
 

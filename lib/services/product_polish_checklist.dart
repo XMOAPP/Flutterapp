@@ -93,7 +93,7 @@ class ProductPolishChecklist {
           'Device list, current-device label, verification state, rename, and delete flows work reliably.',
       requiredEvidence: [
         'Current device is sorted first',
-        'Verified state matches Matrix device keys',
+        'Verified state matches XMO device keys',
         'Delete device handles reauthentication when required',
       ],
     ),

@@ -12,7 +12,7 @@ import '../../theme.dart';
 import '../../widgets/story/story_avatar.dart';
 
 class GroupCallScreen extends StatefulWidget {
-  final GroupCall groupCall;
+  final XmoGroupCall groupCall;
 
   const GroupCallScreen({
     super.key,
@@ -33,27 +33,27 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
   bool _localVideoMirrored = true;
   String? _pinnedVideoUserId;
 
-  GroupCall get _call => widget.groupCall;
-  bool get _isVideoCall => _call.type == GroupCallType.Video;
+  XmoGroupCall get _call => widget.groupCall;
+  bool get _isVideoCall => _call.type == XmoGroupCallType.video;
   bool get _canEndCall => VoipService().canEndGroupCall(_call);
   bool get _shouldKeepCallInPip =>
-      !_closingWithoutPip && !_leaving && _call.state != GroupCallState.Ended;
+      !_closingWithoutPip && !_leaving && _call.state != GroupCallState.ended;
 
   @override
   void initState() {
     super.initState();
     VoipService().enterFullscreenCallRoute();
     _subscriptions.add(
-      _call.onGroupCallEvent.stream.listen((_) => _handleCallUpdate()),
+      _call.eventStream.listen((_) => _handleCallUpdate()),
     );
     _subscriptions.add(
-      _call.onGroupCallState.stream.listen((_) => _handleCallUpdate()),
+      _call.stateStream.listen((_) => _handleCallUpdate()),
     );
     _subscriptions.add(
-      _call.onStreamAdd.stream.listen((_) => _handleCallUpdate()),
+      _call.streamAddStream.listen((_) => _handleCallUpdate()),
     );
     _subscriptions.add(
-      _call.onStreamRemoved.stream.listen((_) => _handleCallUpdate()),
+      _call.streamRemovedStream.listen((_) => _handleCallUpdate()),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_isVideoCall) {
@@ -83,7 +83,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
     setState(() {});
     _startDurationTimer();
 
-    if (_call.state == GroupCallState.Ended && !_leaving) {
+    if (_call.state == GroupCallState.ended && !_leaving) {
       _leaving = true;
       Future.delayed(const Duration(milliseconds: 350), () {
         if (mounted && Navigator.canPop(context)) Navigator.pop(context);
@@ -611,8 +611,7 @@ class _VideoParticipantTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final renderer = stream.renderer;
-    final rtcRenderer = renderer is webrtc.RTCVideoRenderer ? renderer : null;
+    final rtcRenderer = VoipService().rendererFor(stream);
     final showVideo =
         rtcRenderer != null && stream.stream != null && !stream.isVideoMuted();
     final name = stream.displayName ?? MatrixService.cleanName(stream.userId);

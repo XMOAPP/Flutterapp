@@ -21,7 +21,7 @@ Future<void> _submitReport(HttpRequest request) async {
   if (token == null) {
     await _json(request, HttpStatus.unauthorized, {
       'success': false,
-      'error': 'Missing Matrix access token',
+      'error': 'Missing XMO session token',
     });
     return;
   }
@@ -110,7 +110,7 @@ Future<void> _listReports(HttpRequest request) async {
   final token = _userDirectoryBearerToken(request);
   if (token == null) {
     await _json(request, HttpStatus.unauthorized,
-        {'error': 'Missing Matrix access token'});
+        {'error': 'Missing XMO session token'});
     return;
   }
   final reviewerUserId = await _userDirectoryWhoami(token);
@@ -149,7 +149,7 @@ Future<void> _updateReport(HttpRequest request) async {
   final token = _userDirectoryBearerToken(request);
   if (token == null) {
     await _json(request, HttpStatus.unauthorized,
-        {'error': 'Missing Matrix access token'});
+        {'error': 'Missing XMO session token'});
     return;
   }
   final reviewerUserId = await _userDirectoryWhoami(token);

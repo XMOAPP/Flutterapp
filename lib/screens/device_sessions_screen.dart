@@ -59,7 +59,7 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
   Future<void> _signOut(DeviceSession session) async {
     final confirmed = await _confirm(
       'Sign out this device?',
-      'The Matrix session on ${_deviceName(session)} will be invalidated.',
+      'The XMO session on ${_deviceName(session)} will be signed out.',
     );
     if (!confirmed) return;
 
@@ -81,7 +81,7 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
   Future<void> _signOutAllOthers() async {
     final confirmed = await _confirm(
       'Sign out all other devices?',
-      'Every Matrix session except this device will be invalidated.',
+      'Every XMO session except this device will be signed out.',
     );
     if (!confirmed) return;
 
@@ -211,7 +211,7 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
                   padding: const EdgeInsets.fromLTRB(22, 12, 22, 24),
                   children: [
                     Text(
-                      'These are the Matrix sessions currently signed in to your account.',
+                      'These are the devices currently signed in to your XMO account.',
                       style: GoogleFonts.inter(
                         color: kLightGrey,
                         fontSize: 12,
@@ -542,7 +542,7 @@ class _PasswordDialogState extends State<_PasswordDialog> {
         cursorColor: kWhite,
         style: GoogleFonts.inter(color: kWhite),
         decoration: _deviceDialogFieldDecoration(
-          hintText: 'Matrix account password',
+          hintText: 'XMO account password',
         ),
         onSubmitted: (_) => _close(_controller.text),
       ),

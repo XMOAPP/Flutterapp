@@ -23,6 +23,7 @@ class AppLockService extends ChangeNotifier with WidgetsBindingObserver {
   bool _biometricEnabled = false;
   bool _locked = false;
   int _timeoutSeconds = _defaultTimeoutSeconds;
+  int? _pinLength;
   int _failedAttempts = 0;
   DateTime? _backgroundedAt;
   DateTime? _blockedUntil;
@@ -32,6 +33,7 @@ class AppLockService extends ChangeNotifier with WidgetsBindingObserver {
   bool get biometricEnabled => _biometricEnabled;
   bool get locked => _enabled && _locked;
   int get timeoutSeconds => _timeoutSeconds;
+  int? get pinLength => _pinLength;
   DateTime? get blockedUntil => _blockedUntil;
 
   String get _scope =>
@@ -45,6 +47,7 @@ class AppLockService extends ChangeNotifier with WidgetsBindingObserver {
     _enabled = false;
     _biometricEnabled = false;
     _locked = false;
+    _pinLength = null;
     _failedAttempts = 0;
     _blockedUntil = null;
 
@@ -59,10 +62,16 @@ class AppLockService extends ChangeNotifier with WidgetsBindingObserver {
       _storage.read(key: _key('enabled')),
       _storage.read(key: _key('biometric')),
       _storage.read(key: _key('timeout')),
+      _storage.read(key: _key('pin_length')),
     ]);
     _enabled = values[0] == 'true';
     _biometricEnabled = values[1] == 'true';
     _timeoutSeconds = int.tryParse(values[2] ?? '') ?? _defaultTimeoutSeconds;
+    final storedPinLength = int.tryParse(values[3] ?? '');
+    _pinLength =
+        storedPinLength != null && storedPinLength >= 4 && storedPinLength <= 8
+            ? storedPinLength
+            : null;
     _locked = _enabled;
     _initialized = true;
     WidgetsBinding.instance.removeObserver(this);
@@ -99,10 +108,12 @@ class AppLockService extends ChangeNotifier with WidgetsBindingObserver {
         key: _key('timeout'),
         value: timeoutSeconds.toString(),
       ),
+      _storage.write(key: _key('pin_length'), value: pin.length.toString()),
     ]);
     _enabled = true;
     _biometricEnabled = useBiometrics;
     _timeoutSeconds = timeoutSeconds;
+    _pinLength = pin.length;
     _locked = false;
     _failedAttempts = 0;
     notifyListeners();
@@ -129,6 +140,13 @@ class AppLockService extends ChangeNotifier with WidgetsBindingObserver {
       return false;
     }
 
+    if (_pinLength == null) {
+      await _storage.write(
+        key: _key('pin_length'),
+        value: pin.length.toString(),
+      );
+      _pinLength = pin.length;
+    }
     _unlock();
     return true;
   }
@@ -176,10 +194,12 @@ class AppLockService extends ChangeNotifier with WidgetsBindingObserver {
       _storage.delete(key: _key('timeout')),
       _storage.delete(key: _key('salt')),
       _storage.delete(key: _key('hash')),
+      _storage.delete(key: _key('pin_length')),
     ]);
     _enabled = false;
     _locked = false;
     _biometricEnabled = false;
+    _pinLength = null;
     notifyListeners();
   }
 

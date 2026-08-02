@@ -11,6 +11,7 @@ import '../../../models/xmo_contact_card.dart';
 import '../../../providers/matrix_provider.dart';
 import '../../../providers/story_provider.dart';
 import '../../../services/matrix_media_helper.dart';
+import '../../../utils/message_presentation.dart';
 import '../../story/story_viewer_screen.dart';
 import '../media_handler.dart';
 import 'audio_message_bubble.dart';
@@ -21,6 +22,7 @@ import 'package:provider/provider.dart';
 /// Text or file message bubble with rounded corners
 class TextOrFileMessageBubble extends StatelessWidget {
   final Event event;
+  final Event? replySourceEvent;
   final bool isMe;
   final String senderName;
   final String time;
@@ -39,6 +41,7 @@ class TextOrFileMessageBubble extends StatelessWidget {
   final Widget Function(Event) buildMessageStatus;
   final Future<Uint8List?> Function(Event, {bool getThumbnail})? loadImageBytes;
   final Future<Uint8List?> Function(Event)? loadVideoThumbnail;
+  final Event Function(Event)? resolveReplyDisplayEvent;
   final bool isEdited;
   final ValueChanged<String>? onReplyTap;
   final void Function(String roomId, String eventId)? onPrivateReplyTap;
@@ -48,6 +51,7 @@ class TextOrFileMessageBubble extends StatelessWidget {
   const TextOrFileMessageBubble({
     super.key,
     required this.event,
+    this.replySourceEvent,
     required this.isMe,
     required this.senderName,
     required this.time,
@@ -66,6 +70,7 @@ class TextOrFileMessageBubble extends StatelessWidget {
     required this.buildMessageStatus,
     this.loadImageBytes,
     this.loadVideoThumbnail,
+    this.resolveReplyDisplayEvent,
     this.isEdited = false,
     this.onReplyTap,
     this.onPrivateReplyTap,
@@ -78,10 +83,10 @@ class TextOrFileMessageBubble extends StatelessWidget {
     final contact = XmoContactCard.fromEventContent(event.content);
     final storyReply = _storyReplyContent(event);
     final displayBody = _storyReplyDisplayBody(
-      _stripReplyFallback(event.body),
+      matrixVisibleBody(event),
       storyReply,
     );
-    final hasReply = hasMatrixReply(event);
+    final hasReply = hasMatrixReply(replySourceEvent ?? event);
     final screenWidth = MediaQuery.sizeOf(context).width;
     final audioBubbleWidth = math.min(
       330.0,
@@ -128,15 +133,18 @@ class TextOrFileMessageBubble extends StatelessWidget {
                 ),
               ),
             ),
-          MessageReplyContext(
-            event: event,
-            isMe: isMe,
-            loadImageBytes: loadImageBytes,
-            loadVideoThumbnail: loadVideoThumbnail,
-            onTap: onReplyTap,
-            width: replyContextWidth,
-          ),
-          if (hasReply) const SizedBox(height: 6),
+          if (isAudio || isFile)
+            MessageReplyContext(
+              event: event,
+              replySourceEvent: replySourceEvent,
+              isMe: isMe,
+              loadImageBytes: loadImageBytes,
+              loadVideoThumbnail: loadVideoThumbnail,
+              resolveDisplayEvent: resolveReplyDisplayEvent,
+              onTap: onReplyTap,
+              width: replyContextWidth,
+            ),
+          if (hasReply && (isAudio || isFile)) const SizedBox(height: 6),
           // Audio message
           if (isAudio)
             Column(
@@ -352,6 +360,16 @@ class TextOrFileMessageBubble extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  MessageReplyContext(
+                    event: event,
+                    replySourceEvent: replySourceEvent,
+                    isMe: isMe,
+                    loadImageBytes: loadImageBytes,
+                    loadVideoThumbnail: loadVideoThumbnail,
+                    resolveDisplayEvent: resolveReplyDisplayEvent,
+                    onTap: onReplyTap,
+                  ),
+                  if (hasReply) const SizedBox(height: 6),
                   _StoryReplyContextPreview(
                     storyReply: storyReply,
                     isMe: isMe,
@@ -370,7 +388,7 @@ class TextOrFileMessageBubble extends StatelessWidget {
                     members: mentionMembers,
                     baseStyle: GoogleFonts.inter(
                       color: isMe ? kLimeGreen : kWhite,
-                      fontSize: _containsEmoji(displayBody) ? 17 : 14,
+                      fontSize: _isEmojiOnlyMessage(displayBody) ? 17 : 14,
                     ),
                     onMentionTap: onMentionTap,
                   ),
@@ -469,7 +487,7 @@ class _ContactMessageCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      contact.phoneNumber,
+                      contact.subtitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.inter(
@@ -605,33 +623,61 @@ class _FileMessageMenu extends StatelessWidget {
   }
 }
 
-String _stripReplyFallback(String body) {
-  final lines = body.replaceAll('\r\n', '\n').split('\n');
-  if (lines.isEmpty || !lines.first.startsWith('> ')) return body;
+bool _isEmojiOnlyMessage(String text) {
+  final trimmed = text.trim();
+  if (trimmed.isEmpty) return false;
 
-  var index = 0;
-  while (index < lines.length && lines[index].startsWith('> ')) {
-    index++;
-  }
-  while (index < lines.length && lines[index].trim().isEmpty) {
-    index++;
-  }
+  var hasEmoji = false;
+  for (final rune in trimmed.runes) {
+    if (_isEmojiRune(rune)) {
+      hasEmoji = true;
+      continue;
+    }
 
-  final stripped = lines.skip(index).join('\n').trim();
-  return stripped.isEmpty ? body : stripped;
+    final isEmojiJoinerOrModifier = rune == 0x200D ||
+        rune == 0x20E3 ||
+        rune == 0xFE0E ||
+        rune == 0xFE0F ||
+        (rune >= 0xE0020 && rune <= 0xE007F);
+    final isWhitespace = String.fromCharCode(rune).trim().isEmpty;
+    if (!isEmojiJoinerOrModifier && !isWhitespace) return false;
+  }
+  return hasEmoji;
 }
 
-bool _containsEmoji(String text) {
-  for (final rune in text.runes) {
-    final isEmoji = (rune >= 0x1F000 && rune <= 0x1FAFF) ||
-        (rune >= 0x2600 && rune <= 0x27BF) ||
-        (rune >= 0x2300 && rune <= 0x23FF) ||
-        (rune >= 0x2B00 && rune <= 0x2BFF) ||
-        (rune >= 0x1F1E6 && rune <= 0x1F1FF) ||
-        (rune >= 0x1F3FB && rune <= 0x1F3FF);
-    if (isEmoji) return true;
+bool _isEmojiRune(int rune) {
+  return (rune >= 0x1F000 && rune <= 0x1FAFF) ||
+      (rune >= 0x2600 && rune <= 0x27BF) ||
+      (rune >= 0x2300 && rune <= 0x23FF) ||
+      (rune >= 0x2B00 && rune <= 0x2BFF) ||
+      (rune >= 0x1F1E6 && rune <= 0x1F1FF) ||
+      (rune >= 0x1F3FB && rune <= 0x1F3FF);
+}
+
+bool _isEmojiCluster(String character) {
+  var hasEmoji = false;
+  var hasKeycap = false;
+
+  for (final rune in character.runes) {
+    if (_isEmojiRune(rune)) {
+      hasEmoji = true;
+      continue;
+    }
+    if (rune == 0x20E3) {
+      hasKeycap = true;
+      continue;
+    }
+
+    final isEmojiJoinerOrModifier = rune == 0x200D ||
+        rune == 0xFE0E ||
+        rune == 0xFE0F ||
+        (rune >= 0xE0020 && rune <= 0xE007F);
+    final isKeycapBase =
+        rune == 0x23 || rune == 0x2A || (rune >= 0x30 && rune <= 0x39);
+    if (!isEmojiJoinerOrModifier && !isKeycapBase) return false;
   }
-  return false;
+
+  return hasEmoji || hasKeycap;
 }
 
 class _MentionAwareText extends StatefulWidget {
@@ -702,13 +748,15 @@ class _MentionAwareTextState extends State<_MentionAwareText> {
     while (index < widget.text.length) {
       final nextToken = _nextToken(index, mentionTargets);
       if (nextToken == null) {
-        spans.add(TextSpan(text: widget.text.substring(index)));
+        _appendPlainTextSpans(spans, widget.text.substring(index));
         break;
       }
 
       if (nextToken.start > index) {
-        spans
-            .add(TextSpan(text: widget.text.substring(index, nextToken.start)));
+        _appendPlainTextSpans(
+          spans,
+          widget.text.substring(index, nextToken.start),
+        );
       }
 
       spans.add(nextToken.span);
@@ -716,6 +764,36 @@ class _MentionAwareTextState extends State<_MentionAwareText> {
     }
 
     return spans;
+  }
+
+  void _appendPlainTextSpans(List<TextSpan> spans, String text) {
+    if (text.isEmpty) return;
+
+    final buffer = StringBuffer();
+    bool? bufferIsEmoji;
+
+    void flush() {
+      if (buffer.isEmpty) return;
+      spans.add(
+        TextSpan(
+          text: buffer.toString(),
+          style: bufferIsEmoji == true
+              ? widget.baseStyle.copyWith(fontSize: 17)
+              : widget.baseStyle,
+        ),
+      );
+      buffer.clear();
+    }
+
+    for (final character in text.characters) {
+      final isEmoji = _isEmojiCluster(character);
+      if (bufferIsEmoji != null && bufferIsEmoji != isEmoji) {
+        flush();
+      }
+      bufferIsEmoji = isEmoji;
+      buffer.write(character);
+    }
+    flush();
   }
 
   _TextToken? _nextToken(int start, List<_MentionTarget> mentionTargets) {
@@ -1048,7 +1126,12 @@ class _PrivateReplyContextPreview extends StatelessWidget {
       case MessageTypes.Audio:
         return 'Audio';
       case MessageTypes.File:
-        return event.body.trim().isEmpty ? 'File' : event.body.trim();
+        final filename = event.content['filename'];
+        if (filename is String && filename.trim().isNotEmpty) {
+          return filename.trim();
+        }
+        final body = matrixVisibleBody(event).trim();
+        return body.isEmpty ? 'File' : body;
       default:
         return fallback.trim().isEmpty ? 'Original message' : fallback.trim();
     }
@@ -1101,7 +1184,7 @@ class _PrivateReplyMediaPreview extends StatelessWidget {
         height: 38,
         decoration: BoxDecoration(
           color: isMe ? const Color(0xFF1A2A1A) : kDarkGrey,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(4),
         ),
         clipBehavior: Clip.antiAlias,
         child: FutureBuilder<Uint8List?>(

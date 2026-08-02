@@ -1,123 +1,156 @@
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
+import 'package:provider/provider.dart';
+
 import '../../models/invite_link_models.dart';
+import '../../providers/matrix_provider.dart';
+import '../../services/invite_link_service.dart';
 import '../../services/matrix_service.dart';
+import '../../services/room_controls_service.dart';
 import '../shared/invite_link_view.dart';
 
-/// Invite Links Screen - Generate and share invite links for groups
 class InviteLinksScreen extends StatefulWidget {
-  final Room room;
-
   const InviteLinksScreen({super.key, required this.room});
+
+  final Room room;
 
   @override
   State<InviteLinksScreen> createState() => _InviteLinksScreenState();
 }
 
 class _InviteLinksScreenState extends State<InviteLinksScreen> {
+  late final MatrixService _matrixService;
   XmoInviteLink? _inviteLink;
   bool _loading = false;
 
   @override
   void initState() {
     super.initState();
-    _loadOrCreateInviteLink();
+    _matrixService = context.read<MatrixProvider>().service;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadOrCreateInviteLink();
+    });
   }
 
   Future<void> _loadOrCreateInviteLink() async {
+    if (_loading) return;
     setState(() => _loading = true);
     try {
-      final service = MatrixService();
-      final link = await service.getActiveInviteLink(widget.room.id) ??
-          await service.generateTrackedInviteLink(widget.room.id);
+      final links = await InviteLinkService.instance.listInvites(
+        _matrixService,
+        widget.room.id,
+      );
+      final active = _firstUsable(links);
+      final link = active ?? await _createWithJoinModeConfirmation();
+      if (!mounted) return;
+      setState(() => _inviteLink = link);
+    } on InviteLinkException catch (error) {
+      _showError(error.message);
+    } catch (_) {
+      _showError('Invite links are temporarily unavailable.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
 
-      if (mounted) {
-        setState(() {
-          _inviteLink = link;
-          _loading = false;
-        });
+  XmoInviteLink? _firstUsable(List<XmoInviteLink> links) {
+    for (final link in links) {
+      if (link.canBeUsed) return link;
+    }
+    return null;
+  }
+
+  Future<XmoInviteLink?> _createWithJoinModeConfirmation() async {
+    try {
+      return await InviteLinkService.instance.createInvite(
+        _matrixService,
+        widget.room.id,
+      );
+    } on InviteLinkException catch (error) {
+      if (error.statusCode != 409 ||
+          !RoomControlsService.isPrivateEncrypted(widget.room) ||
+          !mounted) {
+        rethrow;
       }
-    } catch (e) {
-      debugPrint('[InviteLinks] Error generating link: $e');
-      if (mounted) {
-        setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to generate link: $e'),
-            backgroundColor: Colors.red,
+      final enable = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Enable join requests?'),
+          content: const Text(
+            'People with this link can request access. The group remains private and encrypted, and an admin must approve each request.',
           ),
-        );
-      }
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Enable'),
+            ),
+          ],
+        ),
+      );
+      if (enable != true) return null;
+      await RoomControlsService.setJoinMode(widget.room, XmoJoinMode.request);
+      return InviteLinkService.instance.createInvite(
+        _matrixService,
+        widget.room.id,
+      );
     }
   }
 
   Future<void> _generateInviteLink() async {
+    if (_loading) return;
     setState(() => _loading = true);
     try {
-      final link = await MatrixService().generateTrackedInviteLink(
-        widget.room.id,
-      );
-
-      if (mounted) {
-        setState(() {
-          _inviteLink = link;
-          _loading = false;
-        });
-      }
-    } catch (e) {
-      debugPrint('[InviteLinks] Error regenerating link: $e');
-      if (mounted) {
-        setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to regenerate link: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      final link = await _createWithJoinModeConfirmation();
+      if (!mounted || link == null) return;
+      setState(() => _inviteLink = link);
+    } on InviteLinkException catch (error) {
+      _showError(error.message);
+    } catch (_) {
+      _showError('Could not create a new invite link.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _revokeInviteLink() async {
     final link = _inviteLink;
-    if (link == null) return;
-
+    if (link == null || _loading) return;
     setState(() => _loading = true);
     try {
-      await MatrixService().revokeInviteLink(widget.room.id, link.linkId);
-
-      if (mounted) {
-        setState(() {
-          _inviteLink = null;
-          _loading = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Invite link revoked'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint('[InviteLinks] Error revoking link: $e');
-      if (mounted) {
-        setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to revoke link: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      await InviteLinkService.instance.revokeInvite(
+        _matrixService,
+        link.linkId,
+      );
+      if (!mounted) return;
+      setState(() => _inviteLink = null);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invite link disabled')),
+      );
+    } on InviteLinkException catch (error) {
+      _showError(error.message);
+    } catch (_) {
+      _showError('Could not disable the invite link.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   Widget build(BuildContext context) {
-    final roomName = MatrixService().getResolvedDisplayName(widget.room);
     return InviteLinkView(
       title: 'Share Group',
-      roomName: roomName,
+      roomName: _matrixService.getResolvedDisplayName(widget.room),
       roomType: 'group',
       icon: Icons.group,
       inviteLink: _inviteLink?.url,

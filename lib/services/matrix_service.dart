@@ -8,8 +8,11 @@ import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
+import 'package:sqflite/sqflite.dart' as sqflite;
 import '../config/app_config.dart';
 import '../models/invite_link_models.dart';
+import '../utils/message_presentation.dart';
 import 'azure_blob_chunk_storage_service.dart';
 import 'channel_analytics_service.dart';
 import 'matrix_encrypted_media_helper.dart';
@@ -23,6 +26,14 @@ import 'video_quality_variant_provider_stub.dart'
     if (dart.library.io) 'video_quality_variant_provider_io.dart';
 import 'xmo_chunked_media_upload_service.dart';
 import 'xmo_media_compatibility.dart';
+import 'package:flutter_vodozemac/flutter_vodozemac.dart' as vodozemac;
+
+Future<sqflite.Database> _openMatrixDatabase() async {
+  final directory = await getApplicationSupportDirectory();
+  return sqflite.openDatabase(
+    p.join(directory.path, 'matrix_xmo_vodozemac_v1.db'),
+  );
+}
 
 enum XmoRoomKind { direct, group, channel, saved }
 
@@ -81,9 +92,9 @@ class MatrixService implements MatrixRepositoryApi {
       const MatrixEncryptedMediaHelper();
   late final XmoChunkedMediaUploadService _chunkedMediaUploadService =
       XmoChunkedMediaUploadService(
-    qualityVariantProvider: createVideoCompressionQualityVariantProvider(),
-    sourceNormalizer: createVideoCompressionSourceNormalizer(),
-  );
+        qualityVariantProvider: createVideoCompressionQualityVariantProvider(),
+        sourceNormalizer: createVideoCompressionSourceNormalizer(),
+      );
   AzureBlobChunkStorageService? _azureBlobChunkStorageService;
   final Set<String> _channelIdCache = {};
   final Set<String> _groupIdCache = {};
@@ -93,17 +104,22 @@ class MatrixService implements MatrixRepositoryApi {
   String? _profileDisplayName;
   String? _profileAvatarUrl;
   bool _profileAvatarRemoved = false;
+  bool _vodozemacActive = false;
+  bool get isVodozemacActive => _vodozemacActive;
 
   /// Repository boundaries retain the existing MatrixService API while making
   /// feature code unit-testable with repository fakes.
   late final MatrixSessionRepository sessionRepository =
       MatrixSdkSessionRepository(this);
-  late final MatrixRoomRepository roomRepository =
-      MatrixSdkRoomRepository(this);
-  late final MatrixMediaRepository mediaRepository =
-      MatrixSdkMediaRepository(this);
-  late final MatrixPushRepository pushRepository =
-      MatrixSdkPushRepository(this);
+  late final MatrixRoomRepository roomRepository = MatrixSdkRoomRepository(
+    this,
+  );
+  late final MatrixMediaRepository mediaRepository = MatrixSdkMediaRepository(
+    this,
+  );
+  late final MatrixPushRepository pushRepository = MatrixSdkPushRepository(
+    this,
+  );
   late final MatrixCommunityRepository communityRepository =
       MatrixSdkCommunityRepository(this);
 
@@ -144,12 +160,13 @@ class MatrixService implements MatrixRepositoryApi {
     final userId = _client.userID;
     if (userId == null) return null;
     return _client.rooms
-        .map((room) =>
-            room.getState(EventTypes.RoomMember, userId)?.asUser.avatarUrl)
-        .firstWhere(
-          (avatar) => avatar != null,
-          orElse: () => null,
+        .map(
+          (room) => room
+              .getState(EventTypes.RoomMember, userId)
+              ?.asUser(room)
+              .avatarUrl,
         )
+        .firstWhere((avatar) => avatar != null, orElse: () => null)
         ?.toString();
   }
 
@@ -181,11 +198,13 @@ class MatrixService implements MatrixRepositoryApi {
       throw Exception('Display name cannot be empty');
     }
 
-    await _client.setDisplayName(userId, cleanDisplayName);
+    await _client.setProfileField(userId, 'displayname', {
+      'displayname': cleanDisplayName,
+    });
     _profileDisplayName = cleanDisplayName;
 
     if (removeAvatar) {
-      await _client.setAvatarUrl(userId, Uri.parse(''));
+      await _client.setProfileField(userId, 'avatar_url', {'avatar_url': ''});
       _profileAvatarUrl = null;
       _profileAvatarRemoved = true;
     } else if (avatarBytes != null && avatarBytes.isNotEmpty) {
@@ -194,7 +213,9 @@ class MatrixService implements MatrixRepositoryApi {
         filename: avatarFileName,
         contentType: _imageContentTypeForName(avatarFileName),
       );
-      await _client.setAvatarUrl(userId, avatarMxc);
+      await _client.setProfileField(userId, 'avatar_url', {
+        'avatar_url': avatarMxc.toString(),
+      });
       _profileAvatarUrl = avatarMxc.toString();
       _profileAvatarRemoved = false;
     }
@@ -221,8 +242,23 @@ class MatrixService implements MatrixRepositoryApi {
     return 'https://matrix.to/#/${Uri.encodeComponent(roomIdOrAlias)}';
   }
 
+  /// Builds an XMO invite URL that hides Matrix server details from users.
+  static String buildXmoInviteLink({
+    required String roomId,
+    required String linkId,
+  }) {
+    final payload = <String, String>{
+      'r': roomId,
+      if (linkId.isNotEmpty) 'i': linkId,
+    };
+    final encoded = base64Url
+        .encode(utf8.encode(jsonEncode(payload)))
+        .replaceAll('=', '');
+    return 'xmo://join/$encoded';
+  }
+
   /// Extracts a room ID or alias from supported invite/search formats.
-  /// Accepts matrix.to links, raw room IDs (!room:server), and aliases (#name:server).
+  /// Accepts XMO links, matrix.to links, raw room IDs, and aliases.
   static String? extractRoomIdentifier(String input) {
     final value = input.trim();
     if (value.isEmpty) return null;
@@ -231,11 +267,15 @@ class MatrixService implements MatrixRepositoryApi {
     final uri = Uri.tryParse(value);
     if (uri == null) return null;
 
-    if (uri.host == 'matrix.to') {
+    final xmoRoomId = _extractRoomIdentifierFromXmoLink(uri);
+    if (xmoRoomId != null) return xmoRoomId;
+
+    if (uri.host.toLowerCase() == 'matrix.to') {
       final fragment = uri.fragment;
       if (fragment.isEmpty) return null;
-      final rawIdentifier =
-          fragment.startsWith('/') ? fragment.substring(1) : fragment;
+      final rawIdentifier = fragment.startsWith('/')
+          ? fragment.substring(1)
+          : fragment;
       final decodedIdentifier = Uri.decodeComponent(rawIdentifier);
       final identifier = decodedIdentifier.split('?').first;
       if (identifier.startsWith('!') || identifier.startsWith('#')) {
@@ -244,6 +284,47 @@ class MatrixService implements MatrixRepositoryApi {
     }
 
     return null;
+  }
+
+  static String? _extractRoomIdentifierFromXmoLink(Uri uri) {
+    if (uri.scheme.toLowerCase() != 'xmo' ||
+        uri.host.toLowerCase() != 'join' ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasPort ||
+        uri.fragment.isNotEmpty) {
+      return null;
+    }
+
+    final queryRoom = uri.queryParameters['room_id']?.trim();
+    if (_isSupportedRoomIdentifier(queryRoom)) return queryRoom;
+
+    if (uri.pathSegments.length != 1) return null;
+    final payload = uri.pathSegments.first.trim();
+    if (payload.isEmpty || payload.length > 2048) return null;
+
+    try {
+      final normalized = payload.padRight(
+        payload.length + ((4 - payload.length % 4) % 4),
+        '=',
+      );
+      final decoded = utf8.decode(base64Url.decode(normalized));
+      final data = jsonDecode(decoded);
+      if (data is! Map) return null;
+      final roomId = (data['r'] ?? data['room_id'])?.toString().trim();
+      if (_isSupportedRoomIdentifier(roomId)) return roomId;
+    } catch (_) {
+      return null;
+    }
+
+    return null;
+  }
+
+  static bool _isSupportedRoomIdentifier(String? value) {
+    if (value == null || value.length < 2 || value.length > 512) {
+      return false;
+    }
+    if (!value.startsWith('!') && !value.startsWith('#')) return false;
+    return !RegExp(r'[\x00-\x20\x7F\\]').hasMatch(value);
   }
 
   /// Classifies an XMO room from Matrix state content.
@@ -286,6 +367,12 @@ class MatrixService implements MatrixRepositoryApi {
   // ─── Init ────────────────────────────────────────────────────────────────────
 
   Future<void> init() async {
+    await vodozemac.init();
+    _vodozemacActive = true;
+    debugPrint(
+      '[MatrixService] Vodozemac Rust crypto engine initialized successfully',
+    );
+
     await Hive.initFlutter();
 
     // Open credential storage box
@@ -311,21 +398,17 @@ class MatrixService implements MatrixRepositoryApi {
 
     _client = Client(
       'XMO',
+      database: await MatrixSdkDatabase.init(
+        'matrix_xmo_vodozemac_v1',
+        database: kIsWeb ? null : await _openMatrixDatabase(),
+      ),
+      nativeImplementations: NativeImplementationsIsolate(
+        compute,
+        vodozemacInit: vodozemac.init,
+      ),
       verificationMethods: {
         KeyVerificationMethod.numbers,
         KeyVerificationMethod.emoji,
-      },
-      databaseBuilder: (_) async {
-        if (kIsWeb) {
-          final db = HiveCollectionsDatabase('matrix_xmo', '');
-          await db.open();
-          return db;
-        } else {
-          final dir = await getApplicationSupportDirectory();
-          final db = HiveCollectionsDatabase('matrix_xmo', dir.path);
-          await db.open();
-          return db;
-        }
       },
     );
 
@@ -458,10 +541,7 @@ class MatrixService implements MatrixRepositoryApi {
     await _clearLocalDrafts(accountUserId);
   }
 
-  Future<void> deactivateAccount({
-    String? password,
-    bool erase = true,
-  }) async {
+  Future<void> deactivateAccount({String? password, bool erase = true}) async {
     final token = accessToken;
     final accountUserId = userId;
     final loginUser = currentLoginUsername;
@@ -532,8 +612,8 @@ class MatrixService implements MatrixRepositoryApi {
         ..set(io.HttpHeaders.contentTypeHeader, 'application/json');
       request.write('{}');
       final response = await request.close().timeout(
-            const Duration(seconds: 20),
-          );
+        const Duration(seconds: 20),
+      );
       final responseBody = await utf8.decodeStream(response);
       if (response.statusCode >= 200 && response.statusCode < 300) return;
 
@@ -568,30 +648,30 @@ class MatrixService implements MatrixRepositoryApi {
     required String password,
     String? session,
   }) async {
-    final uri =
-        Uri.parse('$homeserverUrl/_matrix/client/v3/account/deactivate');
+    final uri = Uri.parse(
+      '$homeserverUrl/_matrix/client/v3/account/deactivate',
+    );
     final httpClient = io.HttpClient();
     try {
       final request = await httpClient.postUrl(uri);
       request.headers
         ..set(io.HttpHeaders.authorizationHeader, 'Bearer $token')
         ..set(io.HttpHeaders.contentTypeHeader, 'application/json');
-      request.write(jsonEncode({
-        'erase': erase,
-        'auth': {
-          'type': 'm.login.password',
-          'identifier': {
-            'type': 'm.id.user',
-            'user': authUser,
+      request.write(
+        jsonEncode({
+          'erase': erase,
+          'auth': {
+            'type': 'm.login.password',
+            'identifier': {'type': 'm.id.user', 'user': authUser},
+            'password': password,
+            if (session != null) 'session': session,
           },
-          'password': password,
-          if (session != null) 'session': session,
-        },
-      }));
+        }),
+      );
 
       final response = await request.close().timeout(
-            const Duration(seconds: 20),
-          );
+        const Duration(seconds: 20),
+      );
       final responseBody = await utf8.decodeStream(response);
       final decoded = responseBody.isEmpty
           ? <String, dynamic>{}
@@ -621,9 +701,7 @@ class MatrixService implements MatrixRepositoryApi {
         'Deleting account timed out. Check your connection and try again.',
       );
     } catch (e) {
-      throw MatrixAccountDeactivationException(
-        'Failed to delete account: $e',
-      );
+      throw MatrixAccountDeactivationException('Failed to delete account: $e');
     } finally {
       httpClient.close(force: true);
     }
@@ -689,9 +767,7 @@ class MatrixService implements MatrixRepositoryApi {
       'device_display_name': deviceDisplayName,
       'profile_tag': profileTag,
       'lang': lang,
-      'data': {
-        'url': pushGatewayUrl,
-      },
+      'data': {'url': pushGatewayUrl},
     });
   }
 
@@ -725,11 +801,12 @@ class MatrixService implements MatrixRepositoryApi {
       request.write(jsonEncode(body));
 
       final response = await request.close();
-      final responseBody =
-          utf8.decode(await consolidateHttpClientResponseBytes(response));
+      final responseBody = utf8.decode(
+        await consolidateHttpClientResponseBytes(response),
+      );
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception(
-          'Failed to configure Matrix pusher (${response.statusCode}): '
+          'Failed to configure XMO push endpoint (${response.statusCode}): '
           '$responseBody',
         );
       }
@@ -741,11 +818,11 @@ class MatrixService implements MatrixRepositoryApi {
   // ─── Rooms ────────────────────────────────────────────────────────────────
 
   List<Room> getRooms() => _client.rooms.where((room) {
-        final type = room.getState(roomTypeStateType)?.content;
-        if (type?['kind'] == 'directory') return false;
-        if (_isDuplicateSavedMessagesRoom(room)) return false;
-        return room.canonicalAlias != '#xmo-user-directory:$matrixServerName';
-      }).toList();
+    final type = room.getState(roomTypeStateType)?.content;
+    if (type?['kind'] == 'directory') return false;
+    if (_isDuplicateSavedMessagesRoom(room)) return false;
+    return room.canonicalAlias != '#xmo-user-directory:$matrixServerName';
+  }).toList();
 
   bool isSavedMessagesRoom(Room room) {
     if (_savedMessagesRoomId == room.id) return true;
@@ -816,10 +893,7 @@ class MatrixService implements MatrixRepositoryApi {
         StateEvent(
           type: roomTypeStateType,
           stateKey: '',
-          content: {
-            'kind': 'saved',
-            'is_saved_messages': true,
-          },
+          content: {'kind': 'saved', 'is_saved_messages': true},
         ),
         StateEvent(
           type: savedMessagesStateType,
@@ -989,8 +1063,9 @@ class MatrixService implements MatrixRepositoryApi {
   /// State used for rooms where XMO requires end-to-end encryption at creation.
   /// Existing rooms are intentionally not modified because enabling encryption
   /// later changes their security model and cannot recover old plaintext events.
-  List<StateEvent> privateRoomInitialState(
-      [List<StateEvent> extra = const []]) {
+  List<StateEvent> privateRoomInitialState([
+    List<StateEvent> extra = const [],
+  ]) {
     if (!_client.encryptionEnabled) {
       throw StateError(
         'End-to-end encryption is unavailable on this device. '
@@ -1002,9 +1077,7 @@ class MatrixService implements MatrixRepositoryApi {
       StateEvent(
         type: EventTypes.Encryption,
         stateKey: '',
-        content: {
-          'algorithm': Client.supportedGroupEncryptionAlgorithms.first,
-        },
+        content: {'algorithm': Client.supportedGroupEncryptionAlgorithms.first},
       ),
       StateEvent(
         type: roomSecurityStateType,
@@ -1021,15 +1094,15 @@ class MatrixService implements MatrixRepositoryApi {
   }
 
   StateEvent publicRoomSecurityState() => StateEvent(
-        type: roomSecurityStateType,
-        stateKey: '',
-        content: const {
-          'version': 1,
-          'visibility': 'public',
-          'encrypted': false,
-          'locked': true,
-        },
-      );
+    type: roomSecurityStateType,
+    stateKey: '',
+    content: const {
+      'version': 1,
+      'visibility': 'public',
+      'encrypted': false,
+      'locked': true,
+    },
+  );
 
   List<StateEvent> _channelInitialState(bool isPublic) {
     final base = <StateEvent>[
@@ -1069,8 +1142,10 @@ class MatrixService implements MatrixRepositoryApi {
     _publishedRoomIds.add(roomId);
     Future.delayed(const Duration(milliseconds: 500), () async {
       try {
-        await _client.setRoomVisibilityOnDirectory(roomId,
-            visibility: Visibility.public);
+        await _client.setRoomVisibilityOnDirectory(
+          roomId,
+          visibility: Visibility.public,
+        );
         debugPrint('[Matrix] Published room $roomId to public directory');
       } catch (e) {
         debugPrint('[Matrix] Failed to publish room to directory: $e');
@@ -1172,7 +1247,7 @@ class MatrixService implements MatrixRepositoryApi {
       if (rawJoinRule != 'public') continue;
       // Only publish rooms the current user has admin power in
       final ownPower = room.ownPowerLevel;
-      if (ownPower < 50) continue;
+      if (ownPower < PowerLevel.moderator) continue;
       _ensureDirectoryVisibility(room.id);
     }
   }
@@ -1185,6 +1260,52 @@ class MatrixService implements MatrixRepositoryApi {
       scanAndCacheChannels();
     } catch (e) {
       debugPrint('[Matrix] Joined room, but immediate type sync failed: $e');
+    }
+  }
+
+  /// Requests access to a private room whose join rule allows knocking.
+  Future<void> requestToJoinRoom(String roomId) async {
+    final token = accessToken;
+    if (token == null || token.isEmpty) {
+      throw StateError('Your XMO session is unavailable. Sign in again.');
+    }
+    if (!roomId.startsWith('!') || !roomId.contains(':')) {
+      throw ArgumentError.value(roomId, 'roomId', 'Invalid room identifier');
+    }
+
+    final base = Uri.parse(homeserverUrl);
+    final uri = base.replace(
+      pathSegments: ['_matrix', 'client', 'v3', 'knock', roomId],
+    );
+    final client = io.HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10);
+    try {
+      final request = await client.postUrl(uri);
+      request.headers.set(io.HttpHeaders.authorizationHeader, 'Bearer $token');
+      request.headers.contentType = io.ContentType.json;
+      request.write('{}');
+      final response = await request.close().timeout(
+        const Duration(seconds: 15),
+      );
+      final raw = utf8.decode(
+        await consolidateHttpClientResponseBytes(response),
+      );
+      if (response.statusCode >= 200 && response.statusCode < 300) return;
+
+      String message = 'Could not send the join request.';
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map && decoded['errcode'] == 'M_ALREADY_IN_ROOM') return;
+        if (decoded is Map && decoded['error'] is String) {
+          final serverMessage = (decoded['error'] as String).trim();
+          if (serverMessage.isNotEmpty && serverMessage.length <= 160) {
+            message = serverMessage;
+          }
+        }
+      } catch (_) {}
+      throw StateError(message);
+    } finally {
+      client.close(force: true);
     }
   }
 
@@ -1245,7 +1366,7 @@ class MatrixService implements MatrixRepositoryApi {
   ///   1. Server-side search via filter (Synapse directory index)
   ///   2. Broad fetch + client-side filter (catches poor indexing)
   ///   3. Room alias resolution fallback (direct lookup by name)
-  Future<List<PublicRoomsChunk>> searchPublicRooms(String query) async {
+  Future<List<PublishedRoomsChunk>> searchPublicRooms(String query) async {
     final trimmedQuery = query.trim();
     if (trimmedQuery.isEmpty) {
       final result = await _client.queryPublicRooms(limit: 200);
@@ -1253,7 +1374,7 @@ class MatrixService implements MatrixRepositoryApi {
     }
 
     final seen = <String>{};
-    final combined = <PublicRoomsChunk>[];
+    final combined = <PublishedRoomsChunk>[];
 
     // Direct invite lookup: pasted matrix.to links, raw room IDs, or aliases.
     final directIdentifier = extractRoomIdentifier(trimmedQuery);
@@ -1274,7 +1395,8 @@ class MatrixService implements MatrixRepositoryApi {
         if (seen.add(room.roomId)) combined.add(room);
       }
       debugPrint(
-          '[PublicSearch] Server-side returned ${serverResult.chunk.length} results');
+        '[PublicSearch] Server-side returned ${serverResult.chunk.length} results',
+      );
     } catch (e) {
       debugPrint('[PublicSearch] Server-side search failed: $e');
     }
@@ -1314,30 +1436,34 @@ class MatrixService implements MatrixRepositoryApi {
         final aliasResult = await _client.getRoomIdByAlias(fullAlias);
         final roomId = aliasResult.roomId;
         if (roomId != null && !seen.contains(roomId)) {
-          // Fetch room details to build a proper PublicRoomsChunk
+          // Fetch room details to build a proper PublishedRoomsChunk.
           seen.add(roomId);
-          combined.add(PublicRoomsChunk(
-            numJoinedMembers: 0,
-            roomId: roomId,
-            worldReadable: false,
-            guestCanJoin: false,
-            name: trimmedQuery,
-            canonicalAlias: fullAlias,
-          ));
+          combined.add(
+            PublishedRoomsChunk(
+              numJoinedMembers: 0,
+              roomId: roomId,
+              worldReadable: false,
+              guestCanJoin: false,
+              name: trimmedQuery,
+              canonicalAlias: fullAlias,
+            ),
+          );
           debugPrint('[PublicSearch] Found room via alias: $roomId');
         }
       } catch (e) {
         debugPrint(
-            '[PublicSearch] Alias resolution failed (expected if no match): $e');
+          '[PublicSearch] Alias resolution failed (expected if no match): $e',
+        );
       }
     }
 
     debugPrint(
-        '[PublicSearch] Combined total: ${combined.length} results for "$trimmedQuery"');
+      '[PublicSearch] Combined total: ${combined.length} results for "$trimmedQuery"',
+    );
     return combined;
   }
 
-  Future<PublicRoomsChunk?> _publicRoomChunkFromIdentifier(
+  Future<PublishedRoomsChunk?> _publicRoomChunkFromIdentifier(
     String identifier,
   ) async {
     if (identifier.startsWith('#')) {
@@ -1345,7 +1471,7 @@ class MatrixService implements MatrixRepositoryApi {
         final aliasResult = await _client.getRoomIdByAlias(identifier);
         final roomId = aliasResult.roomId;
         if (roomId == null) return null;
-        return PublicRoomsChunk(
+        return PublishedRoomsChunk(
           numJoinedMembers: 0,
           roomId: roomId,
           worldReadable: false,
@@ -1361,7 +1487,7 @@ class MatrixService implements MatrixRepositoryApi {
 
     if (identifier.startsWith('!')) {
       final joinedRoom = getRoomById(identifier);
-      return PublicRoomsChunk(
+      return PublishedRoomsChunk(
         numJoinedMembers: joinedRoom?.summary.mJoinedMemberCount ?? 0,
         roomId: identifier,
         worldReadable: false,
@@ -1386,8 +1512,9 @@ class MatrixService implements MatrixRepositoryApi {
   bool isDirectRoom(Room room) {
     return classifyRoomKind(
           typeContent: room.getState(roomTypeStateType)?.content,
-          powerLevelsContent:
-              room.getState(EventTypes.RoomPowerLevels)?.content,
+          powerLevelsContent: room
+              .getState(EventTypes.RoomPowerLevels)
+              ?.content,
           isDirectChat: room.isDirectChat,
         ) ==
         XmoRoomKind.direct;
@@ -1450,12 +1577,10 @@ class MatrixService implements MatrixRepositoryApi {
     final room = _client.getRoomById(roomId);
     if (room == null) return;
 
-    await _client.setRoomStateWithKey(
-      roomId,
-      roomTypeStateType,
-      '',
-      {'is_direct': true, 'kind': 'direct'},
-    );
+    await _client.setRoomStateWithKey(roomId, roomTypeStateType, '', {
+      'is_direct': true,
+      'kind': 'direct',
+    });
     await room.addToDirectChat(otherUserId);
   }
 
@@ -1475,7 +1600,8 @@ class MatrixService implements MatrixRepositoryApi {
         await room.addToDirectChat(peerUserId);
       } catch (e) {
         debugPrint(
-            '[Matrix] Failed to repair direct mapping for ${room.id}: $e');
+          '[Matrix] Failed to repair direct mapping for ${room.id}: $e',
+        );
       }
     }
   }
@@ -1511,7 +1637,7 @@ class MatrixService implements MatrixRepositoryApi {
     final linkId = now.microsecondsSinceEpoch.toString();
     final link = XmoInviteLink(
       linkId: linkId,
-      url: '${buildMatrixToLink(room.id)}?xmo_invite=$linkId',
+      url: buildXmoInviteLink(roomId: room.id, linkId: linkId),
       roomId: room.id,
       createdAt: now,
       createdBy: _client.userID ?? '',
@@ -1562,12 +1688,9 @@ class MatrixService implements MatrixRepositoryApi {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
 
-    await room.client.setRoomStateWithKey(
-      roomId,
-      _inviteLinksStateType,
-      '',
-      {'links': links.map((link) => link.toJson()).toList()},
-    );
+    await room.client.setRoomStateWithKey(roomId, _inviteLinksStateType, '', {
+      'links': links.map((link) => link.toJson()).toList(),
+    });
   }
 
   // ─── Messaging ────────────────────────────────────────────────────────────
@@ -1648,20 +1771,21 @@ class MatrixService implements MatrixRepositoryApi {
       contentType: preparedSticker.contentType,
     );
 
-    await room.sendEvent({
-      'body': fileName,
-      if (preparedSticker.encryptedFile == null) 'url': stickerMxc.toString(),
-      if (preparedSticker.encryptedFile != null)
-        'file': _encryptedFileContent(
-          preparedSticker.encryptedFile!,
-          stickerMxc,
-          mimeType: mimeType,
-        ),
-      'info': {
-        'mimetype': mimeType,
-        'size': bytes.length,
+    await room.sendEvent(
+      {
+        'body': fileName,
+        if (preparedSticker.encryptedFile == null) 'url': stickerMxc.toString(),
+        if (preparedSticker.encryptedFile != null)
+          'file': _encryptedFileContent(
+            preparedSticker.encryptedFile!,
+            stickerMxc,
+            mimeType: mimeType,
+          ),
+        'info': {'mimetype': mimeType, 'size': bytes.length},
       },
-    }, type: EventTypes.Sticker, inReplyTo: inReplyTo);
+      type: EventTypes.Sticker,
+      inReplyTo: inReplyTo,
+    );
   }
 
   Future<void> sendPoll({
@@ -1698,13 +1822,17 @@ class MatrixService implements MatrixRepositoryApi {
       'answers': answers,
     };
 
-    await room.sendEvent({
-      'body': cleanQuestion,
-      'org.matrix.msc1767.text': cleanQuestion,
-      'm.text': cleanQuestion,
-      'org.matrix.msc3381.poll.start': pollStart,
-      'm.poll.start': pollStart,
-    }, type: 'm.poll.start', inReplyTo: inReplyTo);
+    await room.sendEvent(
+      {
+        'body': cleanQuestion,
+        'org.matrix.msc1767.text': cleanQuestion,
+        'm.text': cleanQuestion,
+        'org.matrix.msc3381.poll.start': pollStart,
+        'm.poll.start': pollStart,
+      },
+      type: 'm.poll.start',
+      inReplyTo: inReplyTo,
+    );
   }
 
   Future<void> sendPollResponse({
@@ -1720,10 +1848,7 @@ class MatrixService implements MatrixRepositoryApi {
     };
 
     await room.sendEvent({
-      'm.relates_to': {
-        'rel_type': 'm.reference',
-        'event_id': pollEventId,
-      },
+      'm.relates_to': {'rel_type': 'm.reference', 'event_id': pollEventId},
       'org.matrix.msc3381.poll.response': response,
       'm.poll.response': response,
     }, type: 'm.poll.response');
@@ -1741,22 +1866,24 @@ class MatrixService implements MatrixRepositoryApi {
     if (url.contains('@')) return null;
     final normalizedUrl =
         url.startsWith(RegExp(r'https?://', caseSensitive: false))
-            ? url
-            : 'https://$url';
+        ? url
+        : 'https://$url';
     final uri = Uri.tryParse(normalizedUrl);
     if (uri == null || uri.host.isEmpty) return null;
 
     final fallback = {
       'url': normalizedUrl,
       'host': uri.host,
-      'title':
-          uri.host.replaceFirst(RegExp(r'^www\.', caseSensitive: false), ''),
+      'title': uri.host.replaceFirst(
+        RegExp(r'^www\.', caseSensitive: false),
+        '',
+      ),
     };
 
-    final richPreview = await _fetchRichLinkPreview(uri, fallback).timeout(
-      const Duration(milliseconds: 1200),
-      onTimeout: () => fallback,
-    );
+    final richPreview = await _fetchRichLinkPreview(
+      uri,
+      fallback,
+    ).timeout(const Duration(milliseconds: 1200), onTimeout: () => fallback);
     return richPreview ?? fallback;
   }
 
@@ -1771,9 +1898,9 @@ class MatrixService implements MatrixRepositoryApi {
       ..userAgent = 'XMO/1.0 link preview';
 
     try {
-      final request = await client.getUrl(uri).timeout(
-            const Duration(milliseconds: 900),
-          );
+      final request = await client
+          .getUrl(uri)
+          .timeout(const Duration(milliseconds: 900));
       request.headers.set(
         io.HttpHeaders.acceptHeader,
         'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -1782,8 +1909,8 @@ class MatrixService implements MatrixRepositoryApi {
       request.maxRedirects = 4;
 
       final response = await request.close().timeout(
-            const Duration(milliseconds: 1200),
-          );
+        const Duration(milliseconds: 1200),
+      );
       final contentType = response.headers.contentType?.mimeType.toLowerCase();
       if (response.statusCode < 200 ||
           response.statusCode >= 400 ||
@@ -1801,7 +1928,8 @@ class MatrixService implements MatrixRepositoryApi {
 
       if (chunks.isEmpty) return fallback;
       final html = utf8.decode(chunks, allowMalformed: true);
-      final title = _firstNonEmpty([
+      final title =
+          _firstNonEmpty([
             _htmlMetaContent(html, 'og:title'),
             _htmlMetaContent(html, 'twitter:title'),
             _htmlTitle(html),
@@ -1881,9 +2009,7 @@ class MatrixService implements MatrixRepositoryApi {
   }
 
   String _cleanHtmlText(String value) {
-    return _decodeHtmlEntities(
-      value.replaceAll(RegExp(r'\s+'), ' ').trim(),
-    );
+    return _decodeHtmlEntities(value.replaceAll(RegExp(r'\s+'), ' ').trim());
   }
 
   String _decodeHtmlEntities(String value) {
@@ -1943,8 +2069,10 @@ class MatrixService implements MatrixRepositoryApi {
           if (preparedAudio.encryptedFile == null) 'url': audioMxc.toString(),
           if (preparedAudio.encryptedFile != null)
             'file': _encryptedFileContent(
-                preparedAudio.encryptedFile!, audioMxc,
-                mimeType: mimeType),
+              preparedAudio.encryptedFile!,
+              audioMxc,
+              mimeType: mimeType,
+            ),
           'info': {
             'mimetype': mimeType,
             'size': audioBytes.length,
@@ -1992,6 +2120,7 @@ class MatrixService implements MatrixRepositoryApi {
   }
 
   Map<String, dynamic> _forwardableContent(Event event) {
+    final isReply = hasMatrixReply(event);
     final editedContent = event.content['m.new_content'];
     final source = editedContent is Map
         ? Map<String, dynamic>.from(editedContent)
@@ -2007,11 +2136,16 @@ class MatrixService implements MatrixRepositoryApi {
     };
 
     if (copied['body'] is String) {
-      copied['body'] = _stripReplyFallback(copied['body'] as String);
+      copied['body'] = stripMatrixReplyFallback(
+        copied['body'] as String,
+        isReply: isReply,
+      );
     }
     if (copied['formatted_body'] is String) {
-      copied['formatted_body'] =
-          _stripFormattedReplyFallback(copied['formatted_body'] as String);
+      copied['formatted_body'] = stripMatrixFormattedReplyFallback(
+        copied['formatted_body'] as String,
+        isReply: isReply,
+      );
       if ((copied['formatted_body'] as String).trim().isEmpty) {
         copied.remove('formatted_body');
         copied.remove('format');
@@ -2019,22 +2153,6 @@ class MatrixService implements MatrixRepositoryApi {
     }
 
     return copied;
-  }
-
-  String _stripReplyFallback(String body) {
-    if (!body.startsWith('> ')) return body;
-    final lines = body.split('\n');
-    final separatorIndex = lines.indexWhere((line) => line.trim().isEmpty);
-    if (separatorIndex == -1 || separatorIndex == lines.length - 1) {
-      return body;
-    }
-    return lines.sublist(separatorIndex + 1).join('\n');
-  }
-
-  String _stripFormattedReplyFallback(String html) {
-    final replyEnd = html.indexOf('</mx-reply>');
-    if (replyEnd == -1) return html;
-    return html.substring(replyEnd + '</mx-reply>'.length).trimLeft();
   }
 
   /// Sends a file/image/video to a room through XMO's media path.
@@ -2084,12 +2202,12 @@ class MatrixService implements MatrixRepositoryApi {
           'filename': fileName,
           if (preparedFile.encryptedFile == null) 'url': fileMxc.toString(),
           if (preparedFile.encryptedFile != null)
-            'file': _encryptedFileContent(preparedFile.encryptedFile!, fileMxc,
-                mimeType: mimeType),
-          'info': {
-            'mimetype': mimeType,
-            'size': bytes.length,
-          },
+            'file': _encryptedFileContent(
+              preparedFile.encryptedFile!,
+              fileMxc,
+              mimeType: mimeType,
+            ),
+          'info': {'mimetype': mimeType, 'size': bytes.length},
           if (xmoContact != null) 'com.xmo.contact': xmoContact,
         },
         xmoStream: xmoStream,
@@ -2130,10 +2248,7 @@ class MatrixService implements MatrixRepositoryApi {
     );
     _throwIfCancelled(isCancelled);
     final cleanCaption = caption.trim();
-    final info = <String, dynamic>{
-      'mimetype': mimeType,
-      'size': bytes.length,
-    };
+    final info = <String, dynamic>{'mimetype': mimeType, 'size': bytes.length};
 
     if (thumbnailBytes != null && thumbnailBytes.isNotEmpty) {
       try {
@@ -2181,8 +2296,10 @@ class MatrixService implements MatrixRepositoryApi {
           if (preparedImage.encryptedFile == null) 'url': imageMxc.toString(),
           if (preparedImage.encryptedFile != null)
             'file': _encryptedFileContent(
-                preparedImage.encryptedFile!, imageMxc,
-                mimeType: mimeType),
+              preparedImage.encryptedFile!,
+              imageMxc,
+              mimeType: mimeType,
+            ),
           'info': info,
         },
         xmoStream: xmoStream,
@@ -2278,7 +2395,8 @@ class MatrixService implements MatrixRepositoryApi {
       try {
         _throwIfCancelled(isCancelled);
         debugPrint(
-            '[sendVideo] Uploading thumbnail (${thumbBytes.length} bytes)...');
+          '[sendVideo] Uploading thumbnail (${thumbBytes.length} bytes)...',
+        );
         final preparedThumb = await _prepareMediaUpload(
           room,
           bytes: thumbBytes,
@@ -2318,13 +2436,14 @@ class MatrixService implements MatrixRepositoryApi {
     final shouldAttachXmoStream = preparedVideo.encryptedFile != null;
     final effectiveXmoStream = shouldAttachXmoStream
         ? xmoStream ??
-            await _buildLargeVideoStreamManifest(
-              videoBytes: effectiveVideoBytes,
-              videoFileName: effectiveVideoFileName,
-              videoMimeType: effectiveVideoMimeType,
-              durationMs: durationMs,
-              isCancelled: isCancelled,
-            )
+              await _buildLargeVideoStreamManifest(
+                roomId: room.id,
+                videoBytes: effectiveVideoBytes,
+                videoFileName: effectiveVideoFileName,
+                videoMimeType: effectiveVideoMimeType,
+                durationMs: durationMs,
+                isCancelled: isCancelled,
+              )
         : null;
     _throwIfCancelled(isCancelled);
 
@@ -2339,8 +2458,10 @@ class MatrixService implements MatrixRepositoryApi {
           if (preparedVideo.encryptedFile == null) 'url': videoMxc.toString(),
           if (preparedVideo.encryptedFile != null)
             'file': _encryptedFileContent(
-                preparedVideo.encryptedFile!, videoMxc,
-                mimeType: effectiveVideoMimeType),
+              preparedVideo.encryptedFile!,
+              videoMxc,
+              mimeType: effectiveVideoMimeType,
+            ),
           'info': info,
         },
         xmoStream: effectiveXmoStream,
@@ -2351,6 +2472,7 @@ class MatrixService implements MatrixRepositoryApi {
   }
 
   Future<Map<String, dynamic>?> _buildLargeVideoStreamManifest({
+    required String roomId,
     required Uint8List videoBytes,
     required String videoFileName,
     required String videoMimeType,
@@ -2374,34 +2496,36 @@ class MatrixService implements MatrixRepositoryApi {
         videoMimeType: videoMimeType,
         durationMs: durationMs,
         isCancelled: isCancelled,
-        uploadChunk: ({
-          required encryptedBytes,
-          required fileName,
-          required contentType,
-          required chunkIndex,
-        }) async {
-          final azureStorage = _azureChunkStorage;
-          if (azureStorage != null) {
-            try {
-              return await azureStorage.uploadEncryptedChunk(
+        uploadChunk:
+            ({
+              required encryptedBytes,
+              required fileName,
+              required contentType,
+              required chunkIndex,
+            }) async {
+              final azureStorage = _azureChunkStorage;
+              if (azureStorage != null) {
+                try {
+                  return await azureStorage.uploadEncryptedChunk(
+                    encryptedBytes: encryptedBytes,
+                    fileName: fileName,
+                    contentType: contentType,
+                    chunkIndex: chunkIndex,
+                    roomId: roomId,
+                  );
+                } catch (e) {
+                  debugPrint(
+                    '[sendVideo] Azure stream chunk upload failed; '
+                    'falling back to standard media: $e',
+                  );
+                }
+              }
+              return _uploadMatrixStreamChunk(
                 encryptedBytes: encryptedBytes,
                 fileName: fileName,
                 contentType: contentType,
-                chunkIndex: chunkIndex,
               );
-            } catch (e) {
-              debugPrint(
-                '[sendVideo] Azure stream chunk upload failed; '
-                'falling back to Matrix media: $e',
-              );
-            }
-          }
-          return _uploadMatrixStreamChunk(
-            encryptedBytes: encryptedBytes,
-            fileName: fileName,
-            contentType: contentType,
-          );
-        },
+            },
       );
       debugPrint(
         '[sendVideo] Encrypted stream chunks uploaded: '
@@ -2412,7 +2536,8 @@ class MatrixService implements MatrixRepositoryApi {
       throw const MatrixUploadCancelledException();
     } catch (e) {
       debugPrint(
-          '[sendVideo] Stream chunk upload failed; sending fallback only: $e');
+        '[sendVideo] Stream chunk upload failed; sending fallback only: $e',
+      );
       return null;
     }
   }
@@ -2421,8 +2546,10 @@ class MatrixService implements MatrixRepositoryApi {
     if (!AppConfig.useAzureBlobChunks) return null;
     final endpoint = Uri.tryParse(AppConfig.azureChunkSignUrl.trim());
     if (endpoint == null || !endpoint.hasScheme) return null;
-    return _azureBlobChunkStorageService ??=
-        AzureBlobChunkStorageService(signingEndpoint: endpoint);
+    return _azureBlobChunkStorageService ??= AzureBlobChunkStorageService(
+      signingEndpoint: endpoint,
+      accessTokenProvider: () => accessToken,
+    );
   }
 
   Future<Uri> _uploadMatrixStreamChunk({
@@ -2444,10 +2571,7 @@ class MatrixService implements MatrixRepositoryApi {
     required String mimeType,
   }) async {
     if (!room.encrypted || !_client.fileEncryptionEnabled) {
-      return _PreparedMediaUpload(
-        bytes: bytes,
-        contentType: mimeType,
-      );
+      return _PreparedMediaUpload(bytes: bytes, contentType: mimeType);
     }
 
     final encryptedFile = await _encryptedMediaHelper.encrypt(bytes);
@@ -2486,7 +2610,7 @@ class MatrixService implements MatrixRepositoryApi {
     void Function(int uploadedBytes, int totalBytes)? onProgress,
     bool Function()? isCancelled,
   }) async {
-    if (onProgress == null) {
+    if (onProgress == null && isCancelled == null) {
       return _client.uploadContent(
         content,
         filename: filename,
@@ -2502,7 +2626,7 @@ class MatrixService implements MatrixRepositoryApi {
 
     final token = accessToken;
     if (token == null || token.isEmpty) {
-      throw Exception('Missing Matrix access token');
+      throw Exception('Your XMO session is unavailable. Sign in again.');
     }
 
     final uploadUri = Uri.parse(homeserverUrl).resolveUri(
@@ -2526,7 +2650,7 @@ class MatrixService implements MatrixRepositoryApi {
 
       const chunkSize = 16 * 1024;
       var uploaded = 0;
-      onProgress(0, content.lengthInBytes);
+      onProgress?.call(0, content.lengthInBytes);
 
       for (var offset = 0; offset < content.length; offset += chunkSize) {
         _throwIfCancelled(isCancelled);
@@ -2534,7 +2658,95 @@ class MatrixService implements MatrixRepositoryApi {
         request.add(content.sublist(offset, end));
         await request.flush();
         uploaded = end;
-        onProgress(uploaded, content.lengthInBytes);
+        onProgress?.call(uploaded, content.lengthInBytes);
+      }
+      _throwIfCancelled(isCancelled);
+
+      final response = await request.close();
+      _throwIfCancelled(isCancelled);
+      final responseBytes = await consolidateHttpClientResponseBytes(response);
+      if (response.statusCode != io.HttpStatus.ok) {
+        throw Exception(
+          'Upload failed (${response.statusCode}): ${utf8.decode(responseBytes)}',
+        );
+      }
+      final responseJson = jsonDecode(utf8.decode(responseBytes));
+      return Uri.parse(responseJson['content_uri'] as String);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<Uri> uploadBytesWithProgress(
+    Uint8List content, {
+    String? filename,
+    String? contentType,
+    void Function(int uploadedBytes, int totalBytes)? onProgress,
+    bool Function()? isCancelled,
+  }) => _uploadContentWithProgress(
+    content,
+    filename: filename,
+    contentType: contentType,
+    onProgress: onProgress,
+    isCancelled: isCancelled,
+  );
+
+  /// Uploads a local file without first loading the complete file into memory.
+  ///
+  /// This is public for feature services that already own a local file, such
+  /// as Story video creation. Existing byte-based media upload paths remain
+  /// unchanged.
+  Future<Uri> uploadFileContentWithProgress(
+    String filePath, {
+    String? filename,
+    String? contentType,
+    void Function(int uploadedBytes, int totalBytes)? onProgress,
+    bool Function()? isCancelled,
+  }) async {
+    final file = io.File(filePath);
+    if (!await file.exists()) {
+      throw const io.FileSystemException('Upload source no longer exists');
+    }
+
+    final fileLength = await file.length();
+    final mediaConfig = await _client.getConfig();
+    final maxMediaSize = mediaConfig.mUploadSize;
+    if (maxMediaSize != null && maxMediaSize < fileLength) {
+      throw FileTooBigMatrixException(fileLength, maxMediaSize);
+    }
+
+    final token = accessToken;
+    if (token == null || token.isEmpty) {
+      throw Exception('Your XMO session is unavailable. Sign in again.');
+    }
+
+    final uploadUri = Uri.parse(homeserverUrl).resolveUri(
+      Uri(
+        path: '/_matrix/media/v3/upload',
+        queryParameters: {
+          if (filename != null && filename.isNotEmpty) 'filename': filename,
+        },
+      ),
+    );
+
+    final client = io.HttpClient();
+    try {
+      _throwIfCancelled(isCancelled);
+      final request = await client.postUrl(uploadUri);
+      request.contentLength = fileLength;
+      request.headers.set(io.HttpHeaders.authorizationHeader, 'Bearer $token');
+      if (contentType != null && contentType.isNotEmpty) {
+        request.headers.set(io.HttpHeaders.contentTypeHeader, contentType);
+      }
+
+      var uploaded = 0;
+      onProgress?.call(0, fileLength);
+      await for (final chunk in file.openRead()) {
+        _throwIfCancelled(isCancelled);
+        request.add(chunk);
+        await request.flush();
+        uploaded += chunk.length;
+        onProgress?.call(uploaded, fileLength);
       }
       _throwIfCancelled(isCancelled);
 
@@ -2562,10 +2774,8 @@ class MatrixService implements MatrixRepositoryApi {
   /// Returns the current access token for authenticated requests.
   String? get accessToken => _client.accessToken;
 
-  MatrixMediaHelper get mediaHelper => MatrixMediaHelper(
-        homeserverUrl: homeserverUrl,
-        accessToken: accessToken,
-      );
+  MatrixMediaHelper get mediaHelper =>
+      MatrixMediaHelper(homeserverUrl: homeserverUrl, accessToken: accessToken);
 
   /// Resolves Matrix media without exposing the access token in its URL.
   MatrixMediaRequest? getMediaRequest(

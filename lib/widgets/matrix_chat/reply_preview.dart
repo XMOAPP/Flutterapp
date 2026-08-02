@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import '../../theme.dart';
 import '../../services/matrix_service.dart';
+import '../../utils/message_presentation.dart';
 
 /// Reply Preview Widget - Shows when replying to a message
 class ReplyPreview extends StatelessWidget {
@@ -89,6 +90,6 @@ class ReplyPreview extends StatelessWidget {
       return '📎 File';
     }
 
-    return replyToEvent.body;
+    return matrixVisibleBody(replyToEvent, fallback: 'Message');
   }
 }

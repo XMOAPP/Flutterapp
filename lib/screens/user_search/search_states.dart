@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../services/matrix_service.dart';
 import '../../theme.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -86,12 +85,12 @@ class EmptyState extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            'Type a username or Matrix ID',
+            'Type an XMO username',
             style: GoogleFonts.inter(color: kMediumGrey, fontSize: 12),
           ),
           const SizedBox(height: 8),
           Text(
-            'Examples: kiran, @kiran:${MatrixService.matrixServerName}',
+            'Example: @kiran',
             style: GoogleFonts.inter(color: kMediumGrey, fontSize: 11),
           ),
         ],

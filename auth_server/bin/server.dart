@@ -6,6 +6,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
+import 'package:cryptography/cryptography.dart' as cryptography;
 import 'package:googleapis_auth/auth_io.dart';
 
 import 'package:xmo_auth_server/src/email_service.dart';
@@ -19,6 +20,7 @@ part '../lib/src/handlers/azure_blob_handler.dart';
 part '../lib/src/handlers/account_deletion_handler.dart';
 part '../lib/src/handlers/channel_analytics_handler.dart';
 part '../lib/src/handlers/donation_handler.dart';
+part '../lib/src/handlers/invite_handler.dart';
 part '../lib/src/handlers/otp_handler.dart';
 part '../lib/src/handlers/password_reset_handler.dart';
 part '../lib/src/handlers/push_handler.dart';
@@ -56,6 +58,7 @@ final _walletAuthService = WalletAuthService(
 final _azureBlobConfig = AzureBlobConfig.fromEnvironment(Platform.environment);
 final _reportConfig = ReportConfig.fromEnvironment(Platform.environment);
 final _accountDeletionStore = <String, _AccountDeletionRecord>{};
+final _inviteConfig = InviteConfig.fromEnvironment(Platform.environment);
 const _otpEndpoints = OtpEndpointModule(send: _sendOtp, verify: _verifyOtp);
 const _passwordResetEndpoints = PasswordResetEndpointModule(
   linkEmail: _linkPasswordResetEmail,
@@ -63,12 +66,21 @@ const _passwordResetEndpoints = PasswordResetEndpointModule(
   complete: _completePasswordReset,
 );
 const _donationEndpoints = DonationEndpointModule(_createDonationPayment);
+const _inviteEndpoints = InviteEndpointModule(
+  create: _createInviteLink,
+  list: _listInviteLinks,
+  revoke: _revokeInviteLink,
+  preview: _previewInviteLink,
+  avatar: _serveInviteAvatar,
+  redeem: _redeemInviteLink,
+);
 const _walletEndpoints = WalletEndpointModule(
   nonce: _createWalletNonce,
   verify: _verifyWalletSignature,
 );
 const _azureBlobEndpoints = AzureBlobEndpointModule(
   signUpload: _signAzureBlobChunkUpload,
+  download: _downloadAzureBlobChunk,
 );
 const _userDirectoryEndpoints = UserDirectoryEndpointModule(
   upsert: _upsertUserDirectoryEntry,
@@ -123,7 +135,21 @@ Future<void> _handleRequest(HttpRequest request) async {
       return;
     }
 
-    if (request.method == 'POST' && !_rateLimiter.allow(request)) {
+    final invitePreview = request.method == 'GET' &&
+        _inviteEndpoints.handlesPreview(request.uri.path);
+    final inviteAvatar = request.method == 'GET' &&
+        _inviteEndpoints.handlesAvatar(request.uri.path);
+    final inviteRedeem = request.method == 'POST' &&
+        _inviteEndpoints.handlesRedeem(request.uri.path);
+    final rateLimitRoute = invitePreview
+        ? '/invites/:token/preview'
+        : inviteAvatar
+            ? '/invites/:token/avatar'
+            : inviteRedeem
+                ? '/invites/:token/redeem'
+                : null;
+    if ((request.method == 'POST' || invitePreview || inviteAvatar) &&
+        !_rateLimiter.allow(request, routeKey: rateLimitRoute)) {
       await _json(request, HttpStatus.tooManyRequests, {
         'error': 'Too many requests. Please try again shortly.',
       });
@@ -149,6 +175,7 @@ Future<void> _handleRequest(HttpRequest request) async {
           accountDeletionConfigured:
               _passwordResetConfig.isConfigured && _emailService.isConfigured,
           channelAnalyticsConfigured: _channelAnalyticsConfig.isConfigured,
+          inviteLinksConfigured: _inviteConfig.isConfigured,
         ),
       );
       return;
@@ -162,6 +189,37 @@ Future<void> _handleRequest(HttpRequest request) async {
     if (request.method == 'POST' &&
         _accountDeletionEndpoints.handlesDeleteData(request.uri.path)) {
       await _accountDeletionEndpoints.deleteData(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _inviteEndpoints.handlesCreate(request.uri.path)) {
+      await _inviteEndpoints.create(request);
+      return;
+    }
+    if (request.method == 'POST' &&
+        _inviteEndpoints.handlesList(request.uri.path)) {
+      await _inviteEndpoints.list(request);
+      return;
+    }
+    if (request.method == 'POST' &&
+        _inviteEndpoints.handlesRevoke(request.uri.path)) {
+      await _inviteEndpoints.revoke(request);
+      return;
+    }
+    if (request.method == 'GET' &&
+        _inviteEndpoints.handlesPreview(request.uri.path)) {
+      await _inviteEndpoints.preview(request);
+      return;
+    }
+    if (request.method == 'GET' &&
+        _inviteEndpoints.handlesAvatar(request.uri.path)) {
+      await _inviteEndpoints.avatar(request);
+      return;
+    }
+    if (request.method == 'POST' &&
+        _inviteEndpoints.handlesRedeem(request.uri.path)) {
+      await _inviteEndpoints.redeem(request);
       return;
     }
 
@@ -244,6 +302,12 @@ Future<void> _handleRequest(HttpRequest request) async {
     if (request.method == 'POST' &&
         _azureBlobEndpoints.handlesSignUpload(request.uri.path)) {
       await _azureBlobEndpoints.signUpload(request);
+      return;
+    }
+
+    if (request.method == 'GET' &&
+        _azureBlobEndpoints.handlesDownload(request.uri.path)) {
+      await _azureBlobEndpoints.download(request);
       return;
     }
 

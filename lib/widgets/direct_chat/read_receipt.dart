@@ -17,7 +17,7 @@ ReadReceiptStatus resolveReadReceiptStatus(
   EventStatus eventStatus, {
   bool isRead = false,
 }) {
-  if (eventStatus.isError || eventStatus.isRemoved) {
+  if (eventStatus.isError) {
     return ReadReceiptStatus.failed;
   }
   if (eventStatus.isSending) return ReadReceiptStatus.sending;

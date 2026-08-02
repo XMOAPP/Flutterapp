@@ -69,6 +69,29 @@ void main() {
 
     controller.dispose();
   });
+
+  test('transient edit restores the existing room draft', () async {
+    final store = _MemoryDraftStore();
+    final controller = _controller(store);
+    await controller.bindDraft(userId: userId, roomId: roomId);
+    controller.textController.text = 'unfinished draft';
+
+    expect(await controller.beginTransientEdit('original message'), isTrue);
+    expect(controller.isTransientEdit, isTrue);
+    expect(controller.textController.text, 'original message');
+
+    controller.textController.text = 'edited message';
+    await _settleDraftSave();
+    expect(store.values[_key(userId, roomId)], 'unfinished draft');
+
+    controller.endTransientEdit();
+    await _settleDraftSave();
+    expect(controller.isTransientEdit, isFalse);
+    expect(controller.textController.text, 'unfinished draft');
+    expect(store.values[_key(userId, roomId)], 'unfinished draft');
+
+    controller.dispose();
+  });
 }
 
 ChatComposerController _controller(MessageDraftStore store) {

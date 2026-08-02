@@ -12,6 +12,8 @@ class ChatInputBar extends StatelessWidget {
   final bool enabled;
   final bool recording;
   final bool recordingPaused;
+  final bool editing;
+  final String? editingOriginalText;
   final Duration recordingDuration;
   final List<double> recordingWaveform;
   final String? disabledText;
@@ -33,6 +35,8 @@ class ChatInputBar extends StatelessWidget {
     this.enabled = true,
     this.recording = false,
     this.recordingPaused = false,
+    this.editing = false,
+    this.editingOriginalText,
     this.recordingDuration = Duration.zero,
     this.recordingWaveform = const [],
     this.disabledText,
@@ -73,19 +77,20 @@ class ChatInputBar extends StatelessWidget {
         top: false,
         child: Row(
           children: [
-            GestureDetector(
-              onTap: uploading || !enabled ? null : onShowAttachmentSheet,
-              child: Container(
-                width: actionSize,
-                height: actionSize,
-                margin: EdgeInsets.only(right: isNarrow ? 2 : 4),
-                child: Icon(
-                  Icons.add_circle_outline,
-                  color: uploading || !enabled ? kMediumGrey : kLimeGreen,
-                  size: 24,
+            if (!editing)
+              GestureDetector(
+                onTap: uploading || !enabled ? null : onShowAttachmentSheet,
+                child: Container(
+                  width: actionSize,
+                  height: actionSize,
+                  margin: EdgeInsets.only(right: isNarrow ? 2 : 4),
+                  child: Icon(
+                    Icons.add_circle_outline,
+                    color: uploading || !enabled ? kMediumGrey : kLimeGreen,
+                    size: 24,
+                  ),
                 ),
               ),
-            ),
             Expanded(
               child: Container(
                 padding:
@@ -116,6 +121,11 @@ class ChatInputBar extends StatelessWidget {
                         readOnly: onTextFieldTap != null,
                         onTap: onTextFieldTap,
                         enabled: enabled,
+                        minLines: 1,
+                        maxLines: 6,
+                        keyboardType: TextInputType.multiline,
+                        textInputAction: TextInputAction.newline,
+                        textCapitalization: TextCapitalization.sentences,
                         style: GoogleFonts.inter(color: kWhite, fontSize: 17),
                         decoration: InputDecoration(
                           hintText: enabled
@@ -139,55 +149,80 @@ class ChatInputBar extends StatelessWidget {
               valueListenable: textController,
               builder: (context, value, _) {
                 final hasText = value.text.trim().isNotEmpty;
+                final editEnabled = hasText &&
+                    value.text.trim() != editingOriginalText?.trim() &&
+                    enabled &&
+                    !uploading;
                 return AnimatedSwitcher(
                   duration: const Duration(milliseconds: 200),
                   transitionBuilder: (child, anim) =>
                       ScaleTransition(scale: anim, child: child),
-                  child: hasText && enabled
+                  child: editing
                       ? GestureDetector(
-                          key: const ValueKey('send'),
-                          onTap: uploading || !enabled ? null : onSend,
+                          key: const ValueKey('confirm-edit'),
+                          onTap: editEnabled ? onSend : null,
                           child: Container(
                             width: actionSize,
                             height: actionSize,
                             margin: EdgeInsets.only(left: isNarrow ? 4 : 8),
                             decoration: BoxDecoration(
-                              color: uploading || !enabled
-                                  ? kDarkGrey
-                                  : kLimeGreen,
+                              color: editEnabled ? kLimeGreen : kDarkGrey,
                               shape: BoxShape.circle,
                             ),
                             child: Icon(
-                              Icons.send_rounded,
-                              color:
-                                  uploading || !enabled ? kMediumGrey : kBlack,
-                              size: 20,
+                              Icons.check_rounded,
+                              color: editEnabled ? kBlack : kMediumGrey,
+                              size: 24,
                             ),
                           ),
                         )
-                      : GestureDetector(
-                          key: const ValueKey('record'),
-                          onTap:
-                              uploading || !enabled ? null : onStartRecording,
-                          child: Container(
-                            width: actionSize,
-                            height: actionSize,
-                            margin: EdgeInsets.only(left: isNarrow ? 4 : 8),
-                            decoration: BoxDecoration(
-                              color: uploading || !enabled
-                                  ? kDarkGrey
-                                  : const Color(0xFF2C2C2E),
-                              shape: BoxShape.circle,
+                      : hasText && enabled
+                          ? GestureDetector(
+                              key: const ValueKey('send'),
+                              onTap: uploading || !enabled ? null : onSend,
+                              child: Container(
+                                width: actionSize,
+                                height: actionSize,
+                                margin: EdgeInsets.only(left: isNarrow ? 4 : 8),
+                                decoration: BoxDecoration(
+                                  color: uploading || !enabled
+                                      ? kDarkGrey
+                                      : kLimeGreen,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  Icons.send_rounded,
+                                  color: uploading || !enabled
+                                      ? kMediumGrey
+                                      : kBlack,
+                                  size: 20,
+                                ),
+                              ),
+                            )
+                          : GestureDetector(
+                              key: const ValueKey('record'),
+                              onTap: uploading || !enabled
+                                  ? null
+                                  : onStartRecording,
+                              child: Container(
+                                width: actionSize,
+                                height: actionSize,
+                                margin: EdgeInsets.only(left: isNarrow ? 4 : 8),
+                                decoration: BoxDecoration(
+                                  color: uploading || !enabled
+                                      ? kDarkGrey
+                                      : const Color(0xFF2C2C2E),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  Icons.mic_rounded,
+                                  color: uploading || !enabled
+                                      ? kMediumGrey
+                                      : kLimeGreen,
+                                  size: 21,
+                                ),
+                              ),
                             ),
-                            child: Icon(
-                              Icons.mic_rounded,
-                              color: uploading || !enabled
-                                  ? kMediumGrey
-                                  : kLimeGreen,
-                              size: 21,
-                            ),
-                          ),
-                        ),
                 );
               },
             ),

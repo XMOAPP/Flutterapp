@@ -281,13 +281,11 @@ class _SegmentedStoryRingPainter extends CustomPainter {
     required int segmentCount,
     required bool isViewed,
   }) {
-    if (!isMyStory) {
-      return const Color(0xFF8A8A8A);
-    }
-
     if (isViewed || !hasUnviewedStories) {
       return const Color(0xFF8A8A8A);
     }
+
+    if (!isMyStory) return kLimeGreen;
 
     if (segmentCount <= 1) return const Color(0xFF1686D9);
     final t = index / (segmentCount - 1);

@@ -65,15 +65,15 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   }
 
   bool get _canInvite =>
-      GroupService.canInviteMembers(widget.room.ownPowerLevel);
+      GroupService.canInviteMembers(widget.room.ownPowerLevel.level);
 
   bool get _canEditSettings =>
-      GroupService.canEditSettings(widget.room.ownPowerLevel);
+      GroupService.canEditSettings(widget.room.ownPowerLevel.level);
 
   bool get _canManageAdmins =>
-      GroupService.canManageAdmins(widget.room.ownPowerLevel);
+      GroupService.canManageAdmins(widget.room.ownPowerLevel.level);
 
-  bool get _isOwner => widget.room.ownPowerLevel >= 100;
+  bool get _isOwner => widget.room.ownPowerLevel >= PowerLevel.admin;
 
   bool get _isAdminRole => _canEditSettings && !_isOwner;
 

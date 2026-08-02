@@ -251,11 +251,12 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   }
 
   Future<void> _shareContact() async {
+    final username = _xmoUsernameFromUserId(widget.userId);
     final displayName = _profile?.displayName.trim().isNotEmpty == true
         ? _profile!.displayName.trim()
-        : widget.userId;
+        : username;
     await Clipboard.setData(
-      ClipboardData(text: '$displayName\n${widget.userId}'),
+      ClipboardData(text: '$displayName\n$username'),
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -264,6 +265,12 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         backgroundColor: kLimeGreen,
       ),
     );
+  }
+
+  String _xmoUsernameFromUserId(String userId) {
+    final withoutAt = userId.startsWith('@') ? userId.substring(1) : userId;
+    final localpart = withoutAt.split(':').first.trim();
+    return localpart.isEmpty ? userId : '@$localpart';
   }
 
   void _archiveChat() {

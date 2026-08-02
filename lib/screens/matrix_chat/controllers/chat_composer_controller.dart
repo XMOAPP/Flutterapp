@@ -25,9 +25,12 @@ class ChatComposerController {
   int _bindingGeneration = 0;
   bool _applyingDraft = false;
   bool _pendingSend = false;
+  bool _transientEdit = false;
+  String? _textBeforeTransientEdit;
   bool _disposed = false;
 
   bool get isApplyingDraft => _applyingDraft;
+  bool get isTransientEdit => _transientEdit;
 
   Future<void> bindDraft({
     required String userId,
@@ -71,6 +74,44 @@ class ChatComposerController {
     );
   }
 
+  Future<bool> beginTransientEdit(String text) async {
+    if (_disposed || _pendingSend || _transientEdit) return false;
+    _draftSaveTimer?.cancel();
+    _textBeforeTransientEdit = textController.text;
+
+    if (_textBeforeTransientEdit!.isEmpty) {
+      await _deleteSafely();
+    } else {
+      await _saveSafely(_textBeforeTransientEdit!);
+    }
+    if (_disposed) return false;
+
+    _transientEdit = true;
+    _setTextWithoutDraftPersistence(text);
+    return true;
+  }
+
+  void endTransientEdit() {
+    if (_disposed || !_transientEdit) return;
+    final restoredText = _textBeforeTransientEdit ?? '';
+    _transientEdit = false;
+    _textBeforeTransientEdit = null;
+    _setTextWithoutDraftPersistence(restoredText);
+    _handleTextChanged();
+  }
+
+  void _setTextWithoutDraftPersistence(String text) {
+    _applyingDraft = true;
+    try {
+      textController.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      );
+    } finally {
+      _applyingDraft = false;
+    }
+  }
+
   Future<bool> beginPendingSend(String text) async {
     if (_pendingSend || _disposed) return false;
     _pendingSend = true;
@@ -101,7 +142,13 @@ class ChatComposerController {
   }
 
   void _handleTextChanged() {
-    if (_disposed || _applyingDraft || _pendingSend || !_hasDraftScope) return;
+    if (_disposed ||
+        _applyingDraft ||
+        _pendingSend ||
+        _transientEdit ||
+        !_hasDraftScope) {
+      return;
+    }
     _draftSaveTimer?.cancel();
     _draftSaveTimer = Timer(_draftSaveDelay, () {
       final text = textController.text;
@@ -141,7 +188,7 @@ class ChatComposerController {
   void dispose() {
     if (_disposed) return;
     _draftSaveTimer?.cancel();
-    if (!_pendingSend && textController.text.isNotEmpty) {
+    if (!_pendingSend && !_transientEdit && textController.text.isNotEmpty) {
       unawaited(_saveSafely(textController.text));
     }
     _disposed = true;

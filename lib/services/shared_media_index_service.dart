@@ -5,6 +5,7 @@ import 'package:hive/hive.dart';
 import 'package:matrix/matrix.dart';
 
 import '../models/direct_chat_models.dart';
+import '../utils/message_presentation.dart';
 
 class SharedMediaLinkItem {
   final String id;
@@ -279,8 +280,9 @@ class SharedMediaIndexService {
         media[event.eventId] = _mediaJsonFromEvent(event);
       }
 
-      if (event.body.isNotEmpty) {
-        for (final url in _extractLinks(event.body)) {
+      final visibleBody = matrixVisibleBody(event);
+      if (visibleBody.isNotEmpty) {
+        for (final url in _extractLinks(visibleBody)) {
           final id = '${event.eventId}:$url';
           links[id] = SharedMediaLinkItem(
             id: id,
@@ -382,7 +384,7 @@ class SharedMediaIndexService {
       'type': _mediaTypeForMessageType(event.messageType).name,
       'thumbnailUrl': infoMap['thumbnail_url'],
       'url': content['url'],
-      'filename': event.body,
+      'filename': matrixAttachmentFileName(event),
       'fileSize': infoMap['size'],
       'timestamp': event.originServerTs.millisecondsSinceEpoch,
       'senderId': event.senderId,

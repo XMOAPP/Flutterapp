@@ -17,6 +17,9 @@ import '../screens/group/incoming_group_call_screen.dart';
 import 'call_history_service.dart';
 import 'matrix_service.dart';
 import 'room_controls_service.dart';
+import 'xmo_group_call.dart';
+
+export 'xmo_group_call.dart';
 
 enum CallRecoveryStatus { connected, reconnecting, reconnected, failed }
 
@@ -39,7 +42,7 @@ class VoipService with WidgetsBindingObserver {
 
   // ── Active call tracking ─────────────────────────────────────────────────
   CallSession? _activeSession;
-  GroupCall? _activeGroupCall;
+  XmoGroupCall? _activeGroupCall;
   DateTime? _callConnectedAt;
   DateTime? _groupCallConnectedAt;
   CallHistoryDirection? _activeGroupCallDirection;
@@ -48,18 +51,22 @@ class VoipService with WidgetsBindingObserver {
   final Set<String> _ownedGroupCallIds = <String>{};
   final Set<String> _rejectedGroupCallIds = <String>{};
   final Set<String> _locallyClosedGroupCallIds = <String>{};
+  final Map<String, XmoGroupCall> _groupCalls = <String, XmoGroupCall>{};
+  final Map<String, webrtc.RTCVideoRenderer> _readyRenderers =
+      <String, webrtc.RTCVideoRenderer>{};
+  final Set<String> _pendingRenderers = <String>{};
 
   /// Whether the call is currently in picture-in-picture mode.
   final ValueNotifier<bool> pipMode = ValueNotifier(false);
   final ValueNotifier<int> fullscreenCallRouteDepth = ValueNotifier(0);
   final ValueNotifier<CallSession?> incomingCall = ValueNotifier(null);
-  final ValueNotifier<GroupCall?> incomingGroupCall = ValueNotifier(null);
+  final ValueNotifier<XmoGroupCall?> incomingGroupCall = ValueNotifier(null);
   final ValueNotifier<int> callStateVersion = ValueNotifier(0);
   final ValueNotifier<CallRecoveryStatus> recoveryStatus =
       ValueNotifier(CallRecoveryStatus.connected);
 
   CallSession? get activeSession => _activeSession;
-  GroupCall? get activeGroupCall => _activeGroupCall;
+  XmoGroupCall? get activeGroupCall => _activeGroupCall;
   DateTime? get callConnectedAt => _callConnectedAt;
   DateTime? get groupCallConnectedAt => _groupCallConnectedAt;
   bool get isInCall => _activeSession != null || _activeGroupCall != null;
@@ -112,15 +119,15 @@ class VoipService with WidgetsBindingObserver {
     callStateVersion.value++;
   }
 
-  bool canEndGroupCall(GroupCall groupCall) {
+  bool canEndGroupCall(XmoGroupCall groupCall) {
     return _ownedGroupCallIds.contains(groupCall.groupCallId);
   }
 
-  bool _isActiveGroupCall(GroupCall groupCall) {
+  bool _isActiveGroupCall(XmoGroupCall groupCall) {
     return _activeGroupCall?.groupCallId == groupCall.groupCallId;
   }
 
-  bool isGroupCallRejected(GroupCall groupCall) {
+  bool isGroupCallRejected(XmoGroupCall groupCall) {
     return _rejectedGroupCallIds.contains(groupCall.groupCallId);
   }
 
@@ -205,7 +212,7 @@ class VoipService with WidgetsBindingObserver {
     }
   }
 
-  Future<void> leaveOrEndGroupCall(GroupCall groupCall) async {
+  Future<void> leaveOrEndGroupCall(XmoGroupCall groupCall) async {
     final shouldEnd = canEndGroupCall(groupCall);
     _locallyClosedGroupCallIds.add(groupCall.groupCallId);
     if (shouldEnd) {
@@ -222,8 +229,8 @@ class VoipService with WidgetsBindingObserver {
     }
   }
 
-  GroupCall? ongoingGroupCallForRoom(Room room) {
-    final groupCall = _voip?.getGroupCallForRoom(room.id);
+  XmoGroupCall? ongoingGroupCallForRoom(Room room) {
+    final groupCall = _groupCalls[room.id];
     if (groupCall == null || groupCall.terminated) return null;
     return groupCall;
   }
@@ -290,7 +297,7 @@ class VoipService with WidgetsBindingObserver {
         video: video,
       ),
     );
-    await voip.inviteToCall(room.id, video ? CallType.kVideo : CallType.kVoice);
+    await voip.inviteToCall(room, video ? CallType.kVideo : CallType.kVoice);
   }
 
   Future<void> startGroupCall(Room room, {required bool video}) async {
@@ -308,12 +315,12 @@ class VoipService with WidgetsBindingObserver {
     )) {
       throw StateError('You do not have permission to start calls here');
     }
-    var groupCall = voip.getGroupCallForRoom(room.id);
-    if (!room.groupCallsEnabled) {
+    var groupCall = ongoingGroupCallForRoom(room);
+    if (!room.groupCallsEnabledForEveryone) {
       await room.enableGroupCalls();
     }
 
-    if (!room.canJoinGroupCall && !room.canCreateGroupCall) {
+    if (!room.canJoinGroupCall) {
       throw StateError(
         'Group calls are not enabled for this room. Ask an admin to enable them.',
       );
@@ -325,19 +332,18 @@ class VoipService with WidgetsBindingObserver {
     }
 
     if (groupCall == null || groupCall.terminated) {
-      if (!room.canCreateGroupCall) {
-        throw StateError(
-            'You do not have permission to start group calls here');
-      }
-      groupCall = await voip.newGroupCall(
+      final session = await voip.fetchOrCreateGroupCall(
         room.id,
-        video ? GroupCallType.Video : GroupCallType.Voice,
-        GroupCallIntent.Prompt,
+        room,
+        MeshBackend(),
+        'm.call',
+        'm.room',
       );
-      createdGroupCall = groupCall != null;
-    }
-    if (groupCall == null) {
-      throw StateError('Unable to create or join the group call');
+      groupCall = _wrapGroupCall(
+        session,
+        type: video ? XmoGroupCallType.video : XmoGroupCallType.voice,
+      );
+      createdGroupCall = true;
     }
     if (createdGroupCall) {
       _ownedGroupCallIds.add(groupCall.groupCallId);
@@ -381,6 +387,67 @@ class VoipService with WidgetsBindingObserver {
     );
 
     return kind == XmoRoomKind.group || matrixService.isKnownGroup(room.id);
+  }
+
+  XmoGroupCall _wrapGroupCall(
+    GroupCallSession session, {
+    XmoGroupCallType? type,
+  }) {
+    final existing = _groupCalls[session.room.id];
+    if (existing != null && identical(existing.session, session)) {
+      return existing;
+    }
+
+    final wrapped = XmoGroupCall(
+      session: session,
+      type: type ?? _groupCallTypeFromRoom(session),
+    );
+    _groupCalls[session.room.id] = wrapped;
+    return wrapped;
+  }
+
+  XmoGroupCallType _groupCallTypeFromRoom(GroupCallSession session) {
+    final content = session.room.lastEvent?.content;
+    if (content?['group_call_id'] == session.groupCallId) {
+      final callType = content?['call_type']?.toString().toLowerCase();
+      if (callType == 'video' || content?['m.type'] == 'm.video') {
+        return XmoGroupCallType.video;
+      }
+    }
+    return XmoGroupCallType.voice;
+  }
+
+  String _rendererKey(WrappedMediaStream stream) =>
+      '${stream.participant.userId}:${stream.stream?.id ?? 'empty'}';
+
+  webrtc.RTCVideoRenderer? rendererFor(WrappedMediaStream? stream) {
+    if (stream?.stream == null) return null;
+    final key = _rendererKey(stream!);
+    final ready = _readyRenderers[key];
+    if (ready != null) {
+      if (ready.srcObject != stream.stream) ready.srcObject = stream.stream;
+      return ready;
+    }
+    unawaited(_prepareRenderer(stream));
+    return null;
+  }
+
+  Future<void> _prepareRenderer(WrappedMediaStream stream) async {
+    if (stream.stream == null) return;
+    final key = _rendererKey(stream);
+    if (_readyRenderers.containsKey(key) || !_pendingRenderers.add(key)) return;
+    final renderer = webrtc.RTCVideoRenderer();
+    try {
+      await renderer.initialize();
+      renderer.srcObject = stream.stream;
+      _readyRenderers[key] = renderer;
+      _notifyCallStateChanged();
+    } catch (e) {
+      await renderer.dispose();
+      debugPrint('[VOIP] Failed to initialize video renderer: $e');
+    } finally {
+      _pendingRenderers.remove(key);
+    }
   }
 
   // ── Session lifecycle ────────────────────────────────────────────────────
@@ -436,7 +503,7 @@ class VoipService with WidgetsBindingObserver {
   }
 
   void _trackGroupCall(
-    GroupCall groupCall, {
+    XmoGroupCall groupCall, {
     CallHistoryDirection? direction,
   }) {
     _activeGroupCall = groupCall;
@@ -449,20 +516,21 @@ class VoipService with WidgetsBindingObserver {
     _notifyCallStateChanged();
     _activeGroupCallStateSub?.cancel();
     _activeGroupCallStateSub =
-        groupCall.onGroupCallState.stream.listen((state) {
-      if (state == GroupCallState.Entered &&
+        groupCall.stateStream.listen((state) {
+      if (state == GroupCallState.entered &&
           _groupCallConnectedAt == null &&
           _hasConnectedGroupPeer(groupCall)) {
         _groupCallConnectedAt = DateTime.now();
         _setRecoveryStatus(CallRecoveryStatus.connected);
       }
-      if (state == GroupCallState.Ended) {
+      if (state == GroupCallState.ended) {
         if (_isActiveGroupCall(groupCall)) {
           _cleanupGroupCall();
         }
       }
     });
-    groupCall.onStreamAdd.stream.listen((_) {
+    groupCall.streamAddStream.listen((stream) {
+      unawaited(_prepareRenderer(stream));
       if (_isActiveGroupCall(groupCall) &&
           _groupCallConnectedAt == null &&
           _hasConnectedGroupPeer(groupCall)) {
@@ -472,7 +540,7 @@ class VoipService with WidgetsBindingObserver {
     });
   }
 
-  bool _hasConnectedGroupPeer(GroupCall groupCall) {
+  bool _hasConnectedGroupPeer(XmoGroupCall groupCall) {
     return groupCall.userMediaStreams.any((stream) => !stream.isLocal()) ||
         groupCall.participants
             .any((user) => user.id != groupCall.room.client.userID);
@@ -638,20 +706,23 @@ class VoipService with WidgetsBindingObserver {
     return null;
   }
 
-  GroupCall? _matchingNativeIncomingGroupCall({
+  XmoGroupCall? _matchingNativeIncomingGroupCall({
     required String? roomId,
     required String? callId,
   }) {
-    final candidates = <GroupCall?>[
-      if (callId != null && callId.isNotEmpty) _voip?.getGroupCallById(callId),
+    final candidates = <XmoGroupCall?>[
+      if (callId != null && callId.isNotEmpty)
+        _groupCalls.values
+            .where((call) => call.groupCallId == callId)
+            .firstOrNull,
       incomingGroupCall.value,
       if (roomId != null && roomId.isNotEmpty)
-        _voip?.getGroupCallForRoom(roomId),
+        _groupCalls[roomId],
     ];
 
     for (final groupCall in candidates) {
       if (groupCall == null || groupCall.terminated) continue;
-      if (groupCall.state == GroupCallState.Ended) continue;
+      if (groupCall.state == GroupCallState.ended) continue;
       final roomMatches =
           roomId == null || roomId.isEmpty || groupCall.room.id == roomId;
       final callMatches =
@@ -676,7 +747,7 @@ class VoipService with WidgetsBindingObserver {
       if (!service.isLoggedIn) return;
       await service.client.oneShotSync();
       if (roomId != null && roomId.isNotEmpty) {
-        _voip?.getGroupCallForRoom(roomId);
+        _groupCalls[roomId];
       }
     } catch (e) {
       debugPrint('[VoipService] Native call sync refresh failed: $e');
@@ -754,7 +825,7 @@ class VoipService with WidgetsBindingObserver {
     await _pushCallScreen(session);
   }
 
-  Future<void> _openGroupCallScreen(GroupCall groupCall) async {
+  Future<void> _openGroupCallScreen(XmoGroupCall groupCall) async {
     if (_locallyClosedGroupCallIds.contains(groupCall.groupCallId)) {
       return;
     }
@@ -762,7 +833,7 @@ class VoipService with WidgetsBindingObserver {
       await groupCall.terminate();
       return;
     }
-    if (groupCall.state != GroupCallState.Entered) {
+    if (groupCall.state != GroupCallState.entered) {
       unawaited(_startRingtone());
       if (_shouldOpenIncomingGroupCallFullscreen(groupCall.room)) {
         incomingGroupCall.value = null;
@@ -833,7 +904,7 @@ class VoipService with WidgetsBindingObserver {
   }
 
   Future<void> answerIncomingGroupCall(
-    GroupCall groupCall, {
+    XmoGroupCall groupCall, {
     bool openCallScreen = true,
   }) async {
     unawaited(_stopRingtone());
@@ -873,12 +944,12 @@ class VoipService with WidgetsBindingObserver {
     _setRecoveryStatus(CallRecoveryStatus.connected);
   }
 
-  bool _needsGroupCallEnter(GroupCall groupCall) {
-    return groupCall.state != GroupCallState.Entered ||
+  bool _needsGroupCallEnter(XmoGroupCall groupCall) {
+    return groupCall.state != GroupCallState.entered ||
         groupCall.localUserMediaStream?.stream == null;
   }
 
-  Future<void> _enterGroupCall(GroupCall groupCall) async {
+  Future<void> _enterGroupCall(XmoGroupCall groupCall) async {
     try {
       await groupCall.enter();
       _setRecoveryStatus(CallRecoveryStatus.connected);
@@ -900,7 +971,7 @@ class VoipService with WidgetsBindingObserver {
   }
 
   Future<WrappedMediaStream> _createAudioOnlyGroupStream(
-    GroupCall groupCall,
+    XmoGroupCall groupCall,
   ) async {
     final voip = _voip;
     if (voip == null) {
@@ -918,15 +989,18 @@ class VoipService with WidgetsBindingObserver {
       }
 
       return WrappedMediaStream(
-        renderer: voip.delegate.createRenderer(),
         stream: stream,
-        userId: userId,
+        participant: CallParticipant(
+          voip,
+          userId: userId,
+          deviceId: groupCall.room.client.deviceID,
+        ),
         room: groupCall.room,
         client: groupCall.room.client,
+        voip: voip,
         purpose: SDPStreamMetadataPurpose.Usermedia,
         audioMuted: stream.getAudioTracks().isEmpty,
         videoMuted: true,
-        isWeb: voip.delegate.isWeb,
         isGroupCall: true,
       );
     } catch (e) {
@@ -936,11 +1010,11 @@ class VoipService with WidgetsBindingObserver {
     }
   }
 
-  void dismissIncomingGroupCall(GroupCall groupCall) {
+  void dismissIncomingGroupCall(XmoGroupCall groupCall) {
     rejectGroupCall(groupCall);
   }
 
-  void rejectGroupCall(GroupCall groupCall) {
+  void rejectGroupCall(XmoGroupCall groupCall) {
     unawaited(_stopRingtone());
     _rejectedGroupCallIds.add(groupCall.groupCallId);
     if (incomingGroupCall.value == groupCall) {
@@ -974,7 +1048,7 @@ class VoipService with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _pushGroupCallScreen(GroupCall groupCall) async {
+  Future<void> _pushGroupCallScreen(XmoGroupCall groupCall) async {
     final navigator = _navigatorKey?.currentState;
     if (navigator == null) return;
     if (_openingCallScreen) return;
@@ -992,7 +1066,7 @@ class VoipService with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _pushIncomingGroupCallScreen(GroupCall groupCall) async {
+  Future<void> _pushIncomingGroupCallScreen(XmoGroupCall groupCall) async {
     final navigator = _navigatorKey?.currentState;
     if (navigator == null) {
       incomingGroupCall.value = groupCall;
@@ -1092,7 +1166,7 @@ class _RingtoneAudioSource extends StreamAudioSource {
 
 class _XmoWebRTCDelegate implements WebRTCDelegate {
   final Future<void> Function(CallSession session) onNewCall;
-  final Future<void> Function(GroupCall groupCall) onNewGroupCall;
+  final Future<void> Function(XmoGroupCall groupCall) onNewGroupCall;
 
   _XmoWebRTCDelegate({
     required this.onNewCall,
@@ -1114,7 +1188,7 @@ class _XmoWebRTCDelegate implements WebRTCDelegate {
 
     if (iceServers.isEmpty) {
       debugPrint(
-        '[VOIP] Homeserver did not provide TURN/STUN servers; using public STUN fallback. Configure coturn on the homeserver for reliable calls.',
+        '[VOIP] XMO server did not provide TURN/STUN servers; using public STUN fallback. Configure coturn on the XMO server for reliable calls.',
       );
       iceServers.addAll(_fallbackStunServers);
     }
@@ -1154,7 +1228,6 @@ class _XmoWebRTCDelegate implements WebRTCDelegate {
     }).toList();
   }
 
-  @override
   rtc.VideoRenderer createRenderer() => webrtc.RTCVideoRenderer();
 
   @override
@@ -1164,12 +1237,18 @@ class _XmoWebRTCDelegate implements WebRTCDelegate {
   bool get canHandleNewCall => true;
 
   @override
+  EncryptionKeyProvider? get keyProvider => null;
+
+  @override
   Future<void> playRingtone() async {
     unawaited(VoipService()._startRingtone());
   }
 
   @override
   Future<void> stopRingtone() => VoipService()._stopRingtone();
+
+  @override
+  Future<void> registerListeners(CallSession session) async {}
 
   @override
   Future<void> handleNewCall(CallSession session) => onNewCall(session);
@@ -1190,18 +1269,21 @@ class _XmoWebRTCDelegate implements WebRTCDelegate {
   }
 
   @override
-  Future<void> handleNewGroupCall(GroupCall groupCall) async {
+  Future<void> handleNewGroupCall(GroupCallSession groupCall) async {
+    final wrapped = VoipService()._wrapGroupCall(groupCall);
     VoipService()._notifyCallStateChanged();
-    await onNewGroupCall(groupCall);
+    await onNewGroupCall(wrapped);
   }
 
   @override
-  Future<void> handleGroupCallEnded(GroupCall groupCall) async {
+  Future<void> handleGroupCallEnded(GroupCallSession groupCall) async {
+    final wrapped = VoipService()._wrapGroupCall(groupCall);
     await VoipService()._stopRingtone();
-    VoipService()._ownedGroupCallIds.remove(groupCall.groupCallId);
-    VoipService()._rejectedGroupCallIds.remove(groupCall.groupCallId);
-    VoipService()._locallyClosedGroupCallIds.add(groupCall.groupCallId);
-    if (VoipService()._isActiveGroupCall(groupCall)) {
+    VoipService()._ownedGroupCallIds.remove(wrapped.groupCallId);
+    VoipService()._rejectedGroupCallIds.remove(wrapped.groupCallId);
+    VoipService()._locallyClosedGroupCallIds.add(wrapped.groupCallId);
+    VoipService()._groupCalls.remove(wrapped.room.id);
+    if (VoipService()._isActiveGroupCall(wrapped)) {
       VoipService()._cleanupGroupCall();
     } else {
       VoipService()._notifyCallStateChanged();

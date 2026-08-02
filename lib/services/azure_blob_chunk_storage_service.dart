@@ -3,24 +3,32 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
+
 class AzureBlobChunkSignRequest {
   const AzureBlobChunkSignRequest({
     required this.fileName,
     required this.contentType,
     required this.size,
     required this.chunkIndex,
+    required this.roomId,
+    required this.cipherSha256,
   });
 
   final String fileName;
   final String contentType;
   final int size;
   final int chunkIndex;
+  final String roomId;
+  final String cipherSha256;
 
   Map<String, dynamic> toJson() => {
         'fileName': fileName,
         'contentType': contentType,
         'size': size,
         'chunkIndex': chunkIndex,
+        'roomId': roomId,
+        'cipherSha256': cipherSha256,
       };
 }
 
@@ -65,34 +73,45 @@ typedef AzureBlobChunkUploader = Future<void> Function({
   required String contentType,
 });
 
+typedef AzureBlobAccessTokenProvider = String? Function();
+
 class AzureBlobChunkStorageService {
   AzureBlobChunkStorageService({
     required this.signingEndpoint,
     AzureBlobChunkSigner? signer,
     AzureBlobChunkUploader? uploader,
+    AzureBlobAccessTokenProvider? accessTokenProvider,
     HttpClient? httpClient,
     this.timeout = const Duration(seconds: 30),
   })  : _signer = signer,
         _uploader = uploader,
+        _accessTokenProvider = accessTokenProvider,
         _httpClient = httpClient ?? HttpClient();
 
   final Uri signingEndpoint;
   final AzureBlobChunkSigner? _signer;
   final AzureBlobChunkUploader? _uploader;
+  final AzureBlobAccessTokenProvider? _accessTokenProvider;
   final HttpClient _httpClient;
   final Duration timeout;
+
+  void close() => _httpClient.close(force: true);
 
   Future<Uri> uploadEncryptedChunk({
     required Uint8List encryptedBytes,
     required String fileName,
     required String contentType,
     required int chunkIndex,
+    required String roomId,
   }) async {
     final request = AzureBlobChunkSignRequest(
       fileName: fileName,
       contentType: contentType,
       size: encryptedBytes.length,
       chunkIndex: chunkIndex,
+      roomId: roomId,
+      cipherSha256: base64UrlEncode(sha256.convert(encryptedBytes).bytes)
+          .replaceAll('=', ''),
     );
     final target = await (_signer ?? _signUpload)(request);
     await (_uploader ?? _putBlob)(
@@ -106,8 +125,18 @@ class AzureBlobChunkStorageService {
   Future<AzureBlobChunkUploadTarget> _signUpload(
     AzureBlobChunkSignRequest signRequest,
   ) async {
+    final accessToken = _accessTokenProvider?.call();
+    if (accessToken == null || accessToken.trim().isEmpty) {
+      throw const AzureBlobChunkStorageException(
+        'Your XMO session is unavailable. Sign in again before uploading media.',
+      );
+    }
     final request = await _httpClient.postUrl(signingEndpoint).timeout(timeout);
     request.headers.contentType = ContentType.json;
+    request.headers.set(
+      HttpHeaders.authorizationHeader,
+      'Bearer ${accessToken.trim()}',
+    );
     request.write(jsonEncode(signRequest.toJson()));
     final response = await request.close().timeout(timeout);
     final body = await utf8.decoder.bind(response).join().timeout(timeout);

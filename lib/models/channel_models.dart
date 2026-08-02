@@ -29,8 +29,8 @@ class ChannelSubscriber {
       avatarUrl: user.avatarUrl?.toString(),
       joinedAt: DateTime.now(), // Matrix doesn't store join time easily
       isBanned: false,
-      isAdmin: user.powerLevel >= 50,
-      powerLevel: user.powerLevel,
+      isAdmin: user.powerLevel >= PowerLevel.moderator,
+      powerLevel: user.powerLevel.level,
     );
   }
 }
@@ -58,9 +58,10 @@ class ChannelAdmin {
       userId: user.id,
       displayName: user.displayName ?? user.id,
       avatarUrl: user.avatarUrl?.toString(),
-      permissions: ChannelAdminPermissions.fromPowerLevel(user.powerLevel),
+      permissions:
+          ChannelAdminPermissions.fromPowerLevel(user.powerLevel.level),
       promotedAt: DateTime.now(),
-      powerLevel: user.powerLevel,
+      powerLevel: user.powerLevel.level,
     );
   }
 }

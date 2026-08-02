@@ -58,6 +58,59 @@ class DonationEndpointModule {
       path == '/auth/otp/donations/create';
 }
 
+class InviteEndpointModule {
+  const InviteEndpointModule({
+    required this.create,
+    required this.list,
+    required this.revoke,
+    required this.preview,
+    required this.avatar,
+    required this.redeem,
+  });
+
+  final EndpointHandler create;
+  final EndpointHandler list;
+  final EndpointHandler revoke;
+  final EndpointHandler preview;
+  final EndpointHandler avatar;
+  final EndpointHandler redeem;
+
+  bool handlesCreate(String path) => _matches(path, '/invites/create');
+  bool handlesList(String path) => _matches(path, '/invites/list');
+  bool handlesRevoke(String path) => _matches(path, '/invites/revoke');
+  bool handlesPreview(String path) =>
+      _tokenFromPath(path, suffix: '/preview') != null;
+  bool handlesAvatar(String path) =>
+      _tokenFromPath(path, suffix: '/avatar') != null;
+  bool handlesRedeem(String path) =>
+      _tokenFromPath(path, suffix: '/redeem') != null;
+
+  static bool _matches(String path, String endpoint) =>
+      path == endpoint ||
+      path == '/auth$endpoint' ||
+      path == '/auth/otp$endpoint';
+
+  static String? tokenFromPreviewPath(String path) =>
+      _tokenFromPath(path, suffix: '/preview');
+  static String? tokenFromAvatarPath(String path) =>
+      _tokenFromPath(path, suffix: '/avatar');
+  static String? tokenFromRedeemPath(String path) =>
+      _tokenFromPath(path, suffix: '/redeem');
+
+  static String? _tokenFromPath(String path, {required String suffix}) {
+    for (final prefix in const [
+      '/invites/',
+      '/auth/invites/',
+      '/auth/otp/invites/'
+    ]) {
+      if (!path.startsWith(prefix) || !path.endsWith(suffix)) continue;
+      final token = path.substring(prefix.length, path.length - suffix.length);
+      if (RegExp(r'^[A-Za-z0-9_-]{40,64}$').hasMatch(token)) return token;
+    }
+    return null;
+  }
+}
+
 class WalletEndpointModule {
   const WalletEndpointModule({required this.nonce, required this.verify});
 
@@ -72,14 +125,23 @@ class WalletEndpointModule {
 }
 
 class AzureBlobEndpointModule {
-  const AzureBlobEndpointModule({required this.signUpload});
+  const AzureBlobEndpointModule({
+    required this.signUpload,
+    required this.download,
+  });
 
   final EndpointHandler signUpload;
+  final EndpointHandler download;
 
   bool handlesSignUpload(String path) =>
       path == '/media/chunks/azure/sign-upload' ||
       path == '/auth/media/chunks/azure/sign-upload' ||
       path == '/auth/otp/media/chunks/azure/sign-upload';
+
+  bool handlesDownload(String path) =>
+      path == '/media/chunks/azure/download' ||
+      path == '/auth/media/chunks/azure/download' ||
+      path == '/auth/otp/media/chunks/azure/download';
 }
 
 class UserDirectoryEndpointModule {

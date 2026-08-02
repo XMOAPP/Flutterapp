@@ -1,5 +1,7 @@
 import 'package:matrix/matrix.dart';
 
+import '../utils/message_presentation.dart';
+
 // ═══════════════════════════════════════════════════════════════════════════
 // GROUP SETTINGS
 // ═══════════════════════════════════════════════════════════════════════════
@@ -124,7 +126,7 @@ class GroupMember {
 
   /// Creates GroupMember from Matrix User
   factory GroupMember.fromUser(User user, Room room) {
-    final powerLevel = user.powerLevel;
+    final powerLevel = user.powerLevel.level;
     final role = roleFromPowerLevel(powerLevel);
 
     return GroupMember(
@@ -405,7 +407,7 @@ class PinnedMessage {
   factory PinnedMessage.fromEvent(Event event, {String? pinnedBy}) {
     return PinnedMessage(
       eventId: event.eventId,
-      content: event.body,
+      content: matrixVisibleBody(event),
       senderId: event.senderId,
       senderName:
           event.senderFromMemoryOrFallback.displayName ?? event.senderId,
@@ -554,14 +556,14 @@ class MessageReply {
   });
 
   factory MessageReply.fromEvent(Event event) {
+    final preview = matrixVisibleBody(event);
     return MessageReply(
       eventId: event.eventId,
       senderId: event.senderId,
       senderName:
           event.senderFromMemoryOrFallback.displayName ?? event.senderId,
-      messagePreview: event.body.length > 100
-          ? '${event.body.substring(0, 100)}...'
-          : event.body,
+      messagePreview:
+          preview.length > 100 ? '${preview.substring(0, 100)}...' : preview,
       timestamp: event.originServerTs,
     );
   }

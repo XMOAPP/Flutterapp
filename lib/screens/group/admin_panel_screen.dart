@@ -58,7 +58,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
   }
 
   void _showPromoteDialog(GroupMember member) {
-    if (!GroupService.canManageAdmins(widget.room.ownPowerLevel)) return;
+    if (!GroupService.canManageAdmins(widget.room.ownPowerLevel.level)) return;
 
     showDialog(
       context: context,
@@ -142,7 +142,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
 
   Future<void> _promoteToLevel(GroupMember member, int powerLevel) async {
     try {
-      if (!GroupService.canManageAdmins(widget.room.ownPowerLevel)) {
+      if (!GroupService.canManageAdmins(widget.room.ownPowerLevel.level)) {
         throw Exception('Only owners can promote admins.');
       }
 
@@ -183,7 +183,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
   }
 
   Future<void> _demoteAdmin(GroupMember admin) async {
-    if (!GroupService.canManageAdmins(widget.room.ownPowerLevel)) return;
+    if (!GroupService.canManageAdmins(widget.room.ownPowerLevel.level)) return;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -366,12 +366,12 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
           ? IconButton(
               icon: Icon(
                 Icons.remove_circle_outline,
-                color: GroupService.canManageAdmins(widget.room.ownPowerLevel)
+                color: GroupService.canManageAdmins(widget.room.ownPowerLevel.level)
                     ? Colors.orange
                     : kLightGrey,
                 size: 20,
               ),
-              onPressed: GroupService.canManageAdmins(widget.room.ownPowerLevel)
+              onPressed: GroupService.canManageAdmins(widget.room.ownPowerLevel.level)
                   ? () => _demoteAdmin(admin)
                   : null,
               padding: EdgeInsets.zero,
@@ -397,12 +397,12 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
       trailing: IconButton(
         icon: Icon(
           Icons.add_moderator,
-          color: GroupService.canManageAdmins(widget.room.ownPowerLevel)
+          color: GroupService.canManageAdmins(widget.room.ownPowerLevel.level)
               ? kLimeGreen
               : kLightGrey,
           size: 20,
         ),
-        onPressed: GroupService.canManageAdmins(widget.room.ownPowerLevel)
+        onPressed: GroupService.canManageAdmins(widget.room.ownPowerLevel.level)
             ? () => _showPromoteDialog(member)
             : null,
         padding: EdgeInsets.zero,

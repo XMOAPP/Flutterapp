@@ -7,7 +7,7 @@ Future<void> _deleteXmoAccountData(HttpRequest request) async {
   if (token == null) {
     await _json(request, HttpStatus.unauthorized, {
       'success': false,
-      'error': 'Missing Matrix access token',
+      'error': 'Missing XMO session token',
     });
     return;
   }
@@ -186,7 +186,7 @@ Future<void> _deactivateSynapseAccount(String userId) async {
 Future<void> _purgeXmoAccountRecords(String userId) async {
   final normalized = _userDirectoryNormalizeUserId(userId);
   if (normalized == null) {
-    throw const _BadRequestException('Invalid Matrix user ID');
+    throw const _BadRequestException('Invalid XMO account ID');
   }
   final localpart = _userDirectoryLocalpartFromUserId(normalized);
 
@@ -215,6 +215,7 @@ Future<void> _purgeXmoAccountRecords(String userId) async {
     return null;
   });
   await _deleteChannelAnalyticsForUser(normalized);
+  await _deleteInviteLinksForUser(normalized);
 }
 
 Future<void> _serveAccountDeletionPage(HttpRequest request) async {
@@ -236,8 +237,8 @@ const _accountDeletionHtml = r'''<!doctype html>
 body{margin:0;background:#080d11;color:#f7f7f7;font:16px Arial,sans-serif}main{max-width:560px;margin:0 auto;padding:48px 22px}h1{font-size:28px}p,li{color:#aeb4ba;line-height:1.55}.panel{background:#12181e;padding:22px;border-radius:8px;margin:22px 0}label{display:block;margin:16px 0 7px}input{box-sizing:border-box;width:100%;padding:13px 15px;border:1px solid #555;border-radius:8px;background:#29292c;color:#fff;font-size:16px}button{margin-top:20px;padding:13px 20px;border:0;border-radius:8px;background:#fff;color:#080d11;font-weight:700;cursor:pointer}button:disabled{opacity:.5}#confirm{display:none}.status{margin-top:16px;color:#aeb4ba}.danger{color:#ff8585}a{color:#9bea38}
 </style></head><body><main><h1>Delete your XMO account</h1>
 <p>This page lets you request account deletion without reinstalling XMO.</p>
-<div class="panel"><strong>Deletion removes:</strong><ul><li>Your Matrix login, devices, keys, pushers, profile and room memberships where Synapse can erase them.</li><li>Your XMO public-directory, password-recovery and report records.</li></ul>
-<p class="danger">Messages or media already delivered to other users, devices, or federated Matrix servers may remain. Uploaded media may remain under server retention rules.</p></div>
+<div class="panel"><strong>Deletion removes:</strong><ul><li>Your XMO login, devices, security keys, notifications, profile and room memberships where the service can erase them.</li><li>Your XMO public-directory, password-recovery and report records.</li></ul>
+<p class="danger">Messages or media already delivered to other users, devices, or connected servers may remain. Uploaded media may remain under server retention rules.</p></div>
 <section id="request"><label for="username">XMO username</label><input id="username" placeholder="@username" autocomplete="username"><label for="email">Verified email</label><input id="email" type="email" placeholder="you@example.com" autocomplete="email"><button id="send">Send deletion code</button></section>
 <section id="confirm"><label for="otp">6-digit deletion code</label><input id="otp" inputmode="numeric" maxlength="6" placeholder="000000"><button id="delete">Permanently delete account</button></section>
 <div id="status" class="status" aria-live="polite"></div><p>Need help? <a href="mailto:support@xmo.dpdns.org">support@xmo.dpdns.org</a></p>

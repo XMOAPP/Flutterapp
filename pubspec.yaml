@@ -1,10 +1,10 @@
 name: xmo
 description: XMO Messaging App
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: '>=3.11.0 <4.0.0'
 
 dependencies:
   flutter:
@@ -12,11 +12,12 @@ dependencies:
   google_fonts: ^8.1.0
   provider: ^6.1.1
   cupertino_icons: ^1.0.6
-  matrix: ^0.25.0
-  flutter_olm: ^2.0.0
+  matrix: ^9.0.0
   hive: ^2.2.3
   hive_flutter: ^1.1.0
+  path: ^1.9.1
   path_provider: ^2.1.0
+  sqflite: ^2.4.2
   firebase_core: ^4.7.0
   firebase_crashlytics: ^5.0.0
   firebase_auth: ^6.4.0
@@ -47,6 +48,8 @@ dependencies:
   local_auth: ^2.3.0
   crypto: ^3.0.6
   cryptography: ^2.9.0
+  vodozemac: ^0.5.0
+  flutter_vodozemac: ^0.6.0
   emoji_picker_flutter: 4.4.0
 
 dev_dependencies:

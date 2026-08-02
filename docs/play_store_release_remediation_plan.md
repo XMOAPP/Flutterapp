@@ -10,6 +10,9 @@ Resolve the verified production-release blockers without breaking existing Matri
 
 The work is deliberately ordered. Security and data migration phases must complete before release-build optimization or Play Console submission.
 
+For the executable Play Console and internal-testing sequence after local
+hardening, use [play_internal_testing_runbook.md](play_internal_testing_runbook.md).
+
 ## Release Gate
 
 XMO can be called release-ready only when all of the following are true:

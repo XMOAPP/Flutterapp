@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -12,6 +14,7 @@ import '../../models/story_models.dart';
 import '../../providers/matrix_provider.dart';
 import '../../providers/story_provider.dart';
 import '../../services/privacy_service.dart';
+import '../../services/story_service.dart';
 import '../../widgets/story/story_video_player.dart';
 import '../camera_capture_screen.dart';
 import '../web_video_view_stub.dart'
@@ -30,15 +33,24 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
   final _imagePicker = ImagePicker();
 
   Uint8List? _selectedMedia;
+  String? _selectedMediaFilePath;
+  int? _selectedMediaSizeBytes;
+  bool _ownsSelectedMediaFile = false;
   Uint8List? _selectedVideoThumbnail;
   String? _selectedMediaMimeType;
   String? _selectedMediaFileName;
   StoryMediaType _mediaType = StoryMediaType.text;
   bool _uploading = false;
+  StoryCreationProgress? _creationProgress;
+  StoryCreationCancellationToken? _cancellationToken;
+  late String _clientRequestId;
 
   @override
   void initState() {
     super.initState();
+    _clientRequestId = _generateClientRequestId();
+    _captionController.addListener(_handleDraftTextChanged);
+    unawaited(_cleanupStaleStoryDrafts());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _recoverLostStoryPhoto();
     });
@@ -46,6 +58,9 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
 
   @override
   void dispose() {
+    _cancellationToken?.cancel();
+    _captionController.removeListener(_handleDraftTextChanged);
+    _deleteOwnedSelectedMedia();
     _captionController.dispose();
     super.dispose();
   }
@@ -74,27 +89,37 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
   }
 
   Future<Uint8List?> _generateVideoThumbnail({
-    required Uint8List videoBytes,
+    Uint8List? videoBytes,
+    String? videoFilePath,
     required String mimeType,
   }) async {
     File? tempVideoFile;
     try {
-      if (videoBytes.isEmpty) return null;
-
-      final webThumbnail =
-          await web_video.generateVideoThumbnail(videoBytes, mimeType);
-      if (webThumbnail != null && webThumbnail.isNotEmpty) {
-        return webThumbnail;
+      if ((videoBytes == null || videoBytes.isEmpty) &&
+          (videoFilePath == null || videoFilePath.isEmpty)) {
+        return null;
       }
 
-      final tempDir = await getTemporaryDirectory();
-      tempVideoFile = File(
-        '${tempDir.path}/story_thumb_source_${DateTime.now().microsecondsSinceEpoch}${_fileExtensionForMime(mimeType)}',
-      );
-      await tempVideoFile.writeAsBytes(videoBytes, flush: true);
+      if (videoBytes != null && videoBytes.isNotEmpty) {
+        final webThumbnail =
+            await web_video.generateVideoThumbnail(videoBytes, mimeType);
+        if (webThumbnail != null && webThumbnail.isNotEmpty) {
+          return webThumbnail;
+        }
+      }
+
+      var thumbnailSource = videoFilePath;
+      if (thumbnailSource == null && videoBytes != null) {
+        final tempDir = await getTemporaryDirectory();
+        tempVideoFile = File(
+          '${tempDir.path}/story_thumb_source_${DateTime.now().microsecondsSinceEpoch}${_fileExtensionForMime(mimeType)}',
+        );
+        await tempVideoFile.writeAsBytes(videoBytes, flush: true);
+        thumbnailSource = tempVideoFile.path;
+      }
 
       return await VideoThumbnail.thumbnailData(
-        video: tempVideoFile.path,
+        video: thumbnailSource!,
         imageFormat: ImageFormat.JPEG,
         maxWidth: 720,
         timeMs: 1000,
@@ -141,6 +166,8 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
     if (bytes.isEmpty || !mounted) return;
 
     setState(() {
+      _resetPublishIdentity();
+      _replaceSelectedFile();
       _selectedMedia = bytes;
       _selectedVideoThumbnail = null;
       _selectedMediaMimeType = pickedFile.mimeType ??
@@ -155,52 +182,86 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
   }
 
   Future<void> _setPickedGalleryMedia(XFile pickedFile) async {
-    final bytes = await pickedFile.readAsBytes();
-    if (bytes.isEmpty || !mounted) return;
-
     final mimeType = pickedFile.mimeType ??
-        lookupMimeType(pickedFile.name, headerBytes: bytes) ??
-        lookupMimeType(pickedFile.path, headerBytes: bytes) ??
+        lookupMimeType(pickedFile.name) ??
+        lookupMimeType(pickedFile.path) ??
         'image/jpeg';
     final isVideo = mimeType.startsWith('video/');
 
-    final thumbnailBytes = isVideo
-        ? await _generateVideoThumbnail(
-            videoBytes: bytes,
-            mimeType: mimeType,
-          )
-        : null;
-    if (!mounted) return;
+    if (!isVideo) {
+      await _setPickedImage(pickedFile);
+      return;
+    }
+
+    final stagedFile = await _stageVideoFile(
+      pickedFile.path,
+      mimeType: mimeType,
+    );
+    if (stagedFile == null) return;
+    final thumbnailBytes = await _generateVideoThumbnail(
+      videoFilePath: stagedFile.path,
+      mimeType: mimeType,
+    );
+    if (!mounted) {
+      await _deleteFile(stagedFile.path);
+      return;
+    }
 
     setState(() {
-      _selectedMedia = bytes;
+      _resetPublishIdentity();
+      _replaceSelectedFile();
+      _selectedMedia = null;
+      _selectedMediaFilePath = stagedFile.path;
+      _selectedMediaSizeBytes = stagedFile.lengthSync();
+      _ownsSelectedMediaFile = true;
       _selectedVideoThumbnail = thumbnailBytes;
       _selectedMediaMimeType = mimeType;
       _selectedMediaFileName = pickedFile.name.isNotEmpty
           ? pickedFile.name
           : '${isVideo ? 'story_video' : 'story_image'}_${DateTime.now().millisecondsSinceEpoch}${isVideo ? _fileExtensionForMime(mimeType) : '.jpg'}';
-      _mediaType = isVideo ? StoryMediaType.video : StoryMediaType.image;
+      _mediaType = StoryMediaType.video;
     });
   }
 
   Future<void> _showCameraPicker() async {
     final result = await Navigator.push<CameraCaptureResult>(
       context,
-      MaterialPageRoute(builder: (_) => const CameraCaptureScreen()),
+      MaterialPageRoute(
+        builder: (_) => const CameraCaptureScreen(returnVideoFile: true),
+      ),
     );
-    if (!mounted || result == null || result.bytes.isEmpty) return;
+    if (!mounted || result == null) return;
 
     final isVideo = result.type == CameraCaptureMediaType.video;
+    File? stagedVideo;
+    if (isVideo && result.filePath != null) {
+      stagedVideo = await _stageVideoFile(
+        result.filePath!,
+        mimeType: result.mimeType,
+      );
+      if (stagedVideo == null) return;
+    }
+    final resultBytes = result.bytes;
+    if (!isVideo && resultBytes.isEmpty) return;
     final thumbnailBytes = isVideo
         ? await _generateVideoThumbnail(
-            videoBytes: result.bytes,
+            videoFilePath: stagedVideo?.path,
+            videoBytes: resultBytes,
             mimeType: result.mimeType,
           )
         : null;
-    if (!mounted) return;
+    if (!mounted) {
+      if (stagedVideo != null) await _deleteFile(stagedVideo.path);
+      return;
+    }
 
     setState(() {
-      _selectedMedia = result.bytes;
+      _resetPublishIdentity();
+      _replaceSelectedFile();
+      _selectedMedia = isVideo ? null : resultBytes;
+      _selectedMediaFilePath = stagedVideo?.path;
+      _selectedMediaSizeBytes = stagedVideo?.lengthSync();
+      _ownsSelectedMediaFile = stagedVideo != null;
       _selectedVideoThumbnail = thumbnailBytes;
       _selectedMediaMimeType = result.mimeType;
       _selectedMediaFileName = result.fileName;
@@ -209,6 +270,86 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
       }
       _mediaType = isVideo ? StoryMediaType.video : StoryMediaType.image;
     });
+  }
+
+  Future<File?> _stageVideoFile(
+    String sourcePath, {
+    required String mimeType,
+  }) async {
+    try {
+      final source = File(sourcePath);
+      if (!await source.exists() || await source.length() == 0) return null;
+      final tempDir = await getTemporaryDirectory();
+      final draftDir = Directory('${tempDir.path}/xmo_story_drafts');
+      await draftDir.create(recursive: true);
+      final destination = File(
+        '${draftDir.path}/story_${DateTime.now().microsecondsSinceEpoch}${_fileExtensionForMime(mimeType)}',
+      );
+      return source.copy(destination.path);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _replaceSelectedFile() {
+    final oldPath = _selectedMediaFilePath;
+    final shouldDelete = _ownsSelectedMediaFile;
+    _selectedMediaFilePath = null;
+    _selectedMediaSizeBytes = null;
+    _ownsSelectedMediaFile = false;
+    if (shouldDelete && oldPath != null) {
+      unawaited(_deleteFile(oldPath));
+    }
+  }
+
+  void _handleDraftTextChanged() {
+    if (!_uploading) _resetPublishIdentity();
+  }
+
+  void _resetPublishIdentity() {
+    _clientRequestId = _generateClientRequestId();
+  }
+
+  String _generateClientRequestId() {
+    final random = Random.secure();
+    final randomPart = List<int>.generate(
+      4,
+      (_) => random.nextInt(0x100000000),
+    ).map((value) => value.toRadixString(16).padLeft(8, '0')).join();
+    return 'story_${DateTime.now().microsecondsSinceEpoch}_$randomPart';
+  }
+
+  void _deleteOwnedSelectedMedia() {
+    _replaceSelectedFile();
+  }
+
+  Future<void> _deleteFile(String path) async {
+    try {
+      final file = File(path);
+      if (await file.exists()) await file.delete();
+    } catch (_) {
+      // Draft cleanup is best-effort.
+    }
+  }
+
+  Future<void> _cleanupStaleStoryDrafts() async {
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final draftDir = Directory('${tempDir.path}/xmo_story_drafts');
+      if (!await draftDir.exists()) return;
+      final cutoff = DateTime.now().subtract(const Duration(days: 1));
+      await for (final entity in draftDir.list()) {
+        if (entity is! File) continue;
+        try {
+          final modified = await entity.lastModified();
+          if (modified.isBefore(cutoff)) await entity.delete();
+        } catch (_) {
+          // Continue cleaning the remaining files.
+        }
+      }
+    } catch (_) {
+      // Startup cleanup must never block Story creation.
+    }
   }
 
   String _fileExtensionForMime(String mimeType) {
@@ -227,7 +368,9 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
   }
 
   Future<void> _createStory() async {
-    if (_selectedMedia == null && _captionController.text.trim().isEmpty) {
+    if (_selectedMedia == null &&
+        _selectedMediaFilePath == null &&
+        _captionController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please add an image, video, or text'),
@@ -237,7 +380,14 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
       return;
     }
 
-    setState(() => _uploading = true);
+    final cancellationToken = StoryCreationCancellationToken();
+    setState(() {
+      _uploading = true;
+      _creationProgress = const StoryCreationProgress(
+        phase: StoryCreationPhase.preparing,
+      );
+      _cancellationToken = cancellationToken;
+    });
 
     try {
       final storyProvider = context.read<StoryProvider>();
@@ -251,8 +401,11 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
       };
 
       final request = CreateStoryRequest(
+        clientRequestId: _clientRequestId,
         mediaType: _mediaType,
         mediaBytes: _selectedMedia,
+        mediaFilePath: _selectedMediaFilePath,
+        mediaSizeBytes: _selectedMediaSizeBytes,
         mediaMimeType: _selectedMediaMimeType,
         mediaFileName: _selectedMediaFileName,
         thumbnailBytes:
@@ -260,8 +413,9 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
         caption: _captionController.text.trim().isNotEmpty
             ? _captionController.text.trim()
             : null,
-        textContent:
-            _selectedMedia == null ? _captionController.text.trim() : null,
+        textContent: _selectedMedia == null && _selectedMediaFilePath == null
+            ? _captionController.text.trim()
+            : null,
         privacy: storyPrivacy,
         customPrivacyList:
             privacySettings.storyAudience == XmoPrivacyAudience.contacts
@@ -269,9 +423,16 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
                 : privacySettings.storyUserIds,
       );
 
-      final story = await storyProvider.createStory(request);
+      final story = await storyProvider.createStory(
+        request,
+        cancellationToken: cancellationToken,
+        onProgress: (progress) {
+          if (mounted) setState(() => _creationProgress = progress);
+        },
+      );
 
       if (story != null && mounted) {
+        _deleteOwnedSelectedMedia();
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -283,16 +444,24 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
       }
     } catch (e) {
       if (mounted) {
+        final message =
+            e is StoryValidationException || e is StoryUploadException
+                ? e.toString()
+                : 'Could not post story. Please try again.';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to create story: $e'),
+            content: Text(message),
             backgroundColor: Colors.red,
           ),
         );
       }
     } finally {
       if (mounted) {
-        setState(() => _uploading = false);
+        setState(() {
+          _uploading = false;
+          _creationProgress = null;
+          _cancellationToken = null;
+        });
       }
     }
   }
@@ -318,16 +487,26 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
         ),
         actions: [
           if (_uploading)
-            const Center(
+            Center(
               child: Padding(
-                padding: EdgeInsets.all(16),
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    color: kLimeGreen,
-                    strokeWidth: 2,
-                  ),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        value: _creationProgress?.fraction,
+                        color: kLimeGreen,
+                        strokeWidth: 2,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Cancel upload',
+                      onPressed: () => _cancellationToken?.cancel(),
+                      icon: const Icon(Icons.close, color: kWhite),
+                    ),
+                  ],
                 ),
               ),
             )
@@ -349,7 +528,7 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
         children: [
           // Preview area
           Expanded(
-            child: _selectedMedia != null
+            child: _selectedMedia != null || _selectedMediaFilePath != null
                 ? _buildMediaPreview()
                 : _buildTextPreview(),
           ),
@@ -370,7 +549,8 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
                     controller: _captionController,
                     style: GoogleFonts.inter(color: kWhite, fontSize: 14),
                     decoration: InputDecoration(
-                      hintText: _selectedMedia != null
+                      hintText: _selectedMedia != null ||
+                              _selectedMediaFilePath != null
                           ? 'Add a caption...'
                           : 'Type your story...',
                       hintStyle: GoogleFonts.inter(
@@ -407,13 +587,15 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
                   label: 'Camera',
                   onTap: _showCameraPicker,
                 ),
-                if (_selectedMedia != null)
+                if (_selectedMedia != null || _selectedMediaFilePath != null)
                   _buildMediaButton(
                     icon: Icons.delete_outline,
                     label: 'Remove',
                     color: Colors.red,
                     onTap: () {
                       setState(() {
+                        _resetPublishIdentity();
+                        _replaceSelectedFile();
                         _selectedMedia = null;
                         _selectedVideoThumbnail = null;
                         _selectedMediaMimeType = null;
@@ -439,11 +621,17 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
                 _selectedMedia!,
                 fit: BoxFit.contain,
               )
-            : StoryVideoPlayer.bytes(
-                key: ValueKey(_selectedMedia),
-                bytes: _selectedMedia!,
-                mimeType: _selectedMediaMimeType ?? 'video/mp4',
-              ),
+            : _selectedMediaFilePath != null
+                ? StoryVideoPlayer.file(
+                    key: ValueKey(_selectedMediaFilePath),
+                    filePath: _selectedMediaFilePath!,
+                    mimeType: _selectedMediaMimeType ?? 'video/mp4',
+                  )
+                : StoryVideoPlayer.bytes(
+                    key: ValueKey(_selectedMedia),
+                    bytes: _selectedMedia!,
+                    mimeType: _selectedMediaMimeType ?? 'video/mp4',
+                  ),
       ),
     );
   }

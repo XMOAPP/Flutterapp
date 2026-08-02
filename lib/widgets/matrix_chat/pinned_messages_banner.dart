@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import '../../theme.dart';
 import '../../services/matrix_service.dart';
+import '../../utils/message_presentation.dart';
 
 /// Pinned Messages Banner - Shows at top of chat when messages are pinned
 class PinnedMessagesBanner extends StatelessWidget {
@@ -91,6 +92,6 @@ class PinnedMessagesBanner extends StatelessWidget {
       return 'File';
     }
 
-    return event.body;
+    return matrixVisibleBody(event, fallback: 'Message');
   }
 }

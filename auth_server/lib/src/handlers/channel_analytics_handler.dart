@@ -162,7 +162,7 @@ Future<_ChannelAnalyticsAuth?> _channelAnalyticsAuth(
   if (token == null) {
     await _json(request, HttpStatus.unauthorized, {
       'success': false,
-      'error': 'Missing Matrix access token',
+      'error': 'Missing XMO session token',
     });
     return null;
   }

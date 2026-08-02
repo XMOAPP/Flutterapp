@@ -118,7 +118,7 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
 
   Future<void> _hangup() async {
     try {
-      await _session.hangup(CallErrorCode.UserHangup);
+      await _session.hangup(reason: CallErrorCode.userHangup);
       _closingWithoutPip = true;
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -510,6 +510,8 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
         return 'Connecting...';
       case CallState.kConnected:
         return 'Connected';
+      case CallState.kEnding:
+        return 'Ending call...';
       case CallState.kEnded:
         return 'Call ended';
     }
@@ -517,8 +519,7 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
 
   webrtc.RTCVideoRenderer? _rendererFor(WrappedMediaStream? stream) {
     if (stream?.stream == null) return null;
-    final renderer = stream?.renderer;
-    return renderer is webrtc.RTCVideoRenderer ? renderer : null;
+    return VoipService().rendererFor(stream);
   }
 }
 

@@ -10,8 +10,8 @@ class RequestRateLimiter {
   final int maxRequestsPerWindow;
   final Map<String, _RateWindow> _windows = <String, _RateWindow>{};
 
-  bool allow(HttpRequest request) {
-    final key = '${_clientAddress(request)}:${request.uri.path}';
+  bool allow(HttpRequest request, {String? routeKey}) {
+    final key = '${_clientAddress(request)}:${routeKey ?? request.uri.path}';
     final now = DateTime.now().toUtc();
     final current = _windows[key];
     if (current == null || now.difference(current.startedAt) >= window) {

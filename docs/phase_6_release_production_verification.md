@@ -146,7 +146,7 @@ The release verifier uses these production values by default:
 --dart-define=XMO_STREAM_CHUNK_STORAGE=azure
 --dart-define=XMO_AZURE_CHUNK_SIGN_URL=https://xmo-matrix.centralindia.cloudapp.azure.com/auth/media/chunks/azure/sign-upload
 --dart-define=XMO_ACCOUNT_DELETION_SERVER_URL=https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp
---dart-define=XMO_ACCOUNT_DELETION_WEB_URL=https://xmo-matrix.centralindia.cloudapp.azure.com/account-deletion
+--dart-define=XMO_ACCOUNT_DELETION_WEB_URL=https://xmo.dpdns.org/account-deletion
 ```
 
 If production hosts change, pass replacements through `-DartDefine`.

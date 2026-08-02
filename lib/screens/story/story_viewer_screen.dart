@@ -6,6 +6,7 @@ import '../../theme.dart';
 import '../../models/story_models.dart';
 import '../../providers/story_provider.dart';
 import '../../providers/matrix_provider.dart';
+import '../../widgets/direct_chat/message_reactions.dart';
 import '../../widgets/story/story_avatar.dart';
 import '../../widgets/story/story_video_player.dart';
 import 'story_creator_screen.dart';
@@ -40,21 +41,6 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   bool _isPaused = false;
   String? _activeVideoStoryId;
   bool _sendingStoryReply = false;
-
-  static const List<String> _storyReactionEmojis = [
-    '❤️',
-    '👍',
-    '😂',
-    '😮',
-    '😢',
-    '🙏',
-    '🔥',
-    '🎉',
-    '👏',
-    '💯',
-    '🤔',
-    '😍',
-  ];
 
   @override
   void initState() {
@@ -154,6 +140,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   void _nextStory() {
     if (_currentStoryIndex < _currentUserStories.length - 1) {
       // Next story from same user
+      _resetReplyStateForStoryTransition();
       setState(() {
         _currentStoryIndex++;
         _progress.value = 0.0;
@@ -169,6 +156,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   void _previousStory() {
     if (_currentStoryIndex > 0) {
       // Previous story from same user
+      _resetReplyStateForStoryTransition();
       setState(() {
         _currentStoryIndex--;
         _progress.value = 0.0;
@@ -182,6 +170,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
 
   void _nextUser() {
     if (_currentUserIndex < widget.allUserStories.length - 1) {
+      _resetReplyStateForStoryTransition();
       setState(() {
         _currentUserIndex++;
         _currentStoryIndex = 0;
@@ -195,7 +184,8 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   }
 
   void _previousUser() {
-    if (_currentUserIndex > 0 || _currentUserIndex == -1) {
+    if (_currentUserIndex > 0) {
+      _resetReplyStateForStoryTransition();
       setState(() {
         _currentUserIndex--;
         _currentStoryIndex = 0;
@@ -205,6 +195,20 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     } else {
       _closeViewer();
     }
+  }
+
+  void _resetReplyStateForStoryTransition() {
+    _replyController.clear();
+    _replyFocusNode.unfocus();
+  }
+
+  bool _isOwnStory(Story story) {
+    final currentUserId = context.read<MatrixProvider>().userId;
+    if (currentUserId != null && currentUserId.isNotEmpty) {
+      return story.userId.trim().toLowerCase() ==
+          currentUserId.trim().toLowerCase();
+    }
+    return _currentUserIndex == -1;
   }
 
   void _closeViewer() {
@@ -219,10 +223,9 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   }
 
   Future<void> _markCurrentStoryAsViewed() async {
-    if (_currentUserIndex == -1) return; // Don't mark own stories
-
     if (_currentStoryIndex < _currentUserStories.length) {
       final story = _currentUserStories[_currentStoryIndex];
+      if (_isOwnStory(story)) return;
       final storyProvider = context.read<StoryProvider>();
       await storyProvider.markStoryAsViewed(story.userId, story.id);
     }
@@ -288,16 +291,20 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     }
   }
 
-  void _viewStoryViewers() {
+  Future<void> _viewStoryViewers() async {
     if (_currentStoryIndex >= _currentUserStories.length) return;
 
     final story = _currentUserStories[_currentStoryIndex];
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => StoryViewersScreen(storyId: story.id),
-      ),
+    _pauseStory();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.55),
+      builder: (_) => StoryViewersSheet(storyId: story.id),
     );
+    if (mounted) _resumeStory();
   }
 
   void _addStory() {
@@ -334,22 +341,17 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     if (index != -1) _currentStoryIndex = index;
   }
 
-  Future<void> _sendStoryReaction(Story story, String emoji) async {
-    if (_sendingStoryReply) return;
-    Navigator.of(context).maybePop();
-    await _sendStoryDirectMessage(
-      story,
-      'Reacted to your story: $emoji',
-      successMessage: 'Reaction sent',
-    );
-  }
-
   Future<void> _sendStoryDirectMessage(
     Story story,
     String body, {
     required String successMessage,
   }) async {
-    if (story.userId.isEmpty || _currentUserIndex == -1) return;
+    if (story.userId.isEmpty ||
+        _isOwnStory(story) ||
+        _currentStoryIndex >= _currentUserStories.length ||
+        _currentUserStories[_currentStoryIndex].id != story.id) {
+      return;
+    }
 
     setState(() => _sendingStoryReply = true);
     _pauseStory();
@@ -407,60 +409,51 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     }
   }
 
-  void _showStoryReactionPicker(Story story) {
+  void _insertStoryReplyEmoji(String emoji) {
+    final value = _replyController.value;
+    final selection = value.selection;
+    final start = selection.isValid ? selection.start : value.text.length;
+    final end = selection.isValid ? selection.end : value.text.length;
+    final updatedText = value.text.replaceRange(start, end, emoji);
+
+    _replyController.value = TextEditingValue(
+      text: updatedText,
+      selection: TextSelection.collapsed(offset: start + emoji.length),
+    );
+  }
+
+  void _showStoryEmojiPicker(Story story) {
+    if (_isOwnStory(story) ||
+        _currentStoryIndex >= _currentUserStories.length ||
+        _currentUserStories[_currentStoryIndex].id != story.id) {
+      return;
+    }
     _pauseStory();
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: 0.45),
-      builder: (ctx) {
-        return SafeArea(
-          top: false,
-          child: Container(
-            margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-            decoration: BoxDecoration(
-              color: kDarkerGrey,
-              borderRadius: BorderRadius.circular(22),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'React',
-                  style: GoogleFonts.inter(
-                    color: kWhite,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 8,
-                  children: _storyReactionEmojis.map((emoji) {
-                    return InkWell(
-                      onTap: () => _sendStoryReaction(story, emoji),
-                      borderRadius: BorderRadius.circular(22),
-                      child: SizedBox(
-                        width: 42,
-                        height: 42,
-                        child: Center(
-                          child: Text(
-                            emoji,
-                            style: const TextStyle(fontSize: 25),
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+
+    void switchToKeyboard() {
+      Navigator.pop(context);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _replyFocusNode.requestFocus();
+      });
+    }
+
+    ReactionPicker.show(
+      context,
+      _insertStoryReplyEmoji,
+      closeOnSelection: false,
+      composer: Container(
+        color: kDarkerGrey,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        child: _buildStoryReplyBar(
+          story,
+          emojiPickerOpen: true,
+          onEmojiTap: switchToKeyboard,
+          onSend: () {
+            Navigator.pop(context);
+            _sendStoryReply(story);
+          },
+        ),
+      ),
     ).whenComplete(() {
       if (mounted && !_replyFocusNode.hasFocus && !_sendingStoryReply) {
         _resumeStory();
@@ -480,9 +473,11 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     }
 
     final currentStory = _currentUserStories[_currentStoryIndex];
-    final isMyStory = _currentUserIndex == -1;
+    final isMyStory = _isOwnStory(currentStory);
     final canReply = !isMyStory && currentStory.userId.isNotEmpty;
     final bottomInset = MediaQuery.of(context).padding.bottom;
+    final caption = currentStory.caption?.trim();
+    final hasCaption = caption != null && caption.isNotEmpty;
 
     return Scaffold(
       backgroundColor: kBlack,
@@ -495,8 +490,9 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
 
           // Let header and bottom action buttons handle their own taps.
           if (tapY < mediaQuery.padding.top + 72 ||
-              (isMyStory && tapY > screenHeight - 96) ||
-              (canReply && tapY > screenHeight - (bottomInset + 92))) {
+              ((isMyStory || canReply) &&
+                  tapY >
+                      screenHeight - (bottomInset + (hasCaption ? 150 : 92)))) {
             return;
           }
 
@@ -549,30 +545,36 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
               child: _buildHeader(currentStory, isMyStory),
             ),
 
-            // Caption
-            if (currentStory.caption != null)
+            if (isMyStory || canReply)
               Positioned(
-                bottom: canReply ? bottomInset + 82 : 80,
-                left: 16,
-                right: 16,
-                child: _buildCaption(currentStory.caption!),
-              ),
-
-            // Bottom actions (for my story)
-            if (isMyStory)
-              Positioned(
-                bottom: 20,
-                left: 16,
-                right: 16,
-                child: _buildMyStoryActions(currentStory),
-              ),
-
-            if (canReply)
-              Positioned(
-                bottom: bottomInset + 10,
-                left: 12,
-                right: 12,
-                child: _buildStoryReplyBar(currentStory),
+                key: ValueKey(
+                  'story-actions:${currentStory.id}:$isMyStory',
+                ),
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.5),
+                  padding: EdgeInsets.fromLTRB(
+                    12,
+                    hasCaption ? 14 : 10,
+                    12,
+                    bottomInset + 10,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (hasCaption) ...[
+                        _buildCaption(caption),
+                        const SizedBox(height: 12),
+                      ],
+                      if (isMyStory)
+                        _buildMyStoryActions(currentStory)
+                      else
+                        _buildStoryReplyBar(currentStory),
+                    ],
+                  ),
+                ),
               ),
           ],
         ),
@@ -761,17 +763,14 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   }
 
   Widget _buildCaption(String caption) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(8),
-      ),
+    return SizedBox(
+      width: double.infinity,
       child: Text(
         caption,
+        textAlign: TextAlign.center,
         style: GoogleFonts.inter(
           color: kWhite,
-          fontSize: 13,
+          fontSize: 15,
         ),
       ),
     );
@@ -798,88 +797,124 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     );
   }
 
-  Widget _buildStoryReplyBar(Story story) {
-    return Row(
-      children: [
-        InkWell(
-          onTap:
-              _sendingStoryReply ? null : () => _showStoryReactionPicker(story),
-          borderRadius: BorderRadius.circular(24),
-          child: Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.55),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.emoji_emotions_outlined,
-              color: kWhite,
-              size: 24,
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Container(
-            height: 46,
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.55),
-              borderRadius: BorderRadius.circular(24),
-            ),
-            alignment: Alignment.center,
-            child: ValueListenableBuilder<TextEditingValue>(
-              valueListenable: _replyController,
-              builder: (context, value, _) {
-                return TextField(
-                  controller: _replyController,
-                  focusNode: _replyFocusNode,
-                  enabled: !_sendingStoryReply,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => _sendStoryReply(story),
-                  minLines: 1,
-                  maxLines: 1,
-                  style: GoogleFonts.inter(
-                    color: kWhite,
-                    fontSize: 15,
+  Widget _buildStoryReplyBar(
+    Story story, {
+    bool emojiPickerOpen = false,
+    VoidCallback? onEmojiTap,
+    VoidCallback? onSend,
+  }) {
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: _replyController,
+      builder: (context, value, _) {
+        final hasText = value.text.trim().isNotEmpty;
+        return AnimatedSize(
+          duration: const Duration(milliseconds: 120),
+          alignment: Alignment.bottomCenter,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: kDarkGrey,
+                    borderRadius: BorderRadius.circular(24),
                   ),
-                  decoration: InputDecoration(
-                    hintText: 'Reply to story',
-                    hintStyle: GoogleFonts.inter(
-                      color: Colors.white54,
-                      fontSize: 15,
-                    ),
-                    border: InputBorder.none,
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                    suffixIcon: value.text.trim().isEmpty
-                        ? null
-                        : IconButton(
-                            icon: _sendingStoryReply
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      color: kLimeGreen,
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(
-                                    Icons.send_rounded,
-                                    color: kLimeGreen,
-                                    size: 20,
-                                  ),
-                            onPressed: _sendingStoryReply
-                                ? null
-                                : () => _sendStoryReply(story),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      InkWell(
+                        onTap: _sendingStoryReply
+                            ? null
+                            : onEmojiTap ?? () => _showStoryEmojiPicker(story),
+                        borderRadius: BorderRadius.circular(20),
+                        child: Padding(
+                          padding: const EdgeInsets.all(2),
+                          child: Icon(
+                            emojiPickerOpen
+                                ? Icons.keyboard_alt_outlined
+                                : Icons.emoji_emotions_outlined,
+                            color:
+                                _sendingStoryReply ? kMediumGrey : kLightGrey,
+                            size: 24,
                           ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          key: const ValueKey('story-reply-field'),
+                          controller: _replyController,
+                          focusNode: _replyFocusNode,
+                          enabled: !_sendingStoryReply,
+                          minLines: 1,
+                          maxLines: 6,
+                          keyboardType: TextInputType.multiline,
+                          textInputAction: TextInputAction.newline,
+                          textCapitalization: TextCapitalization.sentences,
+                          textAlignVertical: TextAlignVertical.center,
+                          style: GoogleFonts.inter(
+                            color: kWhite,
+                            fontSize: 17,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: 'Reply to story',
+                            hintStyle: GoogleFonts.inter(
+                              color: kLightGrey,
+                              fontSize: 14,
+                            ),
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                );
-              },
-            ),
+                ),
+              ),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                transitionBuilder: (child, animation) =>
+                    ScaleTransition(scale: animation, child: child),
+                child: hasText
+                    ? GestureDetector(
+                        key: const ValueKey('story-reply-send'),
+                        onTap: _sendingStoryReply
+                            ? null
+                            : onSend ?? () => _sendStoryReply(story),
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          margin: const EdgeInsets.only(left: 8),
+                          decoration: BoxDecoration(
+                            color: _sendingStoryReply ? kDarkGrey : kLimeGreen,
+                            shape: BoxShape.circle,
+                          ),
+                          child: _sendingStoryReply
+                              ? const Padding(
+                                  padding: EdgeInsets.all(11),
+                                  child: CircularProgressIndicator(
+                                    color: kMediumGrey,
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.send_rounded,
+                                  color: kBlack,
+                                  size: 20,
+                                ),
+                        ),
+                      )
+                    : const SizedBox.shrink(
+                        key: ValueKey('story-reply-send-hidden'),
+                      ),
+              ),
+            ],
           ),
-        ),
-      ],
+        );
+      },
     );
   }
 

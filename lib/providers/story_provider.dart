@@ -20,6 +20,7 @@ class StoryProvider extends ChangeNotifier {
   Timer? _refreshTimer;
   Timer? _cleanupTimer;
   StreamSubscription<EventUpdate>? _eventSub;
+  StreamSubscription<BasicEvent>? _accountDataSub;
   bool _hasLoadedContactTimeline = false;
 
   // Getters
@@ -32,10 +33,16 @@ class StoryProvider extends ChangeNotifier {
   /// Initialize provider
   void _init() {
     _eventSub = _storyService.onEvent.listen(_handleEventUpdate);
+    _accountDataSub = _storyService.onAccountData.listen((event) {
+      if (event.type == StoryService.storyAccountDataType) {
+        unawaited(loadMyStories());
+      }
+    });
 
     // Matrix timeline scans are expensive. New story/view events update this
     // provider directly, so periodic work refreshes only account data.
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      unawaited(_storyService.retryPendingStoryDistribution());
       refreshStories(forceTimelineScan: false);
     });
 
@@ -45,17 +52,12 @@ class StoryProvider extends ChangeNotifier {
     });
 
     // Initial load
+    unawaited(_storyService.retryPendingStoryDistribution());
     refreshStories();
   }
 
   Future<void> _handleEventUpdate(EventUpdate update) async {
     try {
-      if (update.type == EventUpdateType.accountData &&
-          update.content['type'] == StoryService.storyAccountDataType) {
-        await loadMyStories();
-        return;
-      }
-
       if (update.type != EventUpdateType.timeline ||
           !_storyService.isDirectChatRoom(update.roomID)) {
         return;
@@ -78,7 +80,7 @@ class StoryProvider extends ChangeNotifier {
     );
     if (userStories == null) return;
 
-    _upsertContactStories(userStories);
+    if (!_upsertContactStories(userStories)) return;
     unawaited(_storyService.cacheContactStories(_contactStories));
     notifyListeners();
   }
@@ -88,34 +90,65 @@ class StoryProvider extends ChangeNotifier {
     if (rawContent is! Map) return;
 
     final content = Map<String, dynamic>.from(rawContent);
-    final storyId = content['story_id'] as String?;
-    final viewerId = content['viewer_id'] as String?;
+    final senderId = eventJson['sender'] as String?;
+    final receivedAt = _eventTimestamp(eventJson['origin_server_ts']);
+    if (senderId == null || receivedAt == null) return;
+
+    final receipt = parseStoryViewReceipt(
+      content: content,
+      senderId: senderId,
+      receivedAt: receivedAt,
+    );
     final myUserId = _storyService.currentUserId;
 
-    if (storyId == null || viewerId == null || myUserId == null) return;
-    if (viewerId == myUserId) return;
+    if (receipt == null || myUserId == null) return;
+    if (receipt.viewerId == myUserId) return;
 
-    final storyIndex = _myStories.indexWhere((story) => story.id == storyId);
+    final storyIndex =
+        _myStories.indexWhere((story) => story.id == receipt.storyId);
     if (storyIndex == -1) return;
 
     final story = _myStories[storyIndex];
-    if (story.viewedBy.contains(viewerId)) return;
+    if (story.viewedBy.contains(receipt.viewerId)) return;
 
     final updatedStories = List<Story>.from(_myStories);
     updatedStories[storyIndex] = story.copyWith(
-      viewedBy: [...story.viewedBy, viewerId],
+      viewedBy: [...story.viewedBy, receipt.viewerId],
     );
     _myStories = updatedStories;
     notifyListeners();
   }
 
-  void _upsertContactStories(UserStories incoming) {
+  DateTime? _eventTimestamp(Object? value) {
+    final milliseconds = switch (value) {
+      int number => number,
+      num number => number.toInt(),
+      _ => int.tryParse(value?.toString() ?? ''),
+    };
+    if (milliseconds == null || milliseconds <= 0) return null;
+    return DateTime.fromMillisecondsSinceEpoch(milliseconds);
+  }
+
+  bool _upsertContactStories(UserStories incoming) {
     final updatedStories = incoming.activeStories;
-    _contactStories.removeWhere((stories) => stories.userId == incoming.userId);
+    final existingIndex = _contactStories.indexWhere(
+      (stories) => stories.userId == incoming.userId,
+    );
+    if (existingIndex != -1 &&
+        !shouldReplaceStorySnapshot(
+          _contactStories[existingIndex],
+          incoming,
+        )) {
+      return false;
+    }
+
+    if (existingIndex != -1) {
+      _contactStories.removeAt(existingIndex);
+    }
 
     if (updatedStories.isEmpty) {
       _sortContactStories();
-      return;
+      return true;
     }
 
     _contactStories.add(UserStories(
@@ -123,8 +156,10 @@ class StoryProvider extends ChangeNotifier {
       userName: incoming.userName,
       userAvatarUrl: incoming.userAvatarUrl,
       stories: updatedStories,
+      snapshotUpdatedAt: incoming.snapshotUpdatedAt,
     ));
     _sortContactStories();
+    return true;
   }
 
   void _sortContactStories() {
@@ -157,6 +192,7 @@ class StoryProvider extends ChangeNotifier {
       userName: userStories.userName,
       userAvatarUrl: userStories.userAvatarUrl,
       stories: updatedStories,
+      snapshotUpdatedAt: userStories.snapshotUpdatedAt,
     );
     unawaited(_storyService.cacheContactStories(_contactStories));
   }
@@ -226,13 +262,21 @@ class StoryProvider extends ChangeNotifier {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /// Create a new story
-  Future<Story?> createStory(CreateStoryRequest request) async {
+  Future<Story?> createStory(
+    CreateStoryRequest request, {
+    ValueChanged<StoryCreationProgress>? onProgress,
+    StoryCreationCancellationToken? cancellationToken,
+  }) async {
     try {
       _loading = true;
       _error = null;
       notifyListeners();
 
-      final story = await _storyService.createStory(request);
+      final story = await _storyService.createStory(
+        request,
+        onProgress: onProgress,
+        cancellationToken: cancellationToken,
+      );
 
       // Add to my stories
       _myStories.add(story);
@@ -330,6 +374,7 @@ class StoryProvider extends ChangeNotifier {
   @override
   void dispose() {
     _eventSub?.cancel();
+    _accountDataSub?.cancel();
     _refreshTimer?.cancel();
     _cleanupTimer?.cancel();
     super.dispose();

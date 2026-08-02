@@ -55,12 +55,11 @@ class ReportService {
           eventId == null) {
         rethrow;
       }
-      await _matrixService.client.reportContent(
+      await _matrixService.client.reportEvent(
         roomId,
         eventId,
         reason:
             '${reason.label}${details?.trim().isNotEmpty == true ? ': ${details!.trim()}' : ''}',
-        score: -100,
       );
     }
   }

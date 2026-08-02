@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import '../../../theme.dart';
+import '../../../utils/message_presentation.dart';
 import '../media_handler.dart';
 
 /// Image content widget for Matrix messages
@@ -47,6 +48,7 @@ class _ImageContentState extends State<ImageContent> {
 
   @override
   Widget build(BuildContext context) {
+    final fileName = matrixAttachmentFileName(widget.event, fallback: 'Photo');
     final screenWidth = MediaQuery.sizeOf(context).width;
     final maxMediaWidth = math.min(
       292.0,
@@ -82,7 +84,7 @@ class _ImageContentState extends State<ImageContent> {
                       color: kLimeGreen, strokeWidth: 2),
                   const SizedBox(height: 8),
                   Text(
-                    widget.event.body,
+                    fileName,
                     style: GoogleFonts.inter(color: kLightGrey, fontSize: 10),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -110,7 +112,7 @@ class _ImageContentState extends State<ImageContent> {
                   const Icon(Icons.broken_image_outlined,
                       color: kLightGrey, size: 28),
                   const SizedBox(height: 4),
-                  Text(widget.event.body,
+                  Text(fileName,
                       style:
                           GoogleFonts.inter(color: kLightGrey, fontSize: 11)),
                 ],
@@ -120,8 +122,8 @@ class _ImageContentState extends State<ImageContent> {
         }
 
         return GestureDetector(
-          onTap: () => widget.openFullscreenImage(
-              bytes, widget.event.body, widget.event),
+          onTap: () =>
+              widget.openFullscreenImage(bytes, fileName, widget.event),
           child: _RenderedSizeReporter(
             onSize: widget.onRenderedSize,
             child: ClipRRect(
@@ -147,7 +149,7 @@ class _ImageContentState extends State<ImageContent> {
                         const Icon(Icons.broken_image_outlined,
                             color: kLightGrey, size: 28),
                         const SizedBox(height: 4),
-                        Text(widget.event.body,
+                        Text(fileName,
                             style: GoogleFonts.inter(
                                 color: kLightGrey, fontSize: 11)),
                       ],

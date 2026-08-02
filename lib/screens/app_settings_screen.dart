@@ -534,7 +534,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
           ),
           const SizedBox(height: 10),
           Text(
-            'This permanently deactivates your Matrix account and removes your XMO directory, recovery-email, and report records. You will not be able to log in again.',
+            'This permanently deactivates your XMO account and removes your public profile, recovery email, and report records. You will not be able to log in again.',
             textAlign: TextAlign.center,
             style: GoogleFonts.inter(
               color: kLightGrey,
@@ -661,7 +661,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
     final rows = [
       'Your local session, cached rooms, and device data will be cleared.',
       'Encrypted message recovery can be lost if you did not save your recovery key.',
-      'Delivered messages and uploaded media may remain on recipient devices or Matrix servers.',
+      'Delivered messages and uploaded media may remain on recipient devices or connected servers.',
       'This is different from logout and cannot be undone.',
     ];
     return Container(
@@ -803,6 +803,16 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     setState(() => _working = true);
     final result = await _e2eeService.setupRecoveryAndKeyBackup(
       passphrase: passphrase,
+      requestAccountPassword: () {
+        if (!mounted) return Future<String?>.value();
+        return _promptInput(
+          title: 'Confirm account password',
+          hint: 'Account password',
+          obscure: true,
+          message:
+              'Your XMO account server requires your password before creating security keys.',
+        );
+      },
     );
     if (!mounted) return;
     setState(() => _working = false);
@@ -839,64 +849,16 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     required String hint,
     required String message,
     bool obscure = false,
-  }) async {
-    final controller = TextEditingController();
-    final result = await showDialog<String>(
+  }) {
+    return showDialog<String>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: kDarkerGrey,
-          title: Text(
-            title,
-            style: GoogleFonts.inter(color: kWhite, fontSize: 18),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                message,
-                style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: controller,
-                obscureText: obscure,
-                style: GoogleFonts.inter(color: kWhite),
-                decoration: InputDecoration(
-                  hintText: hint,
-                  hintStyle: GoogleFonts.inter(color: kLightGrey),
-                  filled: true,
-                  fillColor: const Color(0xFF2C2C2E),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(18),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(
-                'Cancel',
-                style: GoogleFonts.inter(color: kLightGrey),
-              ),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, controller.text),
-              child: Text(
-                'Continue',
-                style: GoogleFonts.inter(color: kWhite),
-              ),
-            ),
-          ],
-        );
-      },
+      builder: (_) => _SecurityInputDialog(
+        title: title,
+        hint: hint,
+        message: message,
+        obscure: obscure,
+      ),
     );
-    controller.dispose();
-    return result;
   }
 
   Future<void> _showRecoveryKey(String? recoveryKey) async {
@@ -995,6 +957,18 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   }
 
   List<Widget> _securityContent(E2eeStatus? status) {
+    final encryptionAvailable = status?.available == true;
+    final crossSigningEnabled = status?.crossSigningEnabled == true;
+    final crossSigningCached = status?.crossSigningCached == true;
+    final keyBackupEnabled = status?.keyBackupEnabled == true;
+    final keyBackupCached = status?.keyBackupCached == true;
+    final needsRecoveryUnlock = encryptionAvailable &&
+        ((crossSigningEnabled && !crossSigningCached) ||
+            (keyBackupEnabled && !keyBackupCached));
+    final needsRecoverySetup = encryptionAvailable &&
+        !needsRecoveryUnlock &&
+        (!crossSigningEnabled || !keyBackupEnabled);
+
     return [
       Row(
         children: [
@@ -1041,7 +1015,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
           _securityNavTile(
             icon: Icons.devices,
             title: 'Devices and Sessions',
-            subtitle: 'Review and sign out Matrix sessions',
+            subtitle: 'Review and sign out XMO sessions',
             onTap: () {
               Navigator.push(
                 context,
@@ -1053,7 +1027,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
           _securityNavTile(
             icon: Icons.verified_user,
             title: 'Two-step verification',
-            subtitle: 'Requires homeserver-enforced login support',
+            subtitle: 'Requires account-server login support',
             onTap: () {
               Navigator.push(
                 context,
@@ -1084,18 +1058,6 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                 : 'Not set up',
             ok: status?.crossSigningEnabled == true &&
                 status?.crossSigningCached == true,
-            actionLabel: status?.crossSigningEnabled == true
-                ? status?.crossSigningCached == true
-                    ? null
-                    : 'Unlock'
-                : 'Set up',
-            onAction: _working
-                ? null
-                : status?.crossSigningEnabled == true
-                    ? status?.crossSigningCached == true
-                        ? null
-                        : _unlockRecovery
-                    : _setupRecovery,
           ),
           _panelDivider(),
           _statusRow(
@@ -1108,34 +1070,26 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                 : 'Not set up',
             ok: status?.keyBackupEnabled == true &&
                 status?.keyBackupCached == true,
-            actionLabel: status?.keyBackupEnabled == true
-                ? status?.keyBackupCached == true
-                    ? null
-                    : 'Unlock'
-                : 'Set up',
-            onAction: _working
-                ? null
-                : status?.keyBackupEnabled == true
-                    ? status?.keyBackupCached == true
-                        ? null
-                        : _unlockRecovery
-                    : _setupRecovery,
           ),
         ],
       ),
-      const SizedBox(height: 18),
-      _actionButton(
-        'Set up recovery and key backup',
-        _working ? null : _setupRecovery,
-        icon: Icons.verified_user_outlined,
-      ),
-      const SizedBox(height: 10),
-      _actionButton(
-        'Unlock recovery',
-        _working ? null : _unlockRecovery,
-        icon: Icons.lock_open_outlined,
-        outlined: true,
-      ),
+      if (needsRecoverySetup) ...[
+        const SizedBox(height: 18),
+        _actionButton(
+          'Set up recovery and key backup',
+          _working ? null : _setupRecovery,
+          icon: Icons.verified_user_outlined,
+        ),
+      ],
+      if (needsRecoveryUnlock) ...[
+        const SizedBox(height: 18),
+        _actionButton(
+          'Unlock recovery',
+          _working ? null : _unlockRecovery,
+          icon: Icons.lock_open_outlined,
+          outlined: true,
+        ),
+      ],
       if (_working) ...[
         const SizedBox(height: 20),
         const Center(child: CircularProgressIndicator(color: kLimeGreen)),
@@ -1214,10 +1168,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
               ],
             ),
           ),
-          if (actionLabel != null)
-            _miniActionButton(actionLabel, onAction)
-          else
-            const Icon(Icons.chevron_right, color: kLightGrey, size: 22),
+          if (actionLabel != null) _miniActionButton(actionLabel, onAction),
         ],
       ),
     );
@@ -1379,6 +1330,95 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   }
 }
 
+class _SecurityInputDialog extends StatefulWidget {
+  final String title;
+  final String hint;
+  final String message;
+  final bool obscure;
+
+  const _SecurityInputDialog({
+    required this.title,
+    required this.hint,
+    required this.message,
+    required this.obscure,
+  });
+
+  @override
+  State<_SecurityInputDialog> createState() => _SecurityInputDialogState();
+}
+
+class _SecurityInputDialogState extends State<_SecurityInputDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: kDarkerGrey,
+      title: Text(
+        widget.title,
+        style: GoogleFonts.inter(color: kWhite, fontSize: 18),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            widget.message,
+            style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _controller,
+            obscureText: widget.obscure,
+            autofocus: true,
+            style: GoogleFonts.inter(color: kWhite),
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => Navigator.pop(context, _controller.text),
+            decoration: InputDecoration(
+              hintText: widget.hint,
+              hintStyle: GoogleFonts.inter(color: kLightGrey),
+              filled: true,
+              fillColor: const Color(0xFF2C2C2E),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(
+            'Cancel',
+            style: GoogleFonts.inter(color: kLightGrey),
+          ),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, _controller.text),
+          child: Text(
+            'Continue',
+            style: GoogleFonts.inter(color: kWhite),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class TwoFactorStatusScreen extends StatelessWidget {
   const TwoFactorStatusScreen({super.key});
 
@@ -1413,9 +1453,9 @@ class TwoFactorStatusScreen extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              'XMO currently uses the Matrix homeserver for account login. '
+              'XMO currently relies on its account server for sign-in. '
               'Secure two-factor authentication must be enforced by that '
-              'server so it cannot be bypassed from another Matrix client.',
+              'server so it applies to every compatible client.',
               style: GoogleFonts.inter(
                 color: kLightGrey,
                 fontSize: 13,
@@ -1426,7 +1466,7 @@ class TwoFactorStatusScreen extends StatelessWidget {
             Text(
               'The email code used during registration verifies the email '
               'address; it is not a second factor for every login. App Lock '
-              'can protect XMO on this phone while homeserver 2FA is being '
+              'can protect XMO on this phone while account 2FA is being '
               'deployed.',
               style: GoogleFonts.inter(
                 color: kLightGrey,

@@ -174,7 +174,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
         addAll(await provider.searchUsers(localpart));
       }
     } catch (e) {
-      debugPrint('[NewChatSearch] Matrix user search failed: $e');
+      debugPrint('[NewChatSearch] XMO user search failed: $e');
     }
 
     return resultsByUserId.values.toList();

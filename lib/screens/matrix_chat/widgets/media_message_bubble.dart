@@ -10,12 +10,14 @@ import 'video_content.dart';
 /// Media message bubble (images and videos) with overlay timestamp
 class MediaMessageBubble extends StatelessWidget {
   final Event event;
+  final Event? replySourceEvent;
   final bool isMe;
   final String senderName;
   final String time;
   final bool isImage;
   final Future<Uint8List?> Function(Event, {bool getThumbnail}) loadImageBytes;
   final Future<Uint8List?> Function(Event) loadVideoThumbnail;
+  final Event Function(Event)? resolveReplyDisplayEvent;
   final Future<void> Function(Event) playVideo;
   final Future<void> Function(Event)? downloadAttachment;
   final Future<void> Function(Event)? shareAttachment;
@@ -32,12 +34,14 @@ class MediaMessageBubble extends StatelessWidget {
   const MediaMessageBubble({
     super.key,
     required this.event,
+    this.replySourceEvent,
     required this.isMe,
     required this.senderName,
     required this.time,
     required this.isImage,
     required this.loadImageBytes,
     required this.loadVideoThumbnail,
+    this.resolveReplyDisplayEvent,
     required this.playVideo,
     this.downloadAttachment,
     this.shareAttachment,
@@ -78,12 +82,15 @@ class MediaMessageBubble extends StatelessWidget {
           ),
         MessageReplyContext(
           event: event,
+          replySourceEvent: replySourceEvent,
           isMe: isMe,
           loadImageBytes: loadImageBytes,
           loadVideoThumbnail: loadVideoThumbnail,
+          resolveDisplayEvent: resolveReplyDisplayEvent,
           onTap: onReplyTap,
         ),
-        if (hasMatrixReply(event)) const SizedBox(height: 4),
+        if (hasMatrixReply(replySourceEvent ?? event))
+          const SizedBox(height: 4),
         Stack(
           children: [
             if (isImage)

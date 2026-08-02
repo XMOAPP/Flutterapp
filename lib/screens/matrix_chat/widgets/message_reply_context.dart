@@ -6,6 +6,10 @@ import 'package:matrix/matrix.dart';
 
 import '../../../services/matrix_service.dart';
 import '../../../theme.dart';
+import '../../../utils/message_presentation.dart';
+
+export '../../../utils/message_presentation.dart'
+    show hasMatrixReply, matrixReplyEventId;
 
 final Map<String, Future<Event?>> _replyEventFutures = {};
 final Map<String, Future<Uint8List?>> _replyThumbnailFutures = {};
@@ -17,41 +21,35 @@ void _trimOldestEntry<T>(Map<String, T> cache, int maxEntries) {
   cache.remove(cache.keys.first);
 }
 
-String? matrixReplyEventId(Event event) {
-  final relatesTo = event.content['m.relates_to'];
-  if (relatesTo is! Map) return null;
-  final inReplyTo = relatesTo['m.in_reply_to'];
-  if (inReplyTo is! Map) return null;
-  final eventId = inReplyTo['event_id'];
-  return eventId is String && eventId.isNotEmpty ? eventId : null;
-}
-
-bool hasMatrixReply(Event event) => matrixReplyEventId(event) != null;
-
 class MessageReplyContext extends StatelessWidget {
   final Event event;
+  final Event? replySourceEvent;
   final bool isMe;
   final Future<Uint8List?> Function(Event, {bool getThumbnail})? loadImageBytes;
   final Future<Uint8List?> Function(Event)? loadVideoThumbnail;
+  final Event Function(Event)? resolveDisplayEvent;
   final ValueChanged<String>? onTap;
   final double? width;
 
   const MessageReplyContext({
     super.key,
     required this.event,
+    this.replySourceEvent,
     required this.isMe,
     this.loadImageBytes,
     this.loadVideoThumbnail,
+    this.resolveDisplayEvent,
     this.onTap,
     this.width,
   });
 
   @override
   Widget build(BuildContext context) {
-    final replyEventId = matrixReplyEventId(event);
+    final relationEvent = replySourceEvent ?? event;
+    final replyEventId = matrixReplyEventId(relationEvent);
     if (replyEventId == null) return const SizedBox.shrink();
 
-    final cacheKey = '${event.room.id}|$replyEventId';
+    final cacheKey = '${relationEvent.room.id}|$replyEventId';
     if (!_replyEventFutures.containsKey(cacheKey)) {
       _trimOldestEntry(_replyEventFutures, _maxReplyEventCacheEntries);
     }
@@ -59,7 +57,7 @@ class MessageReplyContext extends StatelessWidget {
       cacheKey,
       () async {
         try {
-          return await event.room.getEventById(replyEventId);
+          return await relationEvent.room.getEventById(replyEventId);
         } catch (_) {
           return null;
         }
@@ -69,7 +67,10 @@ class MessageReplyContext extends StatelessWidget {
     return FutureBuilder<Event?>(
       future: future,
       builder: (context, snapshot) {
-        final replyEvent = snapshot.data;
+        final sourceReplyEvent = snapshot.data;
+        final replyEvent = sourceReplyEvent == null
+            ? null
+            : (resolveDisplayEvent?.call(sourceReplyEvent) ?? sourceReplyEvent);
         final sender = replyEvent == null
             ? 'Message'
             : MatrixService.cleanName(replyEvent.senderId);
@@ -83,7 +84,7 @@ class MessageReplyContext extends StatelessWidget {
           child: Container(
             width: width,
             constraints: BoxConstraints(maxWidth: width ?? 230),
-            padding: const EdgeInsets.all(6),
+            padding: const EdgeInsets.fromLTRB(6, 6, 10, 6),
             decoration: BoxDecoration(
               color: isMe
                   ? const Color(0xFF29452B)
@@ -159,10 +160,15 @@ String _replyPreviewText(Event event) {
           ? 'Voice message'
           : 'Audio';
     case MessageTypes.File:
-      return event.body.isEmpty ? 'File' : event.body;
+      final filename = event.content['filename'];
+      if (filename is String && filename.trim().isNotEmpty) {
+        return filename.trim();
+      }
+      final body = matrixVisibleBody(event).trim();
+      return body.isEmpty ? 'File' : body;
     default:
       if (event.type == EventTypes.Sticker) return 'Sticker';
-      final body = _stripReplyFallback(event.body).trim();
+      final body = matrixVisibleBody(event).trim();
       return body.isEmpty ? 'Message' : body;
   }
 }
@@ -216,7 +222,7 @@ class _ReplyThumbnail extends StatelessWidget {
       height: 38,
       decoration: BoxDecoration(
         color: isMe ? const Color(0xFF1A2A1A) : kDarkGrey,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(4),
       ),
       clipBehavior: Clip.antiAlias,
       child: FutureBuilder<Uint8List?>(
@@ -292,18 +298,4 @@ class _ThumbnailFallback extends StatelessWidget {
       size: 20,
     );
   }
-}
-
-String _stripReplyFallback(String body) {
-  final lines = body.replaceAll('\r\n', '\n').split('\n');
-  if (lines.isEmpty || !lines.first.startsWith('> ')) return body;
-  var index = 0;
-  while (index < lines.length && lines[index].startsWith('> ')) {
-    index++;
-  }
-  while (index < lines.length && lines[index].trim().isEmpty) {
-    index++;
-  }
-  final stripped = lines.skip(index).join('\n').trim();
-  return stripped.isEmpty ? body : stripped;
 }

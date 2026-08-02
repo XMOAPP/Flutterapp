@@ -9,6 +9,7 @@ Map<String, dynamic> buildHealthStatus({
   required bool reportsConfigured,
   required bool accountDeletionConfigured,
   required bool channelAnalyticsConfigured,
+  required bool inviteLinksConfigured,
 }) =>
     {
       'ok': true,
@@ -26,5 +27,6 @@ Map<String, dynamic> buildHealthStatus({
             accountDeletionConfigured ? 'ready' : 'not_configured',
         'channelAnalytics':
             channelAnalyticsConfigured ? 'ready' : 'not_configured',
+        'inviteLinks': inviteLinksConfigured ? 'ready' : 'not_configured',
       },
     };

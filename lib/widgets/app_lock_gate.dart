@@ -39,13 +39,17 @@ class _AppLockGateState extends State<AppLockGate> {
       animation: AppLockService.instance,
       builder: (context, _) {
         final lock = AppLockService.instance;
-        return Stack(
-          children: [
-            widget.child,
-            if (lock.initialized && lock.locked)
-              const Positioned.fill(child: _AppLockScreen()),
-          ],
-        );
+        final isProtectedSession = _configuredUserId?.isNotEmpty ?? false;
+
+        // Never render authenticated content before secure lock settings load.
+        // This also keeps protected routes out of the tree while locked.
+        if (isProtectedSession && !lock.initialized) {
+          return const ColoredBox(color: kBlack);
+        }
+        if (lock.initialized && lock.locked) {
+          return const _AppLockScreen();
+        }
+        return widget.child;
       },
     );
   }
@@ -58,18 +62,28 @@ class _AppLockScreen extends StatefulWidget {
   State<_AppLockScreen> createState() => _AppLockScreenState();
 }
 
-class _AppLockScreenState extends State<_AppLockScreen> {
-  final _pinController = TextEditingController();
-  final _pinFocusNode = FocusNode();
+class _AppLockScreenState extends State<_AppLockScreen>
+    with TickerProviderStateMixin {
+  String _pin = '';
   bool _working = false;
-  bool _pinVisible = false;
-  int _pinInputRevision = 0;
-  String _lastCleanPin = '';
+  bool _showLastDigit = false;
   String? _error;
+  Timer? _maskTimer;
+  Timer? _lockoutTimer;
+  late final AnimationController _emblemController;
+  late final AnimationController _shakeController;
 
   @override
   void initState() {
     super.initState();
+    _emblemController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat(reverse: true);
+    _shakeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 420),
+    );
     if (AppLockService.instance.biometricEnabled) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _useBiometric());
     }
@@ -77,71 +91,103 @@ class _AppLockScreenState extends State<_AppLockScreen> {
 
   @override
   void dispose() {
-    _pinFocusNode.dispose();
-    _pinController.dispose();
+    _maskTimer?.cancel();
+    _lockoutTimer?.cancel();
+    _emblemController.dispose();
+    _shakeController.dispose();
     super.dispose();
   }
 
-  void _resetPinInputConnection({bool keepFocus = true}) {
-    _pinController.value = TextEditingValue.empty;
-    _lastCleanPin = '';
-    setState(() => _pinInputRevision++);
-    if (!keepFocus) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _pinFocusNode.requestFocus();
+  bool get _blocked {
+    final until = AppLockService.instance.blockedUntil;
+    return until != null && DateTime.now().isBefore(until);
+  }
+
+  int get _remainingLockoutSeconds {
+    final until = AppLockService.instance.blockedUntil;
+    if (until == null) return 0;
+    final milliseconds = until.difference(DateTime.now()).inMilliseconds;
+    if (milliseconds <= 0) return 0;
+    return (milliseconds / 1000).ceil();
+  }
+
+  void _enterDigit(String digit) {
+    if (_working || _blocked) return;
+    final expectedLength = AppLockService.instance.pinLength;
+    if (_pin.length >= (expectedLength ?? 8)) return;
+
+    HapticFeedback.selectionClick();
+    _maskTimer?.cancel();
+    setState(() {
+      _pin += digit;
+      _showLastDigit = true;
+      _error = null;
+    });
+    _maskTimer = Timer(const Duration(milliseconds: 480), () {
+      if (mounted) setState(() => _showLastDigit = false);
+    });
+
+    if (expectedLength != null && _pin.length == expectedLength) {
+      unawaited(_verifyPin());
+    }
+  }
+
+  void _removeDigit() {
+    if (_working || _blocked || _pin.isEmpty) return;
+    HapticFeedback.selectionClick();
+    _maskTimer?.cancel();
+    setState(() {
+      _pin = _pin.substring(0, _pin.length - 1);
+      _showLastDigit = false;
+      _error = null;
     });
   }
 
-  void _handlePinChanged(String value) {
-    final digits = value.replaceAll(RegExp(r'\D'), '');
-    if (digits.isEmpty) {
-      _lastCleanPin = '';
-      return;
-    }
-
-    final previous = _lastCleanPin;
-    var next = digits;
-
-    // Some Android keyboards can resend stale composing text after the user
-    // deletes the field. If the new value is the old PIN plus one fresh digit,
-    // keep only that fresh digit instead of restoring the deleted PIN.
-    if (previous.isEmpty && digits.length > 1) {
-      next = digits.substring(digits.length - 1);
-    }
-
-    if (next.length > 8) {
-      next = next.substring(0, 8);
-    }
-
-    _lastCleanPin = next;
-    if (next == value) return;
-
-    _pinController.value = TextEditingValue(
-      text: next,
-      selection: TextSelection.collapsed(offset: next.length),
-    );
+  void _startLockoutTicker() {
+    _lockoutTimer?.cancel();
+    if (!_blocked) return;
+    _lockoutTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (!_blocked) {
+        timer.cancel();
+        setState(() => _error = null);
+        return;
+      }
+      setState(() {});
+    });
   }
 
   Future<void> _verifyPin() async {
-    if (_working) return;
+    if (_working || _blocked) return;
+    if (_pin.length < 4) {
+      setState(() => _error = 'Enter at least 4 digits');
+      return;
+    }
     setState(() {
       _working = true;
       _error = null;
     });
-    final ok = await AppLockService.instance.verifyPin(_pinController.text);
+    final ok = await AppLockService.instance.verifyPin(_pin);
     if (!mounted) return;
     if (ok) {
       setState(() => _working = false);
       return;
     }
     final blockedUntil = AppLockService.instance.blockedUntil;
+    HapticFeedback.mediumImpact();
     setState(() {
       _working = false;
+      _pin = '';
+      _showLastDigit = false;
       _error = blockedUntil == null
           ? 'Incorrect PIN'
-          : 'Too many attempts. Try again in 30 seconds.';
+          : 'Try again in $_remainingLockoutSeconds seconds';
     });
-    _resetPinInputConnection();
+    _shakeController.forward(from: 0);
+    _startLockoutTicker();
   }
 
   Future<void> _useBiometric() async {
@@ -158,241 +204,306 @@ class _AppLockScreenState extends State<_AppLockScreen> {
     return Material(
       color: kBlack,
       child: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _lockEmblem(),
-                const SizedBox(height: 26),
-                Text(
-                  'XMO is locked',
-                  style: GoogleFonts.inter(
-                    color: kWhite,
-                    fontSize: 21,
-                    fontWeight: FontWeight.w700,
-                  ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxHeight < 700;
+            return Center(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(
+                  24,
+                  compact ? 12 : 24,
+                  24,
+                  compact ? 12 : 20,
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  hasBiometrics
-                      ? 'Enter your PIN or use biometrics to unlock'
-                      : 'Enter your PIN to unlock XMO',
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.inter(
-                    color: kLightGrey,
-                    fontSize: 13,
-                    height: 1.35,
-                  ),
-                ),
-                const SizedBox(height: 34),
-                _pinField(),
-                const SizedBox(height: 20),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 240),
-                  child: SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kWhite,
-                        foregroundColor: kBlack,
-                        disabledBackgroundColor: kWhite.withValues(alpha: 0.55),
-                        disabledForegroundColor: kBlack.withValues(alpha: 0.55),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                      ),
-                      onPressed: _working ? null : _verifyPin,
-                      child: Text(
-                        _working ? 'Unlocking...' : 'Unlock',
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 340),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _lockEmblem(compact: compact),
+                      SizedBox(height: compact ? 12 : 16),
+                      Text(
+                        'Enter your PIN',
                         style: GoogleFonts.inter(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
+                          color: kLightGrey,
+                          fontSize: 13,
                         ),
                       ),
-                    ),
-                  ),
-                ),
-                if (hasBiometrics) ...[
-                  const SizedBox(height: 22),
-                  _orDivider(),
-                  const SizedBox(height: 22),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 386),
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: kWhite,
-                          side: const BorderSide(color: kLimeGreen, width: 1),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(26),
+                      SizedBox(height: compact ? 14 : 20),
+                      _pinIndicator(),
+                      SizedBox(height: compact ? 8 : 12),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 180),
+                        child: SizedBox(
+                          key: ValueKey(_statusText),
+                          height: 20,
+                          child: Text(
+                            _statusText,
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.inter(
+                              color: _error == null
+                                  ? kLightGrey
+                                  : Colors.redAccent,
+                              fontSize: 12,
+                            ),
                           ),
                         ),
-                        onPressed: _working ? null : _useBiometric,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(
-                              Icons.fingerprint,
-                              color: kLimeGreen,
-                              size: 28,
-                            ),
-                            const SizedBox(width: 14),
-                            Text(
-                              'Unlock with biometrics',
-                              style: GoogleFonts.inter(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
                       ),
-                    ),
+                      SizedBox(height: compact ? 8 : 14),
+                      _numberPad(compact: compact),
+                      if (hasBiometrics) ...[
+                        SizedBox(height: compact ? 8 : 14),
+                        _biometricControl(),
+                      ],
+                    ],
                   ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _lockEmblem() {
-    return SizedBox(
-      width: 142,
-      height: 142,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Container(
-            width: 136,
-            height: 136,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: kLimeGreen.withValues(alpha: 0.05),
-              border: Border.all(color: kLimeGreen.withValues(alpha: 0.16)),
-            ),
-          ),
-          Container(
-            width: 104,
-            height: 104,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFF101710),
-              border: Border.all(color: kLimeGreen.withValues(alpha: 0.38)),
-            ),
-          ),
-          const Icon(Icons.lock_outline, color: kLimeGreen, size: 54),
-        ],
-      ),
-    );
-  }
-
-  Widget _pinField() {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 386),
-      child: TextField(
-        key: ValueKey('app-lock-pin-$_pinInputRevision'),
-        controller: _pinController,
-        focusNode: _pinFocusNode,
-        obscureText: !_pinVisible,
-        keyboardType: TextInputType.number,
-        textInputAction: TextInputAction.done,
-        enableSuggestions: false,
-        autocorrect: false,
-        enableIMEPersonalizedLearning: false,
-        autofillHints: const <String>[],
-        inputFormatters: [
-          FilteringTextInputFormatter.digitsOnly,
-          LengthLimitingTextInputFormatter(8),
-        ],
-        onChanged: _handlePinChanged,
-        onSubmitted: (_) => _verifyPin(),
-        maxLength: 8,
-        cursorColor: kWhite,
-        style: GoogleFonts.inter(color: kWhite, fontSize: 15),
-        decoration: InputDecoration(
-          counterText: '',
-          hintText: 'Enter PIN',
-          hintStyle: GoogleFonts.inter(
-            color: kLightGrey,
-            fontSize: 15,
-          ),
-          prefixIcon: const Icon(
-            Icons.lock_outline,
-            color: kWhite,
-            size: 22,
-          ),
-          filled: true,
-          fillColor: const Color(0xFF2C2C2E),
-          errorText: _error,
-          suffixIcon: Semantics(
-            label: _pinVisible ? 'Hide PIN' : 'Show PIN',
-            button: true,
-            child: IconButton(
-              onPressed: () {
-                setState(() => _pinVisible = !_pinVisible);
-              },
-              icon: Icon(
-                _pinVisible ? Icons.visibility_off : Icons.visibility,
-                color: kLightGrey,
+                ),
               ),
-            ),
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(25),
-            borderSide: const BorderSide(color: Color(0xFF252B33)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(25),
-            borderSide: const BorderSide(color: Color(0xFF252B33)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(25),
-            borderSide: const BorderSide(color: kWhite, width: 1),
-          ),
-          errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(25),
-            borderSide: const BorderSide(color: Colors.redAccent),
-          ),
-          focusedErrorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(25),
-            borderSide: const BorderSide(color: Colors.redAccent, width: 1),
-          ),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 18,
-            vertical: 12,
-          ),
+            );
+          },
         ),
       ),
     );
   }
 
-  Widget _orDivider() {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 386),
+  String get _statusText {
+    if (_working) return 'Checking PIN...';
+    if (_blocked) return 'Try again in $_remainingLockoutSeconds seconds';
+    if (_error != null) return _error!;
+    if (AppLockService.instance.pinLength == null && _pin.length >= 4) {
+      return 'Tap the check button to unlock';
+    }
+    return '';
+  }
+
+  Widget _lockEmblem({required bool compact}) {
+    final size = compact ? 28.0 : 32.0;
+    return AnimatedBuilder(
+      animation: _emblemController,
+      builder: (context, child) {
+        final scale = 0.96 + (_emblemController.value * 0.04);
+        return Transform.scale(scale: scale, child: child);
+      },
+      child: Icon(Icons.lock_rounded, color: kWhite, size: size),
+    );
+  }
+
+  Widget _pinIndicator() {
+    final expectedLength = AppLockService.instance.pinLength;
+    final slotCount = expectedLength ?? (_pin.length > 4 ? _pin.length : 4);
+    final animation = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _shakeController, curve: Curves.easeOut),
+    );
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        final progress = animation.value;
+        final offset = progress == 0
+            ? 0.0
+            : (1 - progress) *
+                8 *
+                (progress < 0.25
+                    ? 1
+                    : progress < 0.5
+                        ? -1
+                        : progress < 0.75
+                            ? 1
+                            : -1);
+        return Transform.translate(offset: Offset(offset, 0), child: child);
+      },
       child: Row(
-        children: [
-          const Expanded(child: Divider(color: Color(0xFF20252C), height: 1)),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+        mainAxisSize: MainAxisSize.min,
+        children: List.generate(slotCount, (index) {
+          final entered = index < _pin.length;
+          final reveal = entered && index == _pin.length - 1 && _showLastDigit;
+          return Container(
+            width: 31,
+            height: 34,
+            margin: const EdgeInsets.symmetric(horizontal: 3),
+            alignment: Alignment.center,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 160),
+              transitionBuilder: (child, animation) => ScaleTransition(
+                scale: animation,
+                child: FadeTransition(opacity: animation, child: child),
+              ),
+              child: Text(
+                entered ? (reveal ? _pin[index] : '•') : '○',
+                key: ValueKey('$entered-$reveal-${entered ? _pin[index] : ''}'),
+                style: GoogleFonts.inter(
+                  color: entered ? kWhite : kLightGrey,
+                  fontSize: reveal ? 23 : 20,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  Widget _numberPad({required bool compact}) {
+    const rows = [
+      ['1', '2', '3'],
+      ['4', '5', '6'],
+      ['7', '8', '9'],
+    ];
+    final buttonSize = compact ? 54.0 : 60.0;
+    final rowGap = compact ? 7.0 : 9.0;
+    return Column(
+      children: [
+        for (final row in rows) ...[
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: row
+                .map(
+                  (digit) => _PinKey(
+                    size: buttonSize,
+                    label: digit,
+                    onPressed: () => _enterDigit(digit),
+                    enabled: !_working && !_blocked,
+                  ),
+                )
+                .toList(),
+          ),
+          SizedBox(height: rowGap),
+        ],
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            SizedBox(
+              width: buttonSize,
+              height: buttonSize,
+              child: IconButton(
+                onPressed:
+                    _working || _blocked || _pin.isEmpty ? null : _removeDigit,
+                icon: Icon(
+                  Icons.backspace_rounded,
+                  color: _pin.isEmpty
+                      ? kLightGrey.withValues(alpha: 0.35)
+                      : kWhite,
+                  size: 23,
+                ),
+              ),
+            ),
+            _PinKey(
+              size: buttonSize,
+              label: '0',
+              onPressed: () => _enterDigit('0'),
+              enabled: !_working && !_blocked,
+            ),
+            SizedBox(
+              width: buttonSize,
+              height: buttonSize,
+              child:
+                  AppLockService.instance.pinLength == null && _pin.length >= 4
+                      ? IconButton(
+                          onPressed: _working || _blocked ? null : _verifyPin,
+                          icon: const Icon(
+                            Icons.check_rounded,
+                            color: kWhite,
+                            size: 26,
+                          ),
+                        )
+                      : null,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _biometricControl() {
+    return Semantics(
+      button: true,
+      label: 'Unlock with biometrics',
+      child: InkResponse(
+        onTap: _working || _blocked ? null : _useBiometric,
+        radius: 34,
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.fingerprint,
+                color: _working || _blocked ? kLightGrey : kWhite,
+                size: 30,
+              ),
+              const SizedBox(height: 3),
+              Text(
+                'Biometrics',
+                style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PinKey extends StatefulWidget {
+  const _PinKey({
+    required this.size,
+    required this.label,
+    required this.onPressed,
+    required this.enabled,
+  });
+
+  final double size;
+  final String label;
+  final VoidCallback onPressed;
+  final bool enabled;
+
+  @override
+  State<_PinKey> createState() => _PinKeyState();
+}
+
+class _PinKeyState extends State<_PinKey> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: widget.label,
+      child: GestureDetector(
+        onTapDown:
+            widget.enabled ? (_) => setState(() => _pressed = true) : null,
+        onTapCancel:
+            widget.enabled ? () => setState(() => _pressed = false) : null,
+        onTapUp: widget.enabled
+            ? (_) {
+                setState(() => _pressed = false);
+                widget.onPressed();
+              }
+            : null,
+        child: AnimatedScale(
+          scale: _pressed ? 0.9 : 1,
+          duration: const Duration(milliseconds: 90),
+          curve: Curves.easeOut,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            width: widget.size,
+            height: widget.size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color:
+                  _pressed ? const Color(0xFF4A4D50) : const Color(0xFF303438),
+            ),
             child: Text(
-              'OR',
+              widget.label,
               style: GoogleFonts.inter(
-                color: kLightGrey,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
+                color: widget.enabled ? kWhite : kWhite.withValues(alpha: 0.35),
+                fontSize: 29,
+                fontWeight: FontWeight.w400,
               ),
             ),
           ),
-          const Expanded(child: Divider(color: Color(0xFF20252C), height: 1)),
-        ],
+        ),
       ),
     );
   }

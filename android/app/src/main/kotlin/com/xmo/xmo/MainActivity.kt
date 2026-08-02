@@ -184,6 +184,22 @@ class MainActivity : FlutterFragmentActivity() {
                             result.error("SHARE_ERROR", e.message, null)
                         }
                     }
+                    "shareText" -> {
+                        val text = call.argument<String>("text")
+                        val chooserTitle = call.argument<String>("chooserTitle") ?: "Share with"
+
+                        if (text.isNullOrBlank()) {
+                            result.error("INVALID_ARGS", "text is required", null)
+                            return@setMethodCallHandler
+                        }
+
+                        try {
+                            shareText(text, chooserTitle)
+                            result.success(null)
+                        } catch (e: Exception) {
+                            result.error("SHARE_ERROR", e.message, null)
+                        }
+                    }
                     "openFile" -> {
                         val filePath = call.argument<String>("filePath")
                         val fileName = call.argument<String>("fileName")
@@ -228,7 +244,11 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }
         if (intent.action == Intent.ACTION_VIEW) {
-            linksReceiver?.onReceive(applicationContext, intent)
+            if (linksReceiver == null) {
+                initialLink = intent.dataString
+            } else {
+                linksReceiver?.onReceive(applicationContext, intent)
+            }
         }
     }
 
@@ -340,6 +360,14 @@ class MainActivity : FlutterFragmentActivity() {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         startActivity(chooser)
+    }
+
+    private fun shareText(text: String, chooserTitle: String) {
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        startActivity(Intent.createChooser(sendIntent, chooserTitle))
     }
 
     private fun openFile(filePath: String, fileName: String, mimeType: String) {

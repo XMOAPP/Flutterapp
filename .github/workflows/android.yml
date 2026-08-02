@@ -227,6 +227,8 @@ jobs:
           XMO_AZURE_CHUNK_SIGN_URL: ${{ vars.XMO_AZURE_CHUNK_SIGN_URL }}
           XMO_ACCOUNT_DELETION_SERVER_URL: ${{ vars.XMO_ACCOUNT_DELETION_SERVER_URL }}
           XMO_ACCOUNT_DELETION_WEB_URL: ${{ vars.XMO_ACCOUNT_DELETION_WEB_URL }}
+          XMO_INVITE_SERVER_URL: ${{ vars.XMO_INVITE_SERVER_URL }}
+          XMO_INVITE_WEB_BASE_URL: ${{ vars.XMO_INVITE_WEB_BASE_URL }}
         run: |
           set -euo pipefail
           for variable in \
@@ -236,7 +238,9 @@ jobs:
             XMO_STREAM_CHUNK_STORAGE \
             XMO_AZURE_CHUNK_SIGN_URL \
             XMO_ACCOUNT_DELETION_SERVER_URL \
-            XMO_ACCOUNT_DELETION_WEB_URL; do
+            XMO_ACCOUNT_DELETION_WEB_URL \
+            XMO_INVITE_SERVER_URL \
+            XMO_INVITE_WEB_BASE_URL; do
             test -n "${!variable}"
           done
           bash tools/ci/run_with_timeout.sh 1800 build/quality-logs/release-build.log \
@@ -247,7 +251,21 @@ jobs:
             --dart-define=XMO_STREAM_CHUNK_STORAGE="$XMO_STREAM_CHUNK_STORAGE" \
             --dart-define=XMO_AZURE_CHUNK_SIGN_URL="$XMO_AZURE_CHUNK_SIGN_URL" \
             --dart-define=XMO_ACCOUNT_DELETION_SERVER_URL="$XMO_ACCOUNT_DELETION_SERVER_URL" \
-            --dart-define=XMO_ACCOUNT_DELETION_WEB_URL="$XMO_ACCOUNT_DELETION_WEB_URL"
+            --dart-define=XMO_ACCOUNT_DELETION_WEB_URL="$XMO_ACCOUNT_DELETION_WEB_URL" \
+            --dart-define=XMO_INVITE_SERVER_URL="$XMO_INVITE_SERVER_URL" \
+            --dart-define=XMO_INVITE_WEB_BASE_URL="$XMO_INVITE_WEB_BASE_URL"
+      - name: Verify Vodozemac and 16 KB artifact compatibility
+        run: |
+          set -euo pipefail
+          BUNDLETOOL_VERSION=1.17.2
+          BUNDLETOOL_JAR="$RUNNER_TEMP/bundletool-all-$BUNDLETOOL_VERSION.jar"
+          curl --fail --location --retry 3 \
+            --output "$BUNDLETOOL_JAR" \
+            "https://github.com/google/bundletool/releases/download/$BUNDLETOOL_VERSION/bundletool-all-$BUNDLETOOL_VERSION.jar"
+          pwsh -NoProfile -File tools/verify_android_16kb.ps1 \
+            -BundletoolJar "$BUNDLETOOL_JAR"
+          pwsh -NoProfile -File tools/verify_no_legacy_olm.ps1 \
+            -CheckDependencies -RequireRustCrypto
       - name: Redact retained logs
         if: always()
         run: bash tools/ci/redact_logs.sh build/quality-logs/*.log

@@ -12,7 +12,7 @@ import '../../widgets/story/story_avatar.dart';
 import 'group_call_screen.dart';
 
 class IncomingGroupCallScreen extends StatefulWidget {
-  final GroupCall groupCall;
+  final XmoGroupCall groupCall;
 
   const IncomingGroupCallScreen({
     super.key,
@@ -29,15 +29,15 @@ class _IncomingGroupCallScreenState extends State<IncomingGroupCallScreen> {
   bool _busy = false;
   bool _closing = false;
 
-  GroupCall get _call => widget.groupCall;
-  bool get _isVideoCall => _call.type == GroupCallType.Video;
+  XmoGroupCall get _call => widget.groupCall;
+  bool get _isVideoCall => _call.type == XmoGroupCallType.video;
 
   @override
   void initState() {
     super.initState();
     VoipService().enterFullscreenCallRoute();
-    _stateSub = _call.onGroupCallState.stream.listen((state) {
-      if (state == GroupCallState.Ended && mounted && !_closing) {
+    _stateSub = _call.stateStream.listen((state) {
+      if (state == GroupCallState.ended && mounted && !_closing) {
         _closing = true;
         Navigator.pop(context);
       }

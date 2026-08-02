@@ -34,10 +34,19 @@ class AppConfig {
     defaultValue: 'https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp',
   );
 
+  static const inviteServerUrl = String.fromEnvironment(
+    'XMO_INVITE_SERVER_URL',
+    defaultValue: 'https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp',
+  );
+
+  static const inviteWebBaseUrl = String.fromEnvironment(
+    'XMO_INVITE_WEB_BASE_URL',
+    defaultValue: 'https://xmo.dpdns.org',
+  );
+
   static const accountDeletionWebUrl = String.fromEnvironment(
     'XMO_ACCOUNT_DELETION_WEB_URL',
-    defaultValue:
-        'https://xmo-matrix.centralindia.cloudapp.azure.com/account-deletion',
+    defaultValue: 'https://xmo.dpdns.org/account-deletion',
   );
 
   static const walletAuthServerUrl = String.fromEnvironment(

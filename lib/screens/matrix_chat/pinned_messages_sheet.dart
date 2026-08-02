@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import '../../theme.dart';
 import '../../services/matrix_service.dart';
+import '../../utils/message_presentation.dart';
 
 void showPinnedMessagesSheet({
   required BuildContext context,
@@ -84,7 +85,7 @@ class _PinnedMessageTile extends StatelessWidget {
         ),
       ),
       subtitle: Text(
-        event.body,
+        matrixVisibleBody(event, fallback: 'Message'),
         style: GoogleFonts.inter(color: kWhite, fontSize: 14),
         maxLines: 2,
         overflow: TextOverflow.ellipsis,

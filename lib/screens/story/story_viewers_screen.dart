@@ -1,24 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '../../theme.dart';
+
 import '../../models/story_models.dart';
 import '../../providers/story_provider.dart';
+import '../../theme.dart';
 
-/// Screen showing who viewed a story
-class StoryViewersScreen extends StatefulWidget {
+/// Draggable sheet showing the unique viewers of a story.
+class StoryViewersSheet extends StatefulWidget {
   final String storyId;
 
-  const StoryViewersScreen({
+  const StoryViewersSheet({
     super.key,
     required this.storyId,
   });
 
   @override
-  State<StoryViewersScreen> createState() => _StoryViewersScreenState();
+  State<StoryViewersSheet> createState() => _StoryViewersSheetState();
 }
 
-class _StoryViewersScreenState extends State<StoryViewersScreen> {
+class _StoryViewersSheetState extends State<StoryViewersSheet> {
   List<StoryView> _viewers = [];
   bool _loading = true;
 
@@ -29,105 +30,161 @@ class _StoryViewersScreenState extends State<StoryViewersScreen> {
   }
 
   Future<void> _loadViewers() async {
-    setState(() => _loading = true);
     try {
-      final storyProvider = context.read<StoryProvider>();
-      final viewers = await storyProvider.getStoryViewers(widget.storyId);
-      if (mounted) {
-        setState(() {
-          _viewers = viewers;
-          _loading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _loading = false);
-      }
+      final viewers =
+          await context.read<StoryProvider>().getStoryViewers(widget.storyId);
+      if (!mounted) return;
+      setState(() {
+        _viewers = viewers;
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: kBlack,
-      appBar: AppBar(
-        backgroundColor: kBlack,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: kWhite),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(
-          'Viewers',
-          style: GoogleFonts.inter(
-            color: kWhite,
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.58,
+      minChildSize: 0.32,
+      maxChildSize: 0.88,
+      builder: (context, scrollController) {
+        return Container(
+          clipBehavior: Clip.antiAlias,
+          decoration: const BoxDecoration(
+            color: kDarkerGrey,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
           ),
-        ),
-      ),
-      body: _loading
-          ? const Center(
-              child: CircularProgressIndicator(color: kLimeGreen),
-            )
-          : _viewers.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(
-                        Icons.visibility_off,
-                        color: kMediumGrey,
-                        size: 48,
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'No views yet',
+          child: Column(
+            children: [
+              const SizedBox(height: 10),
+              Container(
+                width: 38,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: kMediumGrey,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 8, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _loading ? 'Viewers' : 'Viewers (${_viewers.length})',
                         style: GoogleFonts.inter(
-                          color: kLightGrey,
-                          fontSize: 14,
+                          color: kWhite,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                    ],
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: _viewers.length,
-                  itemBuilder: (context, index) {
-                    final viewer = _viewers[index];
-                    return _buildViewerTile(viewer);
-                  },
+                    ),
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close, color: kLightGrey),
+                    ),
+                  ],
                 ),
+              ),
+              const Divider(color: kDarkGrey, height: 1),
+              Expanded(child: _buildBody(scrollController)),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildBody(ScrollController scrollController) {
+    if (_loading) {
+      return CustomScrollView(
+        controller: scrollController,
+        slivers: const [
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(
+              child: CircularProgressIndicator(color: kLimeGreen),
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (_viewers.isEmpty) {
+      return CustomScrollView(
+        controller: scrollController,
+        slivers: [
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.visibility_off_outlined,
+                    color: kMediumGrey,
+                    size: 40,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'No views yet',
+                    style: GoogleFonts.inter(
+                      color: kLightGrey,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return ListView.separated(
+      controller: scrollController,
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 20),
+      itemCount: _viewers.length,
+      separatorBuilder: (_, __) => const Divider(
+        color: kDarkGrey,
+        height: 1,
+        indent: 64,
+      ),
+      itemBuilder: (context, index) => _buildViewerTile(_viewers[index]),
     );
   }
 
   Widget _buildViewerTile(StoryView viewer) {
+    final name = viewer.viewerName.trim();
     return ListTile(
       dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      visualDensity: const VisualDensity(vertical: -1),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
       leading: Container(
         width: 40,
         height: 40,
         decoration: const BoxDecoration(
-          color: kLimeGreen,
+          color: kDarkGrey,
           shape: BoxShape.circle,
         ),
-        child: Center(
-          child: Text(
-            viewer.viewerName.isNotEmpty
-                ? viewer.viewerName[0].toUpperCase()
-                : '?',
-            style: GoogleFonts.inter(
-              color: kBlack,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
+        alignment: Alignment.center,
+        child: Text(
+          name.isNotEmpty ? name[0].toUpperCase() : '?',
+          style: GoogleFonts.inter(
+            color: kLimeGreen,
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
           ),
         ),
       ),
       title: Text(
-        viewer.viewerName,
+        name.isNotEmpty ? name : 'XMO user',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: GoogleFonts.inter(
           color: kWhite,
           fontSize: 14,
@@ -145,17 +202,10 @@ class _StoryViewersScreenState extends State<StoryViewersScreen> {
   }
 
   String _formatTimeAgo(DateTime dateTime) {
-    final now = DateTime.now();
-    final difference = now.difference(dateTime);
-
-    if (difference.inMinutes < 1) {
-      return 'Just now';
-    } else if (difference.inHours < 1) {
-      return '${difference.inMinutes}m ago';
-    } else if (difference.inHours < 24) {
-      return '${difference.inHours}h ago';
-    } else {
-      return '${difference.inDays}d ago';
-    }
+    final difference = DateTime.now().difference(dateTime);
+    if (difference.inMinutes < 1) return 'Just now';
+    if (difference.inHours < 1) return '${difference.inMinutes}m ago';
+    if (difference.inHours < 24) return '${difference.inHours}h ago';
+    return '${difference.inDays}d ago';
   }
 }

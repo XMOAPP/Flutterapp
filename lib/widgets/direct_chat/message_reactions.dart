@@ -223,14 +223,14 @@ class ReactionPicker extends StatefulWidget {
   @override
   State<ReactionPicker> createState() => _ReactionPickerState();
 
-  static void show(
+  static Future<void> show(
     BuildContext context,
     ValueChanged<String> onReactionSelected, {
     String? selectedEmoji,
     bool closeOnSelection = true,
     Widget? composer,
   }) {
-    showModalBottomSheet(
+    return showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,

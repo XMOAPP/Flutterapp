@@ -57,7 +57,7 @@ class _SubscriberListScreenState extends State<SubscriberListScreen> {
     });
   }
 
-  bool get _isAdmin => widget.room.ownPowerLevel >= 50;
+  bool get _isAdmin => widget.room.ownPowerLevel >= PowerLevel.moderator;
 
   Future<void> _banSubscriber(ChannelSubscriber subscriber) async {
     final confirmed = await showDialog<bool>(

@@ -32,6 +32,8 @@ import '../widgets/matrix_chat/fullscreen_video_player.dart';
 import '../widgets/matrix_chat/reply_preview.dart';
 import '../widgets/matrix_chat/pinned_messages_banner.dart';
 import '../widgets/matrix_chat/mention_autocomplete.dart';
+import '../widgets/matrix_chat/chat_date_separator.dart';
+import '../widgets/matrix_chat/swipe_to_reply.dart';
 import '../widgets/incoming_call_fullscreen_scope.dart';
 import '../widgets/chat/old_messages_loading_indicator.dart';
 import '../widgets/direct_chat/typing_indicator.dart';
@@ -44,6 +46,7 @@ import '../models/message_reply_reference.dart';
 import '../models/xmo_contact_card.dart';
 import '../models/xmo_stream_manifest.dart';
 import '../models/report_models.dart';
+import '../utils/message_presentation.dart';
 import '../services/direct_chat_service.dart';
 import '../services/chat_archive_service.dart';
 import '../services/local_playback_proxy_service.dart';
@@ -208,6 +211,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   final Set<String> _reportedChannelViewEventIds = {};
   bool _selectionActionBusy = false;
   bool _isChatSearchMode = false;
+  Event? _editingMessageEvent;
+  String _editingMessageOriginalText = '';
+  bool _editMessageSubmitting = false;
+  Event? _replyBeforeMessageEdit;
+  PrivateReplyDraft? _privateReplyBeforeMessageEdit;
+  final Map<String, MatrixMentionTarget> _mentionsBeforeMessageEdit = {};
   List<Event> _chatSearchResults = const [];
   Set<String> _chatSearchResultEventIds = const {};
   int _chatSearchResultIndex = -1;
@@ -240,6 +249,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       _pendingUploads.any((upload) => !upload.failed && !upload.cancelled) ||
       _pendingAlbumUploads.isNotEmpty;
   bool get _isMessageSelectionMode => _selectedMessageEvents.isNotEmpty;
+  bool get _isEditingMessage => _editingMessageEvent != null;
 
   TextEditingController get _textCtrl => _composerController.textController;
   FocusNode get _textFocusNode => _composerController.focusNode;
@@ -336,7 +346,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     _textCtrl.addListener(() {
       final has = _textCtrl.text.trim().isNotEmpty;
 
-      if (_composerController.isApplyingDraft) return;
+      if (_composerController.isApplyingDraft ||
+          _composerController.isTransientEdit ||
+          _isEditingMessage) {
+        return;
+      }
 
       if (!has && _composerMentionTargets.isNotEmpty) {
         _composerMentionTargets.clear();
@@ -1311,13 +1325,19 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         emojiButtonIcon: Icons.keyboard_alt_outlined,
         uploading: _isUploadBusy,
         recording: false,
+        editing: _isEditingMessage,
+        editingOriginalText: _editingMessageOriginalText,
         enabled: _canSendMessages,
         disabledText: _isReadOnlyRestricted
             ? 'Read-only mode'
             : 'You cannot send messages',
         onSend: () {
           Navigator.pop(context);
-          _sendMessage();
+          if (_isEditingMessage) {
+            _submitMessageEdit();
+          } else {
+            _sendMessage();
+          }
         },
         onShowEmojiPicker: switchToKeyboard,
         onTextFieldTap: switchToKeyboard,
@@ -1535,6 +1555,23 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       _replyToEvent = event;
       _privateReplyDraft = null;
     });
+  }
+
+  void _replyFromSwipe(Event event) {
+    _setReplyTo(event);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _replyToEvent?.eventId == event.eventId) {
+        _textFocusNode.requestFocus();
+      }
+    });
+  }
+
+  bool _canSwipeToReply(bool canReply) {
+    return canReply &&
+        !_isMessageSelectionMode &&
+        !_isChatSearchMode &&
+        !_isEditingMessage &&
+        !_recording;
   }
 
   void _cancelReply() {
@@ -2861,7 +2898,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       final matrixFile = await _downloadAttachmentWithQueue(
         event,
         activeLabel:
-            'Loading ${event.body.isNotEmpty ? event.body : 'video'}...',
+            'Loading ${matrixAttachmentFileName(event, fallback: 'video')}...',
         failurePrefix: 'Failed to load video',
         progressLabel: 'Opening',
         showCancelAction: false,
@@ -2876,7 +2913,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           builder: (_) => FullscreenVideoPlayer(
             videoBytes: matrixFile.bytes,
             mimeType: matrixFile.mimeType,
-            title: event.body,
+            title: matrixAttachmentFileName(event, fallback: 'Video'),
             onReply: () async => _setReplyTo(event),
             onDelete: _canDeleteMessage(event)
                 ? () async => _deleteMessage(event)
@@ -2916,7 +2953,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
             videoUrl: streamingRequest.uri,
             videoHeaders: streamingRequest.headers,
             mimeType: _attachmentMimeTypeFor(event),
-            title: event.body,
+            title: matrixAttachmentFileName(event, fallback: 'Video'),
             loadingLabel: playbackDecision.loadingLabel,
             downloadFuture: () => _downloadAttachment(event),
             onReply: () async => _setReplyTo(event),
@@ -2967,7 +3004,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
             videoUrl: localPlaybackHandle.uri,
             videoHeaders: const <String, String>{},
             mimeType: _attachmentMimeTypeFor(event),
-            title: event.body,
+            title: matrixAttachmentFileName(event, fallback: 'Video'),
             loadingLabel: playbackDecision.loadingLabel,
             downloadFuture: () => _downloadAttachment(event),
             onReply: () async => _setReplyTo(event),
@@ -2991,12 +3028,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           videoFuture: _downloadAttachmentWithQueue(
             event,
             activeLabel:
-                'Opening ${event.body.isNotEmpty ? event.body : 'video'}...',
+                'Opening ${matrixAttachmentFileName(event, fallback: 'video')}...',
             failurePrefix: 'Failed to load video',
             progressLabel: 'Opening',
             showCancelAction: false,
           ),
-          title: event.body,
+          title: matrixAttachmentFileName(event, fallback: 'Video'),
           loadingLabel: 'Opening...',
           onReply: () async => _setReplyTo(event),
           onDelete: _canDeleteMessage(event)
@@ -3096,7 +3133,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     }
 
     try {
-      final fileName = event.body.isNotEmpty ? event.body : 'download';
+      final fileName = matrixAttachmentFileName(event, fallback: 'download');
       final info = event.content['info'];
       final size = info is Map ? (info['size'] as num?)?.toInt() ?? 0 : 0;
       downloadJob = await _transferQueue.createDownloadJob(
@@ -3248,7 +3285,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       await _downloadAttachmentWithQueue(
         event,
         activeLabel:
-            'Downloading ${event.body.isNotEmpty ? event.body : 'file'}...',
+            'Downloading ${matrixAttachmentFileName(event, fallback: 'file')}...',
         failurePrefix: 'Failed to download',
         showCompletionSnack: true,
         onDownloaded: (file) => web_download.downloadFile(
@@ -3269,7 +3306,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final info = event.content['info'];
     final mimetype = info is Map ? info['mimetype'] : null;
     if (mimetype is String && mimetype.isNotEmpty) return mimetype;
-    return lookupMimeType(event.body) ?? 'application/octet-stream';
+    return lookupMimeType(matrixAttachmentFileName(event)) ??
+        'application/octet-stream';
   }
 
   TransferKind _downloadTransferKindFor(Event event) {
@@ -3295,7 +3333,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       await _downloadAttachmentWithQueue(
         displayEvent,
         activeLabel:
-            'Opening ${displayEvent.body.isNotEmpty ? displayEvent.body : 'file'}...',
+            'Opening ${matrixAttachmentFileName(displayEvent, fallback: 'file')}...',
         failurePrefix: 'Could not open file',
         progressLabel: 'Opening',
         showCancelAction: false,
@@ -3547,9 +3585,18 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   List<_MessageListItem> _buildMessageListItems(List<Event> messages) {
     final items = <_MessageListItem>[];
     var index = 0;
+    DateTime? previousDay;
+
+    void addDateSeparatorIfNeeded(DateTime timestamp) {
+      final day = localCalendarDay(timestamp);
+      if (previousDay == day) return;
+      items.add(_MessageListItem.dateSeparator(day));
+      previousDay = day;
+    }
 
     while (index < messages.length) {
       final event = messages[index];
+      addDateSeparatorIfNeeded(event.originServerTs);
       if (!_canGroupInMediaAlbum(event)) {
         items.add(_MessageListItem.message(event));
         index++;
@@ -3585,6 +3632,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   Key _messageListItemKey(_MessageListItem item) {
+    final separatorDate = item.separatorDate;
+    if (separatorDate != null) {
+      return ValueKey(
+        'date_${separatorDate.year}_${separatorDate.month}_${separatorDate.day}',
+      );
+    }
     final albumEvents = item.albumEvents;
     if (albumEvents != null) {
       return ValueKey(
@@ -3597,6 +3650,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   bool _canAppendToMediaAlbum(Event previous, Event next) {
     if (!_canGroupInMediaAlbum(next)) return false;
     if (previous.senderId != next.senderId) return false;
+    if (!isSameLocalCalendarDay(
+      previous.originServerTs,
+      next.originServerTs,
+    )) {
+      return false;
+    }
 
     final gap = next.originServerTs.difference(previous.originServerTs).abs();
     return gap <= const Duration(minutes: 2);
@@ -3664,134 +3723,155 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                         : Colors.transparent,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _isMessageSelectionMode
-                ? () => _toggleMessageSelection(event)
+          child: SwipeToReply(
+            onReply: _canSwipeToReply(canReply)
+                ? () => _replyFromSwipe(event)
                 : null,
-            onLongPress: _isMessageSelectionMode
-                ? () => _toggleMessageSelection(event)
-                : canShowMenu
-                    ? () => _showMessageOptions(event)
-                    : null,
-            child: IgnorePointer(
-              ignoring: _isMessageSelectionMode,
-              child: Align(
-                alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                child: Padding(
-                  padding: EdgeInsets.only(
-                    top: 4,
-                    bottom: 4,
-                    left: isMe ? 60 : 0,
-                    right: isMe ? 0 : 60,
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: isMe
-                        ? CrossAxisAlignment.end
-                        : CrossAxisAlignment.start,
-                    children: [
-                      if (displayEvent.type == EventTypes.Sticker)
-                        _withMatrixReplyContext(
-                          displayEvent,
-                          isMe,
-                          _buildStickerBubble(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _isMessageSelectionMode
+                  ? () => _toggleMessageSelection(event)
+                  : null,
+              onLongPress: _isMessageSelectionMode
+                  ? () => _toggleMessageSelection(event)
+                  : canShowMenu
+                      ? () => _showMessageOptions(event)
+                      : null,
+              child: IgnorePointer(
+                ignoring: _isMessageSelectionMode,
+                child: Align(
+                  alignment:
+                      isMe ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      top: 4,
+                      bottom: 4,
+                      left: isMe ? 60 : 0,
+                      right: isMe ? 0 : 60,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: isMe
+                          ? CrossAxisAlignment.end
+                          : CrossAxisAlignment.start,
+                      children: [
+                        if (displayEvent.type == EventTypes.Sticker)
+                          _withMatrixReplyContext(
+                            displayEvent,
+                            isMe,
+                            _buildStickerBubble(
+                              event: displayEvent,
+                              isMe: isMe,
+                              senderName: senderName,
+                              time: time,
+                              status: _buildMessageStatus(event),
+                            ),
+                            replySourceEvent: event,
+                          )
+                        else if (displayEvent.type == _pollStartEventType)
+                          _withMatrixReplyContext(
+                            displayEvent,
+                            isMe,
+                            _buildPollBubble(
+                              event: displayEvent,
+                              isMe: isMe,
+                              senderName: senderName,
+                              time: time,
+                              status: _buildMessageStatus(event),
+                            ),
+                            replySourceEvent: event,
+                          )
+                        else if (isImage || isVideo)
+                          MediaMessageBubble(
                             event: displayEvent,
+                            replySourceEvent: event,
                             isMe: isMe,
                             senderName: senderName,
                             time: time,
-                            status: _buildMessageStatus(event),
-                          ),
-                        )
-                      else if (displayEvent.type == _pollStartEventType)
-                        _withMatrixReplyContext(
-                          displayEvent,
-                          isMe,
-                          _buildPollBubble(
+                            isImage: isImage,
+                            loadImageBytes: _mediaHandler.loadImageBytes,
+                            loadVideoThumbnail:
+                                _mediaHandler.loadVideoThumbnail,
+                            resolveReplyDisplayEvent: _displayEventFor,
+                            playVideo: _openVideoPlayer,
+                            downloadAttachment: _downloadAndOpenFile,
+                            shareAttachment: _shareMessageAttachment,
+                            onReply: canReply ? () => _setReplyTo(event) : null,
+                            onForward: canForward
+                                ? () => _forwardMessage(event)
+                                : null,
+                            onPin:
+                                canPin ? () => _togglePinMessage(event) : null,
+                            onDelete: canDeleteOwnAttachment
+                                ? () => _deleteMessage(event)
+                                : null,
+                            onReplyTap: _scrollToAndHighlightMessage,
+                            isPinned: isPinned,
+                            openFullscreenImage: _openFullscreenImage,
+                            buildMessageStatus: (_) =>
+                                _buildMessageStatus(event),
+                            isEdited: isEdited,
+                          )
+                        else if (_hasLinkPreview(displayEvent))
+                          _withMatrixReplyContext(
+                            displayEvent,
+                            isMe,
+                            _buildLinkPreviewBubble(
+                              event: displayEvent,
+                              isMe: isMe,
+                              senderName: senderName,
+                              time: time,
+                              status: _buildMessageStatus(event),
+                            ),
+                            replySourceEvent: event,
+                          )
+                        else
+                          TextOrFileMessageBubble(
                             event: displayEvent,
+                            replySourceEvent: event,
                             isMe: isMe,
                             senderName: senderName,
                             time: time,
-                            status: _buildMessageStatus(event),
+                            isAudio: isAudio,
+                            isFile: isFile,
+                            downloadAndOpenFile: _downloadAndOpenFile,
+                            shareAttachment: _shareMessageAttachment,
+                            openAttachmentExternally: _openMessageAttachment,
+                            downloadAttachment: _downloadAttachment,
+                            streamingMediaRequest: _streamingMediaRequestFor,
+                            onReply: canReply ? () => _setReplyTo(event) : null,
+                            onForward: canForward
+                                ? () => _forwardMessage(event)
+                                : null,
+                            onPin:
+                                canPin ? () => _togglePinMessage(event) : null,
+                            onDelete: canDeleteOwnAttachment
+                                ? () => _deleteMessage(event)
+                                : null,
+                            isPinned: isPinned,
+                            buildMessageStatus: (_) =>
+                                _buildMessageStatus(event),
+                            loadImageBytes: _mediaHandler.loadImageBytes,
+                            loadVideoThumbnail:
+                                _mediaHandler.loadVideoThumbnail,
+                            resolveReplyDisplayEvent: _displayEventFor,
+                            isEdited: isEdited,
+                            onReplyTap: _scrollToAndHighlightMessage,
+                            onPrivateReplyTap: _openPrivateReplySource,
+                            mentionMembers: _mentionMembersForCurrentRoom(),
+                            onMentionTap: _showMentionProfileSheet,
                           ),
-                        )
-                      else if (isImage || isVideo)
-                        MediaMessageBubble(
-                          event: displayEvent,
-                          isMe: isMe,
-                          senderName: senderName,
-                          time: time,
-                          isImage: isImage,
-                          loadImageBytes: _mediaHandler.loadImageBytes,
-                          loadVideoThumbnail: _mediaHandler.loadVideoThumbnail,
-                          playVideo: _openVideoPlayer,
-                          downloadAttachment: _downloadAndOpenFile,
-                          shareAttachment: _shareMessageAttachment,
-                          onReply: canReply ? () => _setReplyTo(event) : null,
-                          onForward:
-                              canForward ? () => _forwardMessage(event) : null,
-                          onPin: canPin ? () => _togglePinMessage(event) : null,
-                          onDelete: canDeleteOwnAttachment
-                              ? () => _deleteMessage(event)
-                              : null,
-                          onReplyTap: _scrollToAndHighlightMessage,
-                          isPinned: isPinned,
-                          openFullscreenImage: _openFullscreenImage,
-                          buildMessageStatus: (_) => _buildMessageStatus(event),
-                          isEdited: isEdited,
-                        )
-                      else if (_hasLinkPreview(displayEvent))
-                        _withMatrixReplyContext(
-                          displayEvent,
-                          isMe,
-                          _buildLinkPreviewBubble(
-                            event: displayEvent,
-                            isMe: isMe,
-                            senderName: senderName,
-                            time: time,
-                            status: _buildMessageStatus(event),
-                          ),
-                        )
-                      else
-                        TextOrFileMessageBubble(
-                          event: displayEvent,
-                          isMe: isMe,
-                          senderName: senderName,
-                          time: time,
-                          isAudio: isAudio,
-                          isFile: isFile,
-                          downloadAndOpenFile: _downloadAndOpenFile,
-                          shareAttachment: _shareMessageAttachment,
-                          openAttachmentExternally: _openMessageAttachment,
-                          downloadAttachment: _downloadAttachment,
-                          streamingMediaRequest: _streamingMediaRequestFor,
-                          onReply: canReply ? () => _setReplyTo(event) : null,
-                          onForward:
-                              canForward ? () => _forwardMessage(event) : null,
-                          onPin: canPin ? () => _togglePinMessage(event) : null,
-                          onDelete: canDeleteOwnAttachment
-                              ? () => _deleteMessage(event)
-                              : null,
-                          isPinned: isPinned,
-                          buildMessageStatus: (_) => _buildMessageStatus(event),
-                          loadImageBytes: _mediaHandler.loadImageBytes,
-                          loadVideoThumbnail: _mediaHandler.loadVideoThumbnail,
-                          isEdited: isEdited,
-                          onReplyTap: _scrollToAndHighlightMessage,
-                          onPrivateReplyTap: _openPrivateReplySource,
-                          mentionMembers: _mentionMembersForCurrentRoom(),
-                          onMentionTap: _showMentionProfileSheet,
+                        MessageReactions(
+                          reactions: _reactionSummariesFor(event),
+                          isMyMessage: isMe,
+                          onTap: (reaction) {
+                            if (_canReactToMessage(event)) {
+                              _showReactionDetails(event, reaction);
+                            }
+                          },
                         ),
-                      MessageReactions(
-                        reactions: _reactionSummariesFor(event),
-                        isMyMessage: isMe,
-                        onTap: (reaction) {
-                          if (_canReactToMessage(event)) {
-                            _showReactionDetails(event, reaction);
-                          }
-                        },
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -3807,7 +3887,13 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         event.content['com.xmo.link_preview'] is Map;
   }
 
-  Widget _withMatrixReplyContext(Event event, bool isMe, Widget child) {
+  Widget _withMatrixReplyContext(
+    Event event,
+    bool isMe,
+    Widget child, {
+    Event? replySourceEvent,
+  }) {
+    final relationEvent = replySourceEvent ?? event;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment:
@@ -3815,12 +3901,14 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       children: [
         MessageReplyContext(
           event: event,
+          replySourceEvent: relationEvent,
           isMe: isMe,
           loadImageBytes: _mediaHandler.loadImageBytes,
           loadVideoThumbnail: _mediaHandler.loadVideoThumbnail,
+          resolveDisplayEvent: _displayEventFor,
           onTap: _scrollToAndHighlightMessage,
         ),
-        if (hasMatrixReply(event)) const SizedBox(height: 4),
+        if (hasMatrixReply(relationEvent)) const SizedBox(height: 4),
         child,
       ],
     );
@@ -4040,7 +4128,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final siteName = preview['site_name']?.toString().trim();
     final imageUrl = preview['image_url']?.toString().trim();
     final label = (title == null || title.isEmpty) ? host ?? uri.host : title;
-    final body = event.body.trim();
+    final body = matrixVisibleBody(event).trim();
 
     return Container(
       width: _responsiveBubbleWidth(
@@ -4382,7 +4470,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       final text = question['m.text'] ?? question['org.matrix.msc1767.text'];
       if (text is String && text.trim().isNotEmpty) return text.trim();
     }
-    final body = event.body.trim();
+    final body = matrixVisibleBody(event).trim();
     return body.isEmpty ? 'Poll' : body;
   }
 
@@ -4503,6 +4591,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         _canEditMessage(primaryEvent) ||
         _canDeleteMessage(primaryEvent) ||
         _canPinMessage(primaryEvent);
+    final canReply = _canReplyToMessage(primaryEvent);
 
     return KeyedSubtree(
       key: key,
@@ -4526,90 +4615,96 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                         : Colors.transparent,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _isMessageSelectionMode
-                ? () => _toggleMessageSelectionGroup(events)
+          child: SwipeToReply(
+            onReply: _canSwipeToReply(canReply)
+                ? () => _replyFromSwipe(primaryEvent)
                 : null,
-            onLongPress: _isMessageSelectionMode
-                ? () => _toggleMessageSelectionGroup(events)
-                : canShowMenu
-                    ? () => _showMessageOptions(primaryEvent)
-                    : null,
-            child: IgnorePointer(
-              ignoring: _isMessageSelectionMode,
-              child: Align(
-                alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                child: Padding(
-                  padding: EdgeInsets.only(
-                    top: 4,
-                    bottom: 4,
-                    left: isMe ? 60 : 0,
-                    right: isMe ? 0 : 60,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: isMe
-                        ? CrossAxisAlignment.end
-                        : CrossAxisAlignment.start,
-                    children: [
-                      if (!isMe)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4, left: 4),
-                          child: Text(
-                            senderName,
-                            style: GoogleFonts.inter(
-                              color: kLimeGreen,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _isMessageSelectionMode
+                  ? () => _toggleMessageSelectionGroup(events)
+                  : null,
+              onLongPress: _isMessageSelectionMode
+                  ? () => _toggleMessageSelectionGroup(events)
+                  : canShowMenu
+                      ? () => _showMessageOptions(primaryEvent)
+                      : null,
+              child: IgnorePointer(
+                ignoring: _isMessageSelectionMode,
+                child: Align(
+                  alignment:
+                      isMe ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      top: 4,
+                      bottom: 4,
+                      left: isMe ? 60 : 0,
+                      right: isMe ? 0 : 60,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: isMe
+                          ? CrossAxisAlignment.end
+                          : CrossAxisAlignment.start,
+                      children: [
+                        if (!isMe)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4, left: 4),
+                            child: Text(
+                              senderName,
+                              style: GoogleFonts.inter(
+                                color: kLimeGreen,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
-                        ),
-                      Stack(
-                        children: [
-                          _buildMediaAlbumGrid(events),
-                          Positioned(
-                            bottom: 8,
-                            right: 8,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.6),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    time,
-                                    style: GoogleFonts.inter(
-                                      color: Colors.white,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500,
+                        Stack(
+                          children: [
+                            _buildMediaAlbumGrid(events),
+                            Positioned(
+                              bottom: 8,
+                              right: 8,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.6),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      time,
+                                      style: GoogleFonts.inter(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w500,
+                                      ),
                                     ),
-                                  ),
-                                  if (isMe) ...[
-                                    const SizedBox(width: 4),
-                                    _buildMessageStatus(primaryEvent),
+                                    if (isMe) ...[
+                                      const SizedBox(width: 4),
+                                      _buildMessageStatus(primaryEvent),
+                                    ],
                                   ],
-                                ],
+                                ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                      MessageReactions(
-                        reactions: _reactionSummariesFor(primaryEvent),
-                        isMyMessage: isMe,
-                        onTap: (reaction) {
-                          if (_canReactToMessage(primaryEvent)) {
-                            _showReactionDetails(primaryEvent, reaction);
-                          }
-                        },
-                      ),
-                    ],
+                          ],
+                        ),
+                        MessageReactions(
+                          reactions: _reactionSummariesFor(primaryEvent),
+                          isMyMessage: isMe,
+                          onTap: (reaction) {
+                            if (_canReactToMessage(primaryEvent)) {
+                              _showReactionDetails(primaryEvent, reaction);
+                            }
+                          },
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -5379,7 +5474,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       await _downloadAttachmentWithQueue(
         displayEvent,
         activeLabel:
-            'Preparing ${displayEvent.body.isNotEmpty ? displayEvent.body : 'file'}...',
+            'Preparing ${matrixAttachmentFileName(displayEvent, fallback: 'file')}...',
         failurePrefix: 'Failed to share',
         progressLabel: 'Preparing',
         showCancelAction: false,
@@ -5487,9 +5582,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   int _ownPowerLevel() {
     if (_room == null) return 0;
     for (final user in _room!.getParticipants()) {
-      if (user.id == _myUserId) return user.powerLevel;
+      if (user.id == _myUserId) return user.powerLevel.level;
     }
-    return _room!.ownPowerLevel;
+    return _room!.ownPowerLevel.level;
   }
 
   void _showMentionProfileSheet(GroupMember member) {
@@ -5705,14 +5800,15 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       case MessageTypes.Audio:
         return 'Audio';
       case MessageTypes.File:
-        return displayEvent.body.trim().isEmpty ? 'File' : displayEvent.body;
+        return matrixAttachmentFileName(displayEvent, fallback: 'File');
       case MessageTypes.Text:
       case MessageTypes.Notice:
       case MessageTypes.Emote:
-        return _limitPrivateReplyPreview(displayEvent.body.trim());
+        return _limitPrivateReplyPreview(matrixVisibleBody(displayEvent));
       default:
+        final visibleBody = matrixVisibleBody(displayEvent);
         return _limitPrivateReplyPreview(
-          displayEvent.body.trim().isEmpty ? 'Message' : displayEvent.body,
+          visibleBody.isEmpty ? 'Message' : visibleBody,
         );
     }
   }
@@ -6646,77 +6742,97 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   Future<void> _editMessage(Event event) async {
-    if (!_ensureStableMessageActionTarget(event)) return;
-    final currentText = _displayEventFor(event).calcUnlocalizedBody(
-      hideReply: true,
-      hideEdit: true,
-    );
-    final controller = TextEditingController(text: currentText);
+    if (_isEditingMessage || !_ensureStableMessageActionTarget(event)) return;
+    final currentText = _displayEventFor(event)
+        .calcUnlocalizedBody(
+          hideReply: true,
+          hideEdit: true,
+        )
+        .trim();
+    if (currentText.isEmpty) return;
 
-    String? newText;
-    try {
-      newText = await showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: kDarkerGrey,
-          title: Text('Edit Message', style: GoogleFonts.inter(color: kWhite)),
-          content: TextField(
-            controller: controller,
-            style: const TextStyle(color: kWhite),
-            maxLines: 5,
-            decoration: InputDecoration(
-              hintText: 'Enter new message',
-              hintStyle: const TextStyle(color: Colors.white54),
-              filled: true,
-              fillColor: kDarkGrey,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-            ),
-            autofocus: true,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child:
-                  Text('Cancel', style: GoogleFonts.inter(color: kLightGrey)),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-              child: Text('Save', style: GoogleFonts.inter(color: kLimeGreen)),
-            ),
-          ],
-        ),
-      );
-    } finally {
-      controller.dispose();
+    final replyBeforeEdit = _replyToEvent;
+    final privateReplyBeforeEdit = _privateReplyDraft;
+    final mentionsBeforeEdit = Map<String, MatrixMentionTarget>.from(
+      _composerMentionTargets,
+    );
+    final started = await _composerController.beginTransientEdit(currentText);
+    if (!mounted || !started) return;
+
+    setState(() {
+      _editingMessageEvent = event;
+      _editingMessageOriginalText = currentText;
+      _replyBeforeMessageEdit = replyBeforeEdit;
+      _privateReplyBeforeMessageEdit = privateReplyBeforeEdit;
+      _mentionsBeforeMessageEdit
+        ..clear()
+        ..addAll(mentionsBeforeEdit);
+      _replyToEvent = null;
+      _privateReplyDraft = null;
+      _composerMentionTargets.clear();
+      _mentionAutocomplete.value = _MentionAutocompleteState.hidden;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _textFocusNode.requestFocus();
+    });
+  }
+
+  void _cancelMessageEdit() {
+    if (!_isEditingMessage || _editMessageSubmitting) return;
+    _finishMessageEdit();
+  }
+
+  void _finishMessageEdit() {
+    _composerController.endTransientEdit();
+    if (!mounted) return;
+    setState(() {
+      _editingMessageEvent = null;
+      _editingMessageOriginalText = '';
+      _editMessageSubmitting = false;
+      _replyToEvent = _replyBeforeMessageEdit;
+      _privateReplyDraft = _privateReplyBeforeMessageEdit;
+      _composerMentionTargets
+        ..clear()
+        ..addAll(_mentionsBeforeMessageEdit);
+      _replyBeforeMessageEdit = null;
+      _privateReplyBeforeMessageEdit = null;
+      _mentionsBeforeMessageEdit.clear();
+    });
+  }
+
+  Future<void> _submitMessageEdit() async {
+    final event = _editingMessageEvent;
+    final newText = _textCtrl.text.trim();
+    if (event == null ||
+        _editMessageSubmitting ||
+        newText.isEmpty ||
+        newText == _editingMessageOriginalText) {
+      return;
     }
 
-    if (newText == null || newText.isEmpty || newText == currentText) return;
+    setState(() => _editMessageSubmitting = true);
 
     try {
+      Event? repliedEvent;
+      final repliedEventId = matrixReplyEventId(event);
+      if (repliedEventId != null) {
+        try {
+          repliedEvent = await event.room.getEventById(repliedEventId);
+        } catch (_) {
+          // Keep editing available if the original reply target was removed.
+        }
+      }
       await event.room.sendTextEvent(
         newText,
+        inReplyTo: repliedEvent,
         editEventId: event.eventId,
       );
+      if (!mounted) return;
+      _finishMessageEdit();
+    } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Message edited'),
-            backgroundColor: kLimeGreen,
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to edit message: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        setState(() => _editMessageSubmitting = false);
+        _showSnackBar('Failed to edit message. Please try again.');
       }
     }
   }
@@ -7071,7 +7187,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           return const SizedBox.shrink();
         }
 
-        final isVideo = groupCall.type == GroupCallType.Video;
+        final isVideo = groupCall.type == XmoGroupCallType.video;
         final title = isVideo ? 'Ongoing video call' : 'Ongoing voice call';
         final roomTitle = MatrixService.cleanName(
           MatrixService().getResolvedDisplayName(groupCall.room),
@@ -7302,7 +7418,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         continue;
       }
       final displayEvent = _displayEventFor(event);
-      if (!displayEvent.body.toLowerCase().contains(query)) continue;
+      if (!matrixVisibleBody(displayEvent).toLowerCase().contains(query)) {
+        continue;
+      }
       byId[event.eventId] = event;
     }
     final results = byId.values.toList()
@@ -7552,6 +7670,27 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     );
   }
 
+  PreferredSizeWidget _buildMessageEditAppBar() {
+    return AppBar(
+      backgroundColor: kBlack,
+      elevation: 0,
+      leading: IconButton(
+        tooltip: 'Cancel editing',
+        onPressed: _editMessageSubmitting ? null : _cancelMessageEdit,
+        icon: const Icon(Icons.arrow_back, color: kWhite),
+      ),
+      titleSpacing: 0,
+      title: Text(
+        'Edit message',
+        style: GoogleFonts.inter(
+          color: kWhite,
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
   PreferredSizeWidget _buildMessageSelectionAppBar() {
     return AppBar(
       backgroundColor: kBlack,
@@ -7628,12 +7767,15 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final pinnedBannerIndex = _currentPinnedBannerIndex(orderedPinnedEvents);
 
     return PopScope(
-      canPop: !_isMessageSelectionMode && !_isChatSearchMode,
+      canPop:
+          !_isMessageSelectionMode && !_isChatSearchMode && !_isEditingMessage,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _isMessageSelectionMode && !_selectionActionBusy) {
           _clearMessageSelection();
         } else if (!didPop && _isChatSearchMode) {
           _closeChatSearch();
+        } else if (!didPop && _isEditingMessage && !_editMessageSubmitting) {
+          _cancelMessageEdit();
         }
       },
       child: IncomingCallFullscreenScope(
@@ -7646,35 +7788,37 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                   ? _buildMessageSelectionAppBar()
                   : _isChatSearchMode
                       ? _buildChatSearchAppBar()
-                      : _room != null
-                          ? ChatAppBar(
-                              room: _room!,
-                              onBack: () => Navigator.pop(context),
-                              onDeleteChat: _handleDeleteChat,
-                              onArchiveChat: _handleArchiveChat,
-                              onLeaveRoom: _handleLeaveRoom,
-                              onDeleteGroup: _handleDeleteGroup,
-                              matrixProvider: widget.matrixProvider,
-                              onSearch: _openChatSearch,
-                            )
-                          : AppBar(
-                              backgroundColor: kBlack,
-                              elevation: 0,
-                              leading: IconButton(
-                                icon:
-                                    const Icon(Icons.arrow_back, color: kWhite),
-                                onPressed: () => Navigator.pop(context),
-                              ),
-                              title: Text(
-                                widget.previewChannel!.name ??
-                                    widget.previewChannel!.roomId,
-                                style: GoogleFonts.inter(
-                                  color: kWhite,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
+                      : _isEditingMessage
+                          ? _buildMessageEditAppBar()
+                          : _room != null
+                              ? ChatAppBar(
+                                  room: _room!,
+                                  onBack: () => Navigator.pop(context),
+                                  onDeleteChat: _handleDeleteChat,
+                                  onArchiveChat: _handleArchiveChat,
+                                  onLeaveRoom: _handleLeaveRoom,
+                                  onDeleteGroup: _handleDeleteGroup,
+                                  matrixProvider: widget.matrixProvider,
+                                  onSearch: _openChatSearch,
+                                )
+                              : AppBar(
+                                  backgroundColor: kBlack,
+                                  elevation: 0,
+                                  leading: IconButton(
+                                    icon: const Icon(Icons.arrow_back,
+                                        color: kWhite),
+                                    onPressed: () => Navigator.pop(context),
+                                  ),
+                                  title: Text(
+                                    widget.previewChannel!.name ??
+                                        widget.previewChannel!.roomId,
+                                    style: GoogleFonts.inter(
+                                      color: kWhite,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
               body: Stack(
                 children: [
                   const Positioned.fill(
@@ -7745,6 +7889,16 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                                             messageItems.length) {
                                           final item =
                                               messageItems[contentIndex];
+                                          final separatorDate =
+                                              item.separatorDate;
+                                          if (separatorDate != null) {
+                                            return RepaintBoundary(
+                                              key: _messageListItemKey(item),
+                                              child: ChatDateSeparator(
+                                                date: separatorDate,
+                                              ),
+                                            );
+                                          }
                                           final events = item.albumEvents ??
                                               <Event>[item.event!];
                                           final bubble =
@@ -7811,12 +7965,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                                   ),
                       ),
                       // Reply Preview
-                      if (_replyToEvent != null)
+                      if (!_isEditingMessage && _replyToEvent != null)
                         ReplyPreview(
                           replyToEvent: _replyToEvent!,
                           onCancel: _cancelReply,
                         ),
-                      if (_privateReplyDraft != null)
+                      if (!_isEditingMessage && _privateReplyDraft != null)
                         _PrivateReplyComposerPreview(
                           draft: _privateReplyDraft!,
                           onCancel: _cancelPrivateReply,
@@ -7828,7 +7982,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                       ValueListenableBuilder<_MentionAutocompleteState>(
                         valueListenable: _mentionAutocomplete,
                         builder: (context, mention, _) {
-                          if (!mention.visible || _groupMembers.isEmpty) {
+                          if (_isEditingMessage ||
+                              !mention.visible ||
+                              _groupMembers.isEmpty) {
                             return const SizedBox.shrink();
                           }
                           return MentionAutocomplete(
@@ -7839,7 +7995,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                         },
                       ),
                       // Typing Indicator (Direct Chats Only)
-                      if (_isDirectRoom && _typingUsers.isNotEmpty)
+                      if (!_isEditingMessage &&
+                          _isDirectRoom &&
+                          _typingUsers.isNotEmpty)
                         TypingIndicator(userName: _typingUsers.first),
                       if (_isChatSearchMode)
                         _buildChatSearchNavigation()
@@ -7885,13 +8043,17 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                           uploading: _isUploadBusy,
                           recording: _recording,
                           recordingPaused: _recordingPaused,
+                          editing: _isEditingMessage,
+                          editingOriginalText: _editingMessageOriginalText,
                           recordingDuration: _recordingDuration,
                           recordingWaveform: _recordingWaveform,
                           enabled: _canSendMessages,
                           disabledText: _isReadOnlyRestricted
                               ? 'Read-only mode'
                               : 'You cannot send messages',
-                          onSend: _sendMessage,
+                          onSend: _isEditingMessage
+                              ? _submitMessageEdit
+                              : _sendMessage,
                           onShowEmojiPicker: _showComposerEmojiPicker,
                           onShowAttachmentSheet: _showAttachmentSheet,
                           onStartRecording: _startAudioRecording,
@@ -8036,7 +8198,7 @@ class _PrivateReplyComposerPreview extends StatelessWidget {
       case MessageTypes.Audio:
         return 'Audio';
       case MessageTypes.File:
-        return event.body.trim().isEmpty ? 'File' : event.body.trim();
+        return matrixAttachmentFileName(event, fallback: 'File');
       default:
         return fallback.trim().isEmpty ? 'Message' : fallback.trim();
     }
@@ -8607,8 +8769,13 @@ class _PendingAlbumUpload {
 class _MessageListItem {
   final Event? event;
   final List<Event>? albumEvents;
+  final DateTime? separatorDate;
 
-  const _MessageListItem._({this.event, this.albumEvents});
+  const _MessageListItem._({
+    this.event,
+    this.albumEvents,
+    this.separatorDate,
+  });
 
   factory _MessageListItem.message(Event event) {
     return _MessageListItem._(event: event);
@@ -8616,6 +8783,10 @@ class _MessageListItem {
 
   factory _MessageListItem.album(List<Event> events) {
     return _MessageListItem._(albumEvents: List<Event>.unmodifiable(events));
+  }
+
+  factory _MessageListItem.dateSeparator(DateTime date) {
+    return _MessageListItem._(separatorDate: date);
   }
 }
 

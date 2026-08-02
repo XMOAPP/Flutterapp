@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:reown_appkit/reown_appkit.dart';
 
 import 'call_link_service.dart';
+import 'invite_link_service.dart';
 
 class WalletDeepLinkHandler {
   static const _methodChannel = MethodChannel('com.xmo.xmo/wallet_methods');
@@ -53,12 +54,19 @@ class WalletDeepLinkHandler {
     if (!handled && await CallLinkService.instance.handleLink(value)) {
       return;
     }
+    if (!handled && await InviteLinkService.instance.handleLink(value)) {
+      return;
+    }
     if (!handled && isSupportedWalletLink(value)) {
       _queueWalletLink(value);
       return;
     }
     if (!handled) {
-      debugPrint('[WalletDeepLink] Link was not handled by AppKit: $value');
+      final uri = Uri.tryParse(value);
+      final destination = uri == null
+          ? 'invalid link'
+          : '${uri.scheme}://${uri.host.isEmpty ? '<none>' : uri.host}';
+      debugPrint('[WalletDeepLink] Link was not handled: $destination');
     }
   }
 

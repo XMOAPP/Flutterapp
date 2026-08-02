@@ -13,6 +13,7 @@ import '../providers/story_provider.dart';
 import '../services/app_lock_service.dart';
 import '../services/call_link_service.dart';
 import '../services/crash_reporting_service.dart';
+import '../services/invite_link_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/streaming_media_service.dart';
 import '../services/story_service.dart';
@@ -44,6 +45,10 @@ Future<void> main() async {
   );
 
   final matrixProvider = MatrixProvider();
+  InviteLinkService.instance.init(
+    navigatorKey: xmoNavigatorKey,
+    matrixProvider: matrixProvider,
+  );
   runApp(XmoApp(matrixProvider: matrixProvider));
   unawaited(
     _bootstrapServices(matrixProvider)

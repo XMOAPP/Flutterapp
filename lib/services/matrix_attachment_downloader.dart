@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:matrix/matrix.dart';
 
 import 'matrix_encrypted_media_helper.dart';
+import '../utils/message_presentation.dart';
 
 class MatrixAttachmentDownloader {
   const MatrixAttachmentDownloader({
@@ -21,11 +22,6 @@ class MatrixAttachmentDownloader {
     if (![EventTypes.Message, EventTypes.Sticker].contains(event.type)) {
       throw "This event has the type '${event.type}' and so it can't contain an attachment.";
     }
-    if (event.status.isSending) {
-      final localFile = event.room.sendingFilePlaceholders[event.eventId];
-      if (localFile != null) return localFile;
-    }
-
     final mxcUrl =
         event.attachmentOrThumbnailMxcUrl(getThumbnail: getThumbnail);
     if (mxcUrl == null) {
@@ -69,7 +65,7 @@ class MatrixAttachmentDownloader {
         : event.attachmentMimetype;
     return MatrixFile(
       bytes: bytes,
-      name: event.body.isNotEmpty ? event.body : 'attachment',
+      name: safeMatrixAttachmentFileName(event),
       mimeType: mimeType.isNotEmpty ? mimeType : null,
     );
   }
@@ -83,9 +79,9 @@ class MatrixAttachmentDownloader {
   }) async {
     final database = event.room.client.database;
     final infoMap = getThumbnail ? event.thumbnailInfoMap : event.infoMap;
-    var storeable = database != null &&
-        infoMap['size'] is int &&
-        infoMap['size'] <= database.maxFileSize;
+    final declaredSize = infoMap['size'];
+    var storeable = declaredSize is int &&
+        declaredSize <= database.maxFileSize;
 
     Uint8List? bytes;
     if (storeable) {
@@ -100,9 +96,7 @@ class MatrixAttachmentDownloader {
           (Uri url) async =>
               (await event.room.client.httpClient.get(url)).bodyBytes;
       bytes = await callback(_downloadUri(event, mxcUrl));
-      storeable = database != null &&
-          storeable &&
-          bytes.lengthInBytes < database.maxFileSize;
+      storeable = storeable && bytes.lengthInBytes < database.maxFileSize;
       if (storeable) {
         await database.storeFile(
           mxcUrl,

@@ -57,10 +57,10 @@ class _MemberListScreenState extends State<MemberListScreen> {
   }
 
   bool get _canModerate =>
-      GroupService.canModerateMembers(widget.room.ownPowerLevel);
+      GroupService.canModerateMembers(widget.room.ownPowerLevel.level);
 
   bool get _canManageAdmins =>
-      GroupService.canManageAdmins(widget.room.ownPowerLevel);
+      GroupService.canManageAdmins(widget.room.ownPowerLevel.level);
 
   String get _myUserId => context.read<MatrixProvider>().userId ?? '';
 
@@ -69,11 +69,11 @@ class _MemberListScreenState extends State<MemberListScreen> {
     if (!_canModerate && !_canManageAdmins) return;
 
     final canAct = GroupService.canActOnMember(
-      actorPowerLevel: widget.room.ownPowerLevel,
+      actorPowerLevel: widget.room.ownPowerLevel.level,
       targetPowerLevel: member.powerLevel,
     );
     final canChangeAdmin = GroupService.canChangePowerLevel(
-      actorPowerLevel: widget.room.ownPowerLevel,
+      actorPowerLevel: widget.room.ownPowerLevel.level,
       targetPowerLevel: member.powerLevel,
       newPowerLevel: member.powerLevel >= 50 ? 0 : 50,
     );

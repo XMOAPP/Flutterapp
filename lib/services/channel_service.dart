@@ -170,8 +170,8 @@ class ChannelService {
             userId: userId,
             displayName: displayName is String ? displayName : userId,
             avatarUrl: avatarUrl is String ? avatarUrl : null,
-            joinedAt: DateTime.fromMillisecondsSinceEpoch(
-                state.originServerTs.millisecondsSinceEpoch),
+            joinedAt:
+                state is Event ? state.originServerTs : DateTime.now(),
             isBanned: true,
             isAdmin: false,
             powerLevel: -1,
@@ -196,7 +196,7 @@ class ChannelService {
     final participants = room.getParticipants();
 
     return participants
-        .where((user) => user.powerLevel >= 50)
+        .where((user) => user.powerLevel >= PowerLevel.moderator)
         .map((user) => ChannelAdmin.fromUser(user))
         .toList()
       ..sort((a, b) => b.powerLevel.compareTo(a.powerLevel));
@@ -270,13 +270,9 @@ class ChannelService {
       postsLast24h: postsLast24h,
       postsLast7days: postsLast7days,
       averageViews: averageViews,
-      createdAt: DateTime.fromMillisecondsSinceEpoch(
-        room
-                .getState(EventTypes.RoomCreate)
-                ?.originServerTs
-                .millisecondsSinceEpoch ??
-            0,
-      ),
+      createdAt: room.getState(EventTypes.RoomCreate) is Event
+          ? (room.getState(EventTypes.RoomCreate) as Event).originServerTs
+          : DateTime.fromMillisecondsSinceEpoch(0),
     );
   }
 
@@ -342,7 +338,7 @@ class ChannelService {
     if (room == null) throw Exception('Channel not found: $roomId');
 
     // Check if user has permission to post
-    if (room.ownPowerLevel < 50) {
+    if (room.ownPowerLevel < PowerLevel.moderator) {
       throw Exception('Only admins can post to channels');
     }
 

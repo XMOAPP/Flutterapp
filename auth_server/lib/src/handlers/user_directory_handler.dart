@@ -17,7 +17,7 @@ Future<void> _upsertUserDirectoryEntry(HttpRequest request) async {
   if (token == null) {
     await _json(request, HttpStatus.unauthorized, {
       'success': false,
-      'error': 'Missing Matrix access token',
+      'error': 'Missing XMO session token',
     });
     return;
   }
@@ -110,12 +110,12 @@ Future<String> _userDirectoryWhoami(String token) async {
     final response = await request.close().timeout(const Duration(seconds: 15));
     final responseBody = await utf8.decoder.bind(response).join();
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw const _BadRequestException('Invalid Matrix access token');
+      throw const _BadRequestException('Invalid XMO session token');
     }
     final decoded = _decodeJsonMap(responseBody);
     final userId = decoded['user_id']?.toString();
     if (userId == null || userId.isEmpty) {
-      throw const _BadRequestException('Invalid Matrix whoami response');
+      throw const _BadRequestException('Invalid XMO session response');
     }
     return userId;
   } finally {

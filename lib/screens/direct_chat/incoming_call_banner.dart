@@ -41,7 +41,7 @@ class _IncomingCallBannerState extends State<IncomingCallBanner> {
     }
   }
 
-  Future<void> _joinGroupCall(GroupCall groupCall) async {
+  Future<void> _joinGroupCall(XmoGroupCall groupCall) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
@@ -53,7 +53,7 @@ class _IncomingCallBannerState extends State<IncomingCallBanner> {
     }
   }
 
-  void _dismissGroupCall(GroupCall groupCall) {
+  void _dismissGroupCall(XmoGroupCall groupCall) {
     if (_busy) return;
     VoipService().dismissIncomingGroupCall(groupCall);
   }
@@ -94,7 +94,7 @@ class _IncomingCallBannerState extends State<IncomingCallBanner> {
             );
           },
         ),
-        ValueListenableBuilder<GroupCall?>(
+        ValueListenableBuilder<XmoGroupCall?>(
           valueListenable: VoipService().incomingGroupCall,
           builder: (context, groupCall, _) {
             final call = groupCall;
@@ -285,7 +285,7 @@ class _CallBannerButton extends StatelessWidget {
 }
 
 class _IncomingGroupCallCard extends StatelessWidget {
-  final GroupCall groupCall;
+  final XmoGroupCall groupCall;
   final bool busy;
   final VoidCallback onJoin;
   final VoidCallback onDismiss;
@@ -303,7 +303,7 @@ class _IncomingGroupCallCard extends StatelessWidget {
       MatrixService().getResolvedDisplayName(groupCall.room),
     );
     final displayName = title.trim().isEmpty ? 'Group' : title.trim();
-    final isVideo = groupCall.type == GroupCallType.Video;
+    final isVideo = groupCall.type == XmoGroupCallType.video;
 
     return SafeArea(
       bottom: false,

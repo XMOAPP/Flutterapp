@@ -105,7 +105,10 @@ class StoryList extends StatelessWidget {
                 child: StoryRing(
                   userName: userStories.userName,
                   avatarUrl: userStories.userAvatarUrl,
-                  hasUnviewedStories: false,
+                  hasUnviewedStories: storyProvider.hasUnviewedStories(
+                    userStories.userId,
+                    myUserId,
+                  ),
                   previewStory: userStories.latestStory,
                   storyCount: activeStories.length,
                   viewedCount: viewedCount,

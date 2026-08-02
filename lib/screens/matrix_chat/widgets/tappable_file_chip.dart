@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import 'package:mime/mime.dart';
 import '../../../theme.dart';
+import '../../../utils/message_presentation.dart';
 
 /// Tappable file chip for audio/file messages
 class TappableFileChip extends StatelessWidget {
@@ -48,6 +49,7 @@ class TappableFileChip extends StatelessWidget {
     } catch (_) {}
 
     final detectedType = detectAttachmentType(event);
+    final displayFileName = _eventFileName(event);
     final resolvedIcon =
         icon == Icons.insert_drive_file ? detectedType.icon : icon;
     final resolvedTypeLabel =
@@ -78,7 +80,7 @@ class TappableFileChip extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  event.body,
+                  displayFileName,
                   style: GoogleFonts.inter(
                     color: isMe ? kLimeGreen : kWhite,
                     fontSize: 13,
@@ -243,11 +245,7 @@ class AttachmentType {
 }
 
 String _eventFileName(Event event) {
-  final filename = event.content['filename'];
-  if (filename is String && filename.trim().isNotEmpty) {
-    return filename.trim();
-  }
-  return event.body.trim();
+  return matrixAttachmentFileName(event, fallback: 'File');
 }
 
 String? _eventMimeType(Event event, String fileName) {

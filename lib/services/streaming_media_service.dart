@@ -248,8 +248,23 @@ class StreamingMediaService {
     final client = HttpClient();
     try {
       final httpRequest = await client.getUrl(request.uri);
+      httpRequest.followRedirects = false;
       request.headers.forEach(httpRequest.headers.set);
-      final response = await httpRequest.close();
+      var response = await httpRequest.close();
+      if (_isRedirect(response.statusCode)) {
+        final location = response.redirects.isNotEmpty
+            ? response.redirects.last.location
+            : _redirectLocation(response, request.uri);
+        await response.drain<void>();
+        if (location == null || location.scheme != 'https') {
+          throw XmoStreamingMediaException(
+            'Stream chunk ${chunk.index} returned an unsafe redirect.',
+          );
+        }
+        final redirectedRequest = await client.getUrl(location);
+        redirectedRequest.followRedirects = false;
+        response = await redirectedRequest.close();
+      }
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw XmoStreamingMediaException(
           'Failed to download stream chunk ${chunk.index} '
@@ -264,6 +279,20 @@ class StreamingMediaService {
     } finally {
       client.close(force: true);
     }
+  }
+
+  static bool _isRedirect(int statusCode) =>
+      statusCode == HttpStatus.movedPermanently ||
+      statusCode == HttpStatus.found ||
+      statusCode == HttpStatus.seeOther ||
+      statusCode == HttpStatus.temporaryRedirect ||
+      statusCode == HttpStatus.permanentRedirect;
+
+  static Uri? _redirectLocation(HttpClientResponse response, Uri base) {
+    final value = response.headers.value(HttpHeaders.locationHeader);
+    if (value == null || value.isEmpty) return null;
+    final parsed = Uri.tryParse(value);
+    return parsed == null ? null : base.resolveUri(parsed);
   }
 }
 

@@ -98,6 +98,17 @@ class E2eeVerificationChecklist {
         'Previously undecryptable event decrypts without room rejoin',
       ],
     ),
+    E2eeVerificationItem(
+      id: 'vodozemac_rust_engine',
+      title: 'Vodozemac Rust E2EE engine status',
+      objective:
+          'App initializes the Rust-backed Vodozemac Olm and Megolm cryptographic ratchets at startup.',
+      requiredEvidence: [
+        'Vodozemac.init() executed successfully during app startup',
+        'Security status screen displays Rust E2EE engine active',
+        'Olm 1:1 and Megolm group ratchets operate using Vodozemac native crypto',
+      ],
+    ),
   ];
 
   static Iterable<E2eeVerificationItem> get blockingItems =>

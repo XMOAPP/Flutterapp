@@ -2,6 +2,7 @@ param(
     [switch]$BuildAab,
     [switch]$SkipAnalyze,
     [switch]$SkipTests,
+    [switch]$SkipCrashlyticsUpload,
     [switch]$FullChecks,
     [int]$CommandTimeoutSeconds = 300,
     [string]$ReportPath = "build/release_verification/play_release_verification.md",
@@ -12,7 +13,9 @@ param(
         "XMO_STREAM_CHUNK_STORAGE=azure",
         "XMO_AZURE_CHUNK_SIGN_URL=https://xmo-matrix.centralindia.cloudapp.azure.com/auth/media/chunks/azure/sign-upload",
         "XMO_ACCOUNT_DELETION_SERVER_URL=https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp",
-        "XMO_ACCOUNT_DELETION_WEB_URL=https://xmo-matrix.centralindia.cloudapp.azure.com/account-deletion"
+        "XMO_ACCOUNT_DELETION_WEB_URL=https://xmo.dpdns.org/account-deletion",
+        "XMO_INVITE_SERVER_URL=https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp",
+        "XMO_INVITE_WEB_BASE_URL=https://xmo.dpdns.org"
     )
 )
 
@@ -113,6 +116,7 @@ $appConfig = if (Test-Path $appConfigPath) { Get-Content $appConfigPath -Raw } e
 $applicationId = Get-RegexValue $buildGradle 'applicationId\s*=\s*"([^"]+)"'
 $namespace = Get-RegexValue $buildGradle 'namespace\s*=\s*"([^"]+)"'
 $version = Get-RegexValue $pubspec '(?m)^version:\s*([^\r\n]+)'
+$androidLabel = Get-RegexValue $manifest 'android:label="([^"]+)"'
 
 if ($applicationId -and $applicationId -notmatch '^com\.example\.') {
     Add-Result $results "Application identity" "applicationId" "PASS" "BLOCKER" "$buildGradlePath uses $applicationId" "None"
@@ -130,6 +134,12 @@ if ($version -match '^\d+\.\d+\.\d+\+\d+$') {
     Add-Result $results "Application identity" "pubspec version format" "PASS" "HIGH" "$pubspecPath version=$version" "Before Play upload, confirm this versionCode is unused in Play Console."
 } else {
     Add-Result $results "Application identity" "pubspec version format" "FAIL" "HIGH" "$pubspecPath version=$version" "Use versionName+versionCode, for example 1.0.1+2."
+}
+
+if ($androidLabel -eq "XMO") {
+    Add-Result $results "Application identity" "Android app label" "PASS" "HIGH" "$manifestPath android:label=$androidLabel" "None"
+} else {
+    Add-Result $results "Application identity" "Android app label" "FAIL" "HIGH" "$manifestPath android:label=$androidLabel" "Set the release launcher label to XMO."
 }
 
 if ($buildGradle -match 'throw GradleException\(\s*"Missing android/key\.properties' -and $buildGradle -match 'signingConfig\s*=\s*signingConfigs\.getByName\("release"\)') {
@@ -163,7 +173,9 @@ $requiredDefines = @(
     "XMO_STREAM_CHUNK_STORAGE",
     "XMO_AZURE_CHUNK_SIGN_URL",
     "XMO_ACCOUNT_DELETION_SERVER_URL",
-    "XMO_ACCOUNT_DELETION_WEB_URL"
+    "XMO_ACCOUNT_DELETION_WEB_URL",
+    "XMO_INVITE_SERVER_URL",
+    "XMO_INVITE_WEB_BASE_URL"
 )
 
 $providedDefineNames = @{}
@@ -265,6 +277,38 @@ if (!$SkipTests) {
 }
 
 if ($BuildAab) {
+    $aabPath = "build/app/outputs/bundle/release/app-release.aab"
+    $aabBuildStartedAt = Get-Date
+    $versionMatch = [regex]::Match($version, '^(?<name>\d+\.\d+\.\d+)\+(?<code>\d+)$')
+    if (!$versionMatch.Success) {
+        throw "Cannot build AAB: invalid pubspec version '$version'."
+    }
+    $flutterVersionName = $versionMatch.Groups['name'].Value
+    $flutterVersionCode = $versionMatch.Groups['code'].Value
+    $localPropertiesPath = "android/local.properties"
+    if (!(Test-Path $localPropertiesPath)) {
+        throw "Cannot build AAB: $localPropertiesPath is missing. Run flutter pub get first."
+    }
+    $localProperties = Get-Content $localPropertiesPath -Raw
+    foreach ($entry in @{
+            'flutter.versionName' = $flutterVersionName
+            'flutter.versionCode' = $flutterVersionCode
+        }.GetEnumerator()) {
+        $pattern = "(?m)^$([regex]::Escape($entry.Key))=.*$"
+        $replacement = "$($entry.Key)=$($entry.Value)"
+        if ($localProperties -match $pattern) {
+            $localProperties = [regex]::Replace(
+                $localProperties,
+                $pattern,
+                $replacement
+            )
+        } else {
+            $localProperties = $localProperties.TrimEnd() +
+                [Environment]::NewLine + $replacement +
+                [Environment]::NewLine
+        }
+    }
+    Set-Content -Path $localPropertiesPath -Value $localProperties -NoNewline
     $encodedDartDefines = @()
     foreach ($define in $DartDefine) {
         $encodedDartDefines += [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($define))
@@ -274,13 +318,25 @@ if ($BuildAab) {
         "-p",
         "android",
         ":app:bundleRelease",
+        "-Pflutter.versionName=$flutterVersionName",
+        "-Pflutter.versionCode=$flutterVersionCode",
         "-Pdart-defines=$($encodedDartDefines -join ',')"
     )
+    if ($SkipCrashlyticsUpload) {
+        $aabCommand += @(
+            "-x",
+            ":app:uploadCrashlyticsMappingFileRelease"
+        )
+    }
     $aab = Invoke-CheckedCommand "Gradle bundleRelease" $aabCommand -TimeoutSeconds ([math]::Max($CommandTimeoutSeconds, 900))
     $commands.Add($aab) | Out-Null
-    if ($aab.ExitCode -eq 0 -and (Test-Path "build/app/outputs/bundle/release/app-release.aab")) {
-        $aabItem = Get-Item "build/app/outputs/bundle/release/app-release.aab"
-        Add-Result $results "Signed AAB" "release app bundle build" "PASS" "BLOCKER" "AAB built at build/app/outputs/bundle/release/app-release.aab ($([math]::Round($aabItem.Length / 1MB, 2)) MiB)" "Upload this only to internal testing first."
+    if ($aab.ExitCode -eq 0 -and (Test-Path $aabPath)) {
+        $aabItem = Get-Item $aabPath
+        if ($aabItem.LastWriteTime -ge $aabBuildStartedAt.AddSeconds(-5)) {
+            Add-Result $results "Signed AAB" "release app bundle build" "PASS" "BLOCKER" "AAB built at $aabPath ($([math]::Round($aabItem.Length / 1MB, 2)) MiB)" "Upload this only to internal testing first."
+        } else {
+            Add-Result $results "Signed AAB" "release app bundle build" "FAIL" "BLOCKER" "Gradle exited $($aab.ExitCode), but $aabPath was not freshly generated in this run" "Fix release build and rerun; do not rely on stale AAB artifacts."
+        }
     } else {
         Add-Result $results "Signed AAB" "release app bundle build" "FAIL" "BLOCKER" "Gradle bundleRelease exited $($aab.ExitCode)" "Fix release build before Play upload."
     }

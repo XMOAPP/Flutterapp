@@ -14,6 +14,7 @@ enum CameraCaptureMediaType { image, video }
 class CameraCaptureResult {
   final CameraCaptureMediaType type;
   final Uint8List bytes;
+  final String? filePath;
   final String fileName;
   final String mimeType;
   final String caption;
@@ -21,6 +22,7 @@ class CameraCaptureResult {
   const CameraCaptureResult({
     this.type = CameraCaptureMediaType.image,
     required this.bytes,
+    this.filePath,
     required this.fileName,
     required this.mimeType,
     this.caption = '',
@@ -30,11 +32,13 @@ class CameraCaptureResult {
 class CameraCaptureScreen extends StatefulWidget {
   final bool allowVideo;
   final bool showCaption;
+  final bool returnVideoFile;
 
   const CameraCaptureScreen({
     super.key,
     this.allowVideo = true,
     this.showCaption = true,
+    this.returnVideoFile = false,
   });
 
   @override
@@ -357,14 +361,18 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
     final fileName = _capturedFileName;
     if (path == null || fileName == null) return;
 
-    final bytes = await File(path).readAsBytes();
-    if (!mounted || bytes.isEmpty) return;
+    final videoFile = File(path);
+    if (!mounted || !await videoFile.exists()) return;
+    final bytes =
+        widget.returnVideoFile ? Uint8List(0) : await videoFile.readAsBytes();
+    if (!mounted || (!widget.returnVideoFile && bytes.isEmpty)) return;
 
     Navigator.pop(
       context,
       CameraCaptureResult(
         type: CameraCaptureMediaType.video,
         bytes: bytes,
+        filePath: widget.returnVideoFile ? path : null,
         fileName: fileName,
         mimeType: 'video/mp4',
         caption: widget.showCaption ? _captionController.text.trim() : '',

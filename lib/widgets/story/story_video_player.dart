@@ -11,6 +11,7 @@ import '../../theme.dart';
 class StoryVideoPlayer extends StatefulWidget {
   final Uint8List? videoBytes;
   final String? videoUrl;
+  final String? videoFilePath;
   final Map<String, String> httpHeaders;
   final String mimeType;
   final bool looping;
@@ -30,6 +31,21 @@ class StoryVideoPlayer extends StatefulWidget {
     this.onCompleted,
   })  : videoBytes = bytes,
         videoUrl = null,
+        videoFilePath = null,
+        httpHeaders = const <String, String>{};
+
+  const StoryVideoPlayer.file({
+    super.key,
+    required String filePath,
+    this.mimeType = 'video/mp4',
+    this.looping = true,
+    this.paused = false,
+    this.enableTapToPause = true,
+    this.onProgress,
+    this.onCompleted,
+  })  : videoBytes = null,
+        videoUrl = null,
+        videoFilePath = filePath,
         httpHeaders = const <String, String>{};
 
   const StoryVideoPlayer.url({
@@ -43,7 +59,8 @@ class StoryVideoPlayer extends StatefulWidget {
     this.onProgress,
     this.onCompleted,
   })  : videoBytes = null,
-        videoUrl = url;
+        videoUrl = url,
+        videoFilePath = null;
 
   @override
   State<StoryVideoPlayer> createState() => _StoryVideoPlayerState();
@@ -67,6 +84,7 @@ class _StoryVideoPlayerState extends State<StoryVideoPlayer> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.videoBytes != widget.videoBytes ||
         oldWidget.videoUrl != widget.videoUrl ||
+        oldWidget.videoFilePath != widget.videoFilePath ||
         oldWidget.mimeType != widget.mimeType) {
       _initializeFuture = _reinitialize();
     } else if (oldWidget.paused != widget.paused) {
@@ -98,11 +116,23 @@ class _StoryVideoPlayerState extends State<StoryVideoPlayer> {
     try {
       final videoUrl = widget.videoUrl;
       final videoBytes = widget.videoBytes;
+      final videoFilePath = widget.videoFilePath;
 
       if (videoUrl != null) {
         _controller = VideoPlayerController.networkUrl(
           Uri.parse(videoUrl),
           httpHeaders: widget.httpHeaders,
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+          viewType: _preferredVideoViewType,
+        );
+      } else if (videoFilePath != null) {
+        final file = File(videoFilePath);
+        if (!await file.exists()) {
+          _error = 'Video unavailable';
+          return;
+        }
+        _controller = VideoPlayerController.file(
+          file,
           videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
           viewType: _preferredVideoViewType,
         );

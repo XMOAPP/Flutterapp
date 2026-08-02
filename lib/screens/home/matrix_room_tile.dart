@@ -9,6 +9,7 @@ import '../../providers/matrix_provider.dart';
 import '../../services/matrix_service.dart';
 import '../../services/matrix_media_helper.dart';
 import '../../widgets/story/story_avatar.dart';
+import '../../utils/message_presentation.dart';
 import '../matrix_chat/widgets/tappable_file_chip.dart';
 import '../matrix_chat/media_handler.dart';
 import '../matrix_chat_screen.dart';
@@ -405,8 +406,10 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
   }
 
   static String _previewBody(Event event, {required String fallback}) {
-    final body = _stripStoryReplyFallback(event.body.trim());
-    final stripped = _stripReplyFallback(body).trim();
+    final body = _stripStoryReplyFallback(
+      matrixVisibleBody(event).trim(),
+    );
+    final stripped = body.trim();
     return stripped.isEmpty ? fallback : stripped;
   }
 
@@ -414,21 +417,6 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
     const prefix = 'Replied to your story\n';
     if (!body.startsWith(prefix)) return body;
     return body.substring(prefix.length).trim();
-  }
-
-  static String _stripReplyFallback(String body) {
-    final lines = body.replaceAll('\r\n', '\n').split('\n');
-    if (lines.isEmpty || !lines.first.startsWith('> ')) return body;
-
-    var index = 0;
-    while (index < lines.length && lines[index].startsWith('> ')) {
-      index++;
-    }
-    while (index < lines.length && lines[index].trim().isEmpty) {
-      index++;
-    }
-
-    return lines.skip(index).join('\n').trim();
   }
 
   static String _captionOrLabel(Event event, String label) {
@@ -446,10 +434,7 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
   }
 
   static String _fileName(Event event, {required String fallback}) {
-    final filename = event.content['filename']?.toString().trim();
-    if (filename != null && filename.isNotEmpty) return filename;
-    final body = event.body.trim();
-    return body.isEmpty ? fallback : body;
+    return matrixAttachmentFileName(event, fallback: fallback);
   }
 
   static MatrixMediaRequest? _mediaThumbnailRequest(

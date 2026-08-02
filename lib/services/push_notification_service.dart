@@ -323,7 +323,7 @@ class PushNotificationService {
     if (service == null || !service.isLoggedIn) {
       debugPrint(
         '[PushNotificationService] Pusher registration skipped: '
-        'Matrix user is not logged in.',
+        'XMO user is not logged in.',
       );
       return;
     }
@@ -341,7 +341,7 @@ class PushNotificationService {
     if (gatewayUrl.isEmpty) {
       debugPrint(
         '[PushNotificationService] XMO_PUSH_GATEWAY_URL is empty; '
-        'skipping Matrix pusher registration.',
+        'skipping push registration.',
       );
       return;
     }
@@ -351,7 +351,7 @@ class PushNotificationService {
 
     try {
       debugPrint(
-        '[PushNotificationService] Registering Matrix pusher: '
+        '[PushNotificationService] Registering XMO push endpoint: '
         'user=${service.userId}, gateway=$gatewayUrl, '
         'token=${_redactToken(token)}',
       );
@@ -364,7 +364,7 @@ class PushNotificationService {
         pushGatewayUrl: gatewayUrl,
       );
       _registeredToken = token;
-      debugPrint('[PushNotificationService] Matrix pusher registered.');
+      debugPrint('[PushNotificationService] XMO push endpoint registered.');
     } catch (e) {
       debugPrint('[PushNotificationService] Failed to register pusher: $e');
     }
@@ -375,7 +375,7 @@ class PushNotificationService {
     if (service == null || !service.isLoggedIn) {
       debugPrint(
         '[PushNotificationService] Pusher removal skipped: '
-        'Matrix user is not logged in.',
+        'XMO user is not logged in.',
       );
       return;
     }
@@ -394,7 +394,7 @@ class PushNotificationService {
         appId: AppConfig.pushAppId,
       );
       _registeredToken = null;
-      debugPrint('[PushNotificationService] Matrix pusher removed.');
+      debugPrint('[PushNotificationService] XMO push endpoint removed.');
     } catch (e) {
       debugPrint('[PushNotificationService] Failed to remove pusher: $e');
     }

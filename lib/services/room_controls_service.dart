@@ -330,7 +330,7 @@ class RoomControlsService {
 
   static int powerLevelFor(Room room, String userId) {
     for (final user in room.getParticipants()) {
-      if (user.id == userId) return user.powerLevel;
+      if (user.id == userId) return user.powerLevel.level;
     }
     final content = room.getState(EventTypes.RoomPowerLevels)?.content;
     final users = content?['users'];

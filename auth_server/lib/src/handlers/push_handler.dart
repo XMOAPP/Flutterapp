@@ -130,7 +130,8 @@ _FcmPayload _buildFcmPayload(Map<String, dynamic> notification) {
       'room_name': notification['room_name'].toString(),
     if (eventType.isNotEmpty) 'event_type': eventType,
     if (msgType.isNotEmpty) 'msgtype': msgType,
-    if (content['body'] != null) 'content': content['body'].toString(),
+    if (_visiblePushBody(content).isNotEmpty)
+      'content': _visiblePushBody(content),
     if (_fileName(content, fallback: '').isNotEmpty)
       'filename': _fileName(content, fallback: ''),
     if (_contentMimeType(content) != null)
@@ -224,8 +225,8 @@ _PushPreview _notificationPreview(
   if (lowerMsgType.contains('location')) {
     return const _PushPreview(kind: 'location', label: 'Location');
   }
-  final contentBody = content['body']?.toString().trim();
-  if (contentBody != null && _isDisplayablePushText(contentBody)) {
+  final contentBody = _visiblePushBody(content);
+  if (_isDisplayablePushText(contentBody)) {
     return _PushPreview(kind: 'text', label: contentBody);
   }
   if (lowerEventType.startsWith('m.room.')) {
@@ -234,7 +235,7 @@ _PushPreview _notificationPreview(
 
   return _PushPreview(
     kind: 'text',
-    label: contentBody == null || contentBody.isEmpty ? 'Message' : contentBody,
+    label: contentBody.isEmpty ? 'Message' : contentBody,
   );
 }
 
@@ -262,7 +263,7 @@ String _notificationBody(
     return 'Incoming ${_callType(eventType, msgType, content)} call';
   }
 
-  final contentBody = content['body']?.toString().trim();
+  final contentBody = _visiblePushBody(content);
   final lowerEventType = eventType.toLowerCase();
   final lowerMsgType = msgType.toLowerCase();
   if (lowerEventType.contains('encrypted')) return 'New message';
@@ -285,7 +286,7 @@ String _notificationBody(
   }
   if (lowerMsgType.contains('location')) return 'Location';
 
-  if (contentBody != null && _isDisplayablePushText(contentBody)) {
+  if (_isDisplayablePushText(contentBody)) {
     return contentBody;
   }
 
@@ -313,8 +314,40 @@ String _captionOrLabel(Map<String, dynamic> content, String label) {
 String _fileName(Map<String, dynamic> content, {required String fallback}) {
   final filename = content['filename']?.toString().trim();
   if (filename != null && filename.isNotEmpty) return filename;
-  final body = content['body']?.toString().trim();
-  return body == null || body.isEmpty ? fallback : body;
+  final body = _visiblePushBody(content);
+  return body.isEmpty ? fallback : body;
+}
+
+String _visiblePushBody(Map<String, dynamic> content) {
+  final rawBody = content['body']?.toString() ?? '';
+  return _stripPushReplyFallback(
+    rawBody,
+    isReply: _pushReplyEventId(content) != null,
+  ).trim();
+}
+
+String? _pushReplyEventId(Map<String, dynamic> content) {
+  final relatesTo = _asMap(content['m.relates_to']);
+  final inReplyTo = _asMap(relatesTo?['m.in_reply_to']);
+  final eventId = inReplyTo?['event_id']?.toString().trim();
+  return eventId == null || eventId.isEmpty ? null : eventId;
+}
+
+String _stripPushReplyFallback(String body, {required bool isReply}) {
+  if (!isReply) return body;
+  final normalized = body.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+  final lines = normalized.split('\n');
+  if (lines.isEmpty || !lines.first.startsWith('> ')) return body;
+
+  var index = 0;
+  while (index < lines.length && lines[index].startsWith('> ')) {
+    index++;
+  }
+  if (index >= lines.length || lines[index].trim().isNotEmpty) return body;
+  while (index < lines.length && lines[index].trim().isEmpty) {
+    index++;
+  }
+  return lines.skip(index).join('\n');
 }
 
 String? _contentMimeType(Map<String, dynamic> content) {

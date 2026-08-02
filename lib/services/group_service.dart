@@ -105,8 +105,7 @@ class GroupService {
           'm.room.avatar': 75,
           'm.room.power_levels': 100,
           'm.room.pinned_events': 50,
-          EventTypes.GroupCallPrefix: 0,
-          EventTypes.GroupCallMemberPrefix: 0,
+          EventTypes.GroupCallMember: 0,
         },
       },
     );
@@ -402,8 +401,8 @@ class GroupService {
             avatarUrl: avatarUrl is String ? avatarUrl : null,
             role: MemberRole.restricted,
             powerLevel: -1,
-            joinedAt: DateTime.fromMillisecondsSinceEpoch(
-                state.originServerTs.millisecondsSinceEpoch),
+            joinedAt:
+                state is Event ? state.originServerTs : DateTime.now(),
             isBanned: true,
           ));
         }
@@ -464,7 +463,7 @@ class GroupService {
           orElse: () => throw Exception('User not found in room'),
         );
 
-    return AdminPermissions.fromPowerLevel(user.powerLevel);
+    return AdminPermissions.fromPowerLevel(user.powerLevel.level);
   }
 
   /// Gets all admins in the group
@@ -774,7 +773,7 @@ class GroupService {
           orElse: () => throw Exception('User not found'),
         );
 
-    final powerLevel = user.powerLevel;
+    final powerLevel = user.powerLevel.level;
     final powerLevelsState = room.getState(EventTypes.RoomPowerLevels);
     final actionLevel = powerLevelsState?.content[action];
     final requiredLevel = actionLevel is num ? actionLevel.toInt() : 50;
@@ -818,7 +817,7 @@ class GroupService {
   }
 
   void _ensureOwnPower(Room room, int requiredPower, String action) {
-    if (room.ownPowerLevel < requiredPower) {
+    if (room.ownPowerLevel.level < requiredPower) {
       throw Exception('You do not have permission to $action.');
     }
   }
@@ -835,7 +834,7 @@ class GroupService {
 
     final targetPower = await _getMemberPowerLevel(room, userId);
     if (!canActOnMember(
-      actorPowerLevel: room.ownPowerLevel,
+      actorPowerLevel: room.ownPowerLevel.level,
       targetPowerLevel: targetPower,
     )) {
       throw Exception('You do not have permission to $action this member.');
@@ -854,7 +853,7 @@ class GroupService {
 
     final targetPower = await _getMemberPowerLevel(room, userId);
     if (!canChangePowerLevel(
-      actorPowerLevel: room.ownPowerLevel,
+      actorPowerLevel: room.ownPowerLevel.level,
       targetPowerLevel: targetPower,
       newPowerLevel: newPowerLevel,
     )) {
@@ -865,7 +864,7 @@ class GroupService {
   Future<int> _getMemberPowerLevel(Room room, String userId) async {
     await room.requestParticipants();
     for (final user in room.getParticipants()) {
-      if (user.id == userId) return user.powerLevel;
+      if (user.id == userId) return user.powerLevel.level;
     }
 
     final powerLevels = room.getState(EventTypes.RoomPowerLevels)?.content;

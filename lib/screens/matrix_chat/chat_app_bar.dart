@@ -39,7 +39,7 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Size get preferredSize => const Size.fromHeight(kToolbarHeight);
 
-  bool get _isAdmin => room.ownPowerLevel >= 50;
+  bool get _isAdmin => room.ownPowerLevel >= PowerLevel.moderator;
   bool get _isChannel => room.isChannel;
   bool get _isDirect => MatrixService().isDirectRoom(room);
   bool get _isSavedMessages => MatrixService().isSavedMessagesRoom(room);

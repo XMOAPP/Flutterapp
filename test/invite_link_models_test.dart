@@ -8,7 +8,8 @@ void main() {
       final expiresAt = DateTime.utc(2026, 5, 7);
       final link = XmoInviteLink(
         linkId: 'invite-1',
-        url: 'https://matrix.to/#/!abc%3Alocalhost?xmo_invite=invite-1',
+        url:
+            'https://xmo.dpdns.org/join/abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG',
         roomId: '!abc:localhost',
         createdAt: createdAt,
         expiresAt: expiresAt,
@@ -28,6 +29,50 @@ void main() {
       expect(decoded.createdBy, '@alice:localhost');
       expect(decoded.isActive, isFalse);
       expect(decoded.canBeUsed, isFalse);
+    });
+  });
+
+  group('XmoInvitePreview', () {
+    test('parses the public invite snapshot', () {
+      final preview = XmoInvitePreview.fromJson({
+        'name': 'Launch group',
+        'type': 'group',
+        'topic': 'Release coordination',
+        'memberCount': 12,
+        'joinMode': 'knock',
+        'expiresAt': '2026-08-01T00:00:00Z',
+      });
+
+      expect(preview.name, 'Launch group');
+      expect(preview.type, 'group');
+      expect(preview.topic, 'Release coordination');
+      expect(preview.memberCount, 12);
+      expect(preview.requiresApproval, isTrue);
+    });
+
+    test('rejects unsupported room types and join modes', () {
+      expect(
+        () => XmoInvitePreview.fromJson({
+          'name': 'Invalid',
+          'type': 'space',
+          'memberCount': 1,
+          'joinMode': 'invite',
+          'expiresAt': '2026-08-01T00:00:00Z',
+        }),
+        throwsFormatException,
+      );
+    });
+
+    test('requires a valid expiry timestamp', () {
+      expect(
+        () => XmoInvitePreview.fromJson({
+          'name': 'Invalid',
+          'type': 'channel',
+          'memberCount': 1,
+          'joinMode': 'join',
+        }),
+        throwsFormatException,
+      );
     });
   });
 }

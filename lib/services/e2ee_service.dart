@@ -8,6 +8,7 @@ import 'matrix_service.dart';
 
 class E2eeStatus {
   final bool available;
+  final bool vodozemacEngineActive;
   final bool crossSigningEnabled;
   final bool crossSigningCached;
   final bool keyBackupEnabled;
@@ -19,6 +20,7 @@ class E2eeStatus {
 
   const E2eeStatus({
     required this.available,
+    this.vodozemacEngineActive = false,
     required this.crossSigningEnabled,
     required this.crossSigningCached,
     required this.keyBackupEnabled,
@@ -67,9 +69,11 @@ class E2eeService {
 
   Future<E2eeStatus> getStatus() async {
     final encryption = _encryption;
+    final vodozemacActive = _matrixService.isVodozemacActive;
     if (encryption == null || !encryption.enabled) {
       return E2eeStatus(
         available: false,
+        vodozemacEngineActive: vodozemacActive,
         crossSigningEnabled: false,
         crossSigningCached: false,
         keyBackupEnabled: false,
@@ -96,6 +100,7 @@ class E2eeService {
 
     return E2eeStatus(
       available: true,
+      vodozemacEngineActive: vodozemacActive,
       crossSigningEnabled: encryption.crossSigning.enabled,
       crossSigningCached: crossSigningCached,
       keyBackupEnabled: encryption.keyManager.enabled,
@@ -109,6 +114,7 @@ class E2eeService {
 
   Future<E2eeBootstrapResult> setupRecoveryAndKeyBackup({
     String? passphrase,
+    Future<String?> Function()? requestAccountPassword,
   }) async {
     final encryption = _encryption;
     if (encryption == null || !encryption.enabled) {
@@ -121,8 +127,66 @@ class E2eeService {
 
     final bootstrap = encryption.bootstrap();
     SdkError? lastEncryptionError;
+    String? authenticationError;
+    final pendingUiaRequests = <UiaRequest>{};
     final errorSubscription = _client.onEncryptionError.stream.listen((error) {
       lastEncryptionError = error;
+    });
+    final uiaSubscription = _client.onUiaRequest.stream.listen((request) {
+      if (request.state != UiaRequestState.waitForUser ||
+          !pendingUiaRequests.add(request)) {
+        return;
+      }
+      unawaited(() async {
+        try {
+          while (request.state == UiaRequestState.waitForUser) {
+            if (request.nextStages.contains(AuthenticationTypes.dummy)) {
+              await request.completeStage(
+                AuthenticationData(
+                  type: AuthenticationTypes.dummy,
+                  session: request.session,
+                ),
+              );
+              continue;
+            }
+
+            if (!request.nextStages.contains(AuthenticationTypes.password)) {
+              authenticationError =
+                  'The XMO account server requested an unsupported authentication method.';
+              request.cancel(Exception(authenticationError));
+              return;
+            }
+
+            final password = await requestAccountPassword?.call();
+            if (password == null || password.isEmpty) {
+              authenticationError =
+                  'Account password confirmation was cancelled.';
+              request.cancel(Exception(authenticationError));
+              return;
+            }
+
+            await request.completeStage(
+              AuthenticationPassword(
+                session: request.session,
+                password: password,
+                identifier: AuthenticationUserIdentifier(
+                  user: _client.userID!,
+                ),
+              ),
+            );
+          }
+        } catch (error, stackTrace) {
+          debugPrint('[E2EE] Interactive authentication failed: '
+              '$error\n$stackTrace');
+          authenticationError = _formatException(error);
+          if (request.state != UiaRequestState.done &&
+              request.state != UiaRequestState.fail) {
+            request.cancel(Exception(authenticationError));
+          }
+        } finally {
+          pendingUiaRequests.remove(request);
+        }
+      }());
     });
     try {
       for (var step = 0; step < 60; step++) {
@@ -177,7 +241,10 @@ class E2eeService {
             );
           case BootstrapState.error:
             return E2eeBootstrapResult.failure(
-              _formatBootstrapError(lastEncryptionError),
+              _formatBootstrapError(
+                lastEncryptionError,
+                authenticationError: authenticationError,
+              ),
             );
         }
       }
@@ -186,6 +253,7 @@ class E2eeService {
       return E2eeBootstrapResult.failure(_formatException(e));
     } finally {
       await errorSubscription.cancel();
+      await uiaSubscription.cancel();
     }
 
     return E2eeBootstrapResult.failure(
@@ -238,7 +306,13 @@ class E2eeService {
     }
   }
 
-  String _formatBootstrapError(SdkError? error) {
+  String _formatBootstrapError(
+    SdkError? error, {
+    String? authenticationError,
+  }) {
+    if (authenticationError?.isNotEmpty == true) {
+      return authenticationError!;
+    }
     if (error?.exception != null) {
       return _formatException(error!.exception);
     }

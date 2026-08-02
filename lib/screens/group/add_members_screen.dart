@@ -104,7 +104,7 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
         return;
       }
     } catch (e) {
-      debugPrint('Direct Matrix ID lookup failed: $e');
+      debugPrint('Direct XMO username lookup failed: $e');
     }
 
     if (mounted) {

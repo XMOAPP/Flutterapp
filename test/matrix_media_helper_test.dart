@@ -66,5 +66,21 @@ void main() {
       expect(request.uri.toString(), 'https://cdn.example.org/avatar.jpg');
       expect(request.headers, isEmpty);
     });
+
+    test('authenticates the same-origin Azure chunk gateway only', () {
+      final ownGateway = helper.fromUrl(
+        Uri.parse(
+          'https://matrix.example.org/auth/media/chunks/azure/download?ref=opaque',
+        ),
+      );
+      final externalGateway = helper.fromUrl(
+        Uri.parse(
+          'https://cdn.example.org/auth/media/chunks/azure/download?ref=opaque',
+        ),
+      );
+
+      expect(ownGateway.headers, {'Authorization': 'Bearer secret-token'});
+      expect(externalGateway.headers, isEmpty);
+    });
   });
 }

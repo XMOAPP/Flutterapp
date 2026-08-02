@@ -64,7 +64,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
     }
   }
 
-  bool get _isAdmin => widget.room.ownPowerLevel >= 50;
+  bool get _isAdmin => widget.room.ownPowerLevel >= PowerLevel.moderator;
 
   @override
   Widget build(BuildContext context) {

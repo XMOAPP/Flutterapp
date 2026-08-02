@@ -78,11 +78,26 @@ class MatrixMediaHelper {
 
     final isMatrixMedia = normalized.path.startsWith('/_matrix/client/') &&
         normalized.path.contains('/media/');
+    final homeserver = Uri.parse(homeserverUrl);
+    final isOwnAzureChunkGateway = _sameOrigin(normalized, homeserver) &&
+        normalized.path == '/auth/media/chunks/azure/download';
     return MatrixMediaRequest(
       uri: normalized,
-      headers:
-          isMatrixMedia ? _authorizationHeaders() : const <String, String>{},
+      headers: isMatrixMedia || isOwnAzureChunkGateway
+          ? _authorizationHeaders()
+          : const <String, String>{},
     );
+  }
+
+  bool _sameOrigin(Uri first, Uri second) {
+    int effectivePort(Uri uri) {
+      if (uri.hasPort) return uri.port;
+      return uri.scheme == 'https' ? 443 : 80;
+    }
+
+    return first.scheme == second.scheme &&
+        first.host == second.host &&
+        effectivePort(first) == effectivePort(second);
   }
 
   Uri _replaceQueryParameters(Uri uri, Map<String, String> query) {

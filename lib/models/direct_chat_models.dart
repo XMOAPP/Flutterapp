@@ -1,5 +1,7 @@
 import 'package:matrix/matrix.dart';
 
+import '../utils/message_presentation.dart';
+
 /// Models for direct chat (DM) features
 
 /// User profile information for direct chats
@@ -83,7 +85,7 @@ class SharedMediaItem {
       type: type,
       url: content['url'] as String?,
       thumbnailUrl: info?['thumbnail_url'] as String?,
-      filename: event.body,
+      filename: matrixAttachmentFileName(event),
       fileSize: info?['size'] as int?,
       timestamp: event.originServerTs,
       senderId: event.senderId,

@@ -54,9 +54,9 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
     if (session == null && groupCall == null) return;
     if (groupCall != null && session == null) {
       _stateSub?.cancel();
-      _stateSub = groupCall.onGroupCallState.stream.listen((state) {
+      _stateSub = groupCall.stateStream.listen((state) {
         if (!mounted) return;
-        if (state == GroupCallState.Ended) {
+        if (state == GroupCallState.ended) {
           _voip.pipMode.value = false;
         }
         setState(() {});
@@ -138,7 +138,7 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
   Future<void> _endCall() async {
     final session = _voip.activeSession;
     if (session == null) return;
-    await session.hangup(CallErrorCode.UserHangup);
+    await session.hangup(reason: CallErrorCode.userHangup);
   }
 
   void _maximize() => _voip.maximizeCall();
@@ -181,8 +181,8 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
     );
   }
 
-  Widget _buildGroupCard(GroupCall groupCall) {
-    final isVideo = groupCall.type == GroupCallType.Video;
+  Widget _buildGroupCard(XmoGroupCall groupCall) {
+    final isVideo = groupCall.type == XmoGroupCallType.video;
     final remoteStreams = groupCall.userMediaStreams.where(
       (stream) => !stream.isLocal(),
     );
@@ -457,7 +457,6 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
 
   webrtc.RTCVideoRenderer? _rendererFor(WrappedMediaStream? stream) {
     if (stream?.stream == null) return null;
-    final renderer = stream?.renderer;
-    return renderer is webrtc.RTCVideoRenderer ? renderer : null;
+    return VoipService().rendererFor(stream);
   }
 }

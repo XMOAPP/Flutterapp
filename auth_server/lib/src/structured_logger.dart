@@ -15,11 +15,21 @@ class StructuredLogger {
   }) {
     logInfo('request', {
       'method': request.method,
-      'path': request.uri.path,
+      'path': sanitizeRequestPath(request.uri.path),
       'statusCode': statusCode,
       'elapsedMs': elapsed.inMilliseconds,
     });
   }
+}
+
+String sanitizeRequestPath(String path) {
+  return path.replaceAllMapped(
+    RegExp(
+      r'(^|/)(invites)/[A-Za-z0-9_-]{40,64}/(preview|redeem)(?=/|$)',
+    ),
+    (match) =>
+        '${match.group(1)}${match.group(2)}/<redacted>/${match.group(3)}',
+  );
 }
 
 void logInfo(String message, [Map<String, Object?> context = const {}]) {

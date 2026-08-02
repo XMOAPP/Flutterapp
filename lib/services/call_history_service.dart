@@ -3,6 +3,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:matrix/matrix.dart';
 
 import 'matrix_service.dart';
+import 'xmo_group_call.dart';
 
 enum CallHistoryKind { direct, group }
 
@@ -174,7 +175,7 @@ class CallHistoryService {
   }
 
   Future<void> recordGroupCall(
-    GroupCall groupCall, {
+    XmoGroupCall groupCall, {
     required CallHistoryDirection direction,
     required CallHistoryStatus status,
     Duration? duration,
@@ -184,7 +185,7 @@ class CallHistoryService {
       kind: CallHistoryKind.group,
       direction: direction,
       status: status,
-      video: groupCall.type == GroupCallType.Video,
+      video: groupCall.type == XmoGroupCallType.video,
       duration: duration,
     );
   }
