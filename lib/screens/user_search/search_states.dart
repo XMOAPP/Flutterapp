@@ -45,8 +45,11 @@ class ErrorState extends StatelessWidget {
       child: Center(
         child: Column(
           children: [
-            const Icon(Icons.person_search_outlined,
-                color: kMediumGrey, size: 48),
+            const Icon(
+              Icons.person_search_outlined,
+              color: kMediumGrey,
+              size: 48,
+            ),
             const SizedBox(height: 12),
             Text(
               error,
@@ -85,7 +88,7 @@ class EmptyState extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            'Type an XMO username',
+            'Type an XMO @username',
             style: GoogleFonts.inter(color: kMediumGrey, fontSize: 12),
           ),
           const SizedBox(height: 8),

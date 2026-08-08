@@ -125,9 +125,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final mediaQuery = MediaQuery.of(context);
+    final size = MediaQuery.sizeOf(context);
+    final viewInsets = MediaQuery.viewInsetsOf(context);
     final horizontalPadding =
-        (mediaQuery.size.width * 0.08).clamp(20.0, 28.0).toDouble();
+        (size.width * 0.08).clamp(20.0, 28.0).toDouble();
 
     return Scaffold(
       backgroundColor: kBlack,
@@ -145,7 +146,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             horizontalPadding,
             24,
             horizontalPadding,
-            24 + mediaQuery.viewInsets.bottom,
+            24 + viewInsets.bottom,
           ),
           child: Form(
             key: _formKey,

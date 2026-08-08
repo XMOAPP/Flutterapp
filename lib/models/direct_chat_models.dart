@@ -1,5 +1,6 @@
 import 'package:matrix/matrix.dart';
 
+import '../utils/matrix_identity.dart';
 import '../utils/message_presentation.dart';
 
 /// Models for direct chat (DM) features
@@ -33,7 +34,10 @@ class DirectChatProfile {
   factory DirectChatProfile.fromUser(User user, Room room) {
     return DirectChatProfile(
       userId: user.id,
-      displayName: user.displayName ?? user.id,
+      displayName: MatrixIdentity.displayName(
+        userId: user.id,
+        candidate: user.displayName,
+      ),
       avatarUrl: user.avatarUrl?.toString(),
       isOnline: false, // Will be fetched separately via presence API
       lastSeen: null, // Will be fetched separately via presence API
@@ -93,12 +97,7 @@ class SharedMediaItem {
   }
 }
 
-enum MediaType {
-  image,
-  video,
-  audio,
-  file,
-}
+enum MediaType { image, video, audio, file }
 
 /// Chat settings for direct chat
 class DirectChatSettings {
@@ -186,10 +185,7 @@ class VoiceMessage {
     this.currentPosition = Duration.zero,
   });
 
-  VoiceMessage copyWith({
-    bool? isPlaying,
-    Duration? currentPosition,
-  }) {
+  VoiceMessage copyWith({bool? isPlaying, Duration? currentPosition}) {
     return VoiceMessage(
       eventId: eventId,
       url: url,

@@ -32,7 +32,7 @@ class UserSearchBar extends StatelessWidget {
           autofocus: true,
           style: _searchTextStyle,
           decoration: InputDecoration(
-            hintText: 'Search by username...',
+            hintText: 'Search @username, groups, channels',
             hintStyle: _hintTextStyle,
             prefixIcon: const Icon(Icons.search, color: kLightGrey, size: 20),
             suffixIcon: controller.text.isNotEmpty
@@ -42,8 +42,10 @@ class UserSearchBar extends StatelessWidget {
                   )
                 : null,
             border: InputBorder.none,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 14,
+            ),
           ),
           onChanged: onChanged,
         ),

@@ -4,3 +4,6 @@ import 'dart:typed_data';
 Future<Uint8List?> generateNativeThumbnail(Uint8List videoBytes) async {
   return null;
 }
+
+Future<Uint8List?> generateNativeThumbnailFromPath(String videoPath) async =>
+    null;

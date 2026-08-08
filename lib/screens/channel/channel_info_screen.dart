@@ -164,10 +164,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
           // Subscriber Count
           Text(
             '$subscriberCount subscriber${subscriberCount == 1 ? '' : 's'}',
-            style: GoogleFonts.inter(
-              color: kLightGrey,
-              fontSize: 14,
-            ),
+            style: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
           ),
         ],
       ),
@@ -193,16 +190,8 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
     }
 
     return [
-      _buildMenuItem(
-        value: 'live',
-        icon: Icons.live_tv,
-        label: 'Live Stream',
-      ),
-      _buildMenuItem(
-        value: 'edit',
-        icon: Icons.edit,
-        label: 'Edit Channel',
-      ),
+      _buildMenuItem(value: 'live', icon: Icons.live_tv, label: 'Live Stream'),
+      _buildMenuItem(value: 'edit', icon: Icons.edit, label: 'Edit Channel'),
       _buildMenuItem(
         value: 'delete',
         icon: Icons.delete,
@@ -231,13 +220,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
         children: [
           Icon(icon, color: color, size: 20),
           const SizedBox(width: 12),
-          Text(
-            label,
-            style: GoogleFonts.inter(
-              color: color,
-              fontSize: 14,
-            ),
-          ),
+          Text(label, style: GoogleFonts.inter(color: color, fontSize: 14)),
         ],
       ),
     );
@@ -382,10 +365,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
         children: [
           Text(
             description,
-            style: GoogleFonts.inter(
-              color: kWhite,
-              fontSize: 14,
-            ),
+            style: GoogleFonts.inter(color: kWhite, fontSize: 14),
           ),
         ],
       ),
@@ -522,8 +502,10 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
         children: [
           ListTile(
             dense: true,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 8,
+            ),
             leading: const Icon(Icons.people, color: kLimeGreen, size: 20),
             title: Text(
               'Subscribers',
@@ -563,10 +545,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
               padding: const EdgeInsets.all(8),
               child: Text(
                 'and ${_subscribers.length - 3} more...',
-                style: GoogleFonts.inter(
-                  color: kLightGrey,
-                  fontSize: 11,
-                ),
+                style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
               ),
             ),
         ],

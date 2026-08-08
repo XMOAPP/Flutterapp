@@ -181,10 +181,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
           // Member Count
           Text(
             '$memberCount members',
-            style: GoogleFonts.inter(
-              color: kLightGrey,
-              fontSize: 14,
-            ),
+            style: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
           ),
         ],
       ),
@@ -194,11 +191,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   List<PopupMenuEntry<String>> _buildMenuItems() {
     return [
       if (_isOwner || _canEditSettings)
-        _buildMenuItem(
-          value: 'edit',
-          icon: Icons.edit,
-          label: 'Edit Group',
-        ),
+        _buildMenuItem(value: 'edit', icon: Icons.edit, label: 'Edit Group'),
       if (_isOwner)
         _buildMenuItem(
           value: 'delete',
@@ -235,13 +228,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         children: [
           Icon(icon, color: color, size: 20),
           const SizedBox(width: 12),
-          Text(
-            label,
-            style: GoogleFonts.inter(
-              color: color,
-              fontSize: 14,
-            ),
-          ),
+          Text(label, style: GoogleFonts.inter(color: color, fontSize: 14)),
         ],
       ),
     );
@@ -263,10 +250,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => MemberListScreen(
-              room: widget.room,
-              members: _members,
-            ),
+            builder: (_) =>
+                MemberListScreen(room: widget.room, members: _members),
           ),
         ).then((_) => _loadGroupData());
         break;
@@ -307,8 +292,9 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content:
-              Text('Unable to start ${video ? 'video' : 'voice'} call: $e'),
+          content: Text(
+            'Unable to start ${video ? 'video' : 'voice'} call: $e',
+          ),
           backgroundColor: Colors.red,
         ),
       );
@@ -433,10 +419,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         children: [
           Text(
             description,
-            style: GoogleFonts.inter(
-              color: kWhite,
-              fontSize: 14,
-            ),
+            style: GoogleFonts.inter(color: kWhite, fontSize: 14),
           ),
         ],
       ),
@@ -607,8 +590,10 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         children: [
           ListTile(
             dense: true,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 8,
+            ),
             leading: const Icon(Icons.group, color: kLimeGreen, size: 20),
             title: Text(
               'Members',
@@ -631,27 +616,22 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => MemberListScreen(
-                    room: widget.room,
-                    members: _members,
-                  ),
+                  builder: (_) =>
+                      MemberListScreen(room: widget.room, members: _members),
                 ),
               ).then((_) => _loadGroupData());
             },
           ),
           // Show first 3 members
-          ..._members.take(3).map(
-                (member) => _buildMemberTile(member, showRole: true),
-              ),
+          ..._members
+              .take(3)
+              .map((member) => _buildMemberTile(member, showRole: true)),
           if (_members.length > 3)
             Padding(
               padding: const EdgeInsets.all(8),
               child: Text(
                 'and ${_members.length - 3} more...',
-                style: GoogleFonts.inter(
-                  color: kLightGrey,
-                  fontSize: 11,
-                ),
+                style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
               ),
             ),
         ],
@@ -672,10 +652,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       ),
       title: Text(
         member.displayName,
-        style: GoogleFonts.inter(
-          color: kWhite,
-          fontSize: 13,
-        ),
+        style: GoogleFonts.inter(color: kWhite, fontSize: 13),
       ),
       trailing: showRole ? _buildRoleBadge(member.role) : null,
     );

@@ -26,6 +26,7 @@ class XmoVideoQualitySource {
     required this.fileName,
     required this.mimeType,
     required this.durationMs,
+    this.sourcePath,
     this.isCancelled,
   });
 
@@ -33,6 +34,7 @@ class XmoVideoQualitySource {
   final String fileName;
   final String mimeType;
   final int? durationMs;
+  final String? sourcePath;
   final bool Function()? isCancelled;
 }
 
@@ -84,6 +86,7 @@ class XmoChunkedMediaUploadService {
     required String videoFileName,
     required String videoMimeType,
     required int? durationMs,
+    String? sourcePath,
     required XmoEncryptedChunkUploader uploadChunk,
     bool Function()? isCancelled,
   }) async {
@@ -113,6 +116,7 @@ class XmoChunkedMediaUploadService {
           fileName: videoFileName,
           mimeType: videoMimeType,
           durationMs: durationMs,
+          sourcePath: sourcePath,
           isCancelled: isCancelled,
         ),
         isCancelled,
@@ -161,6 +165,7 @@ class XmoChunkedMediaUploadService {
     required String videoFileName,
     required String videoMimeType,
     required int? durationMs,
+    String? sourcePath,
     bool Function()? isCancelled,
   }) async {
     final normalizer = sourceNormalizer;
@@ -178,6 +183,7 @@ class XmoChunkedMediaUploadService {
           fileName: videoFileName,
           mimeType: videoMimeType,
           durationMs: durationMs,
+          sourcePath: sourcePath,
           isCancelled: isCancelled,
         ),
       );

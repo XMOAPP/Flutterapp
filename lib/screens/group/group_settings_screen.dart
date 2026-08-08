@@ -9,6 +9,7 @@ import '../../providers/matrix_provider.dart';
 import '../../services/group_service.dart';
 import '../../services/matrix_service.dart';
 import '../../services/room_controls_service.dart';
+import '../../utils/matrix_identity.dart';
 import '../../widgets/story/story_avatar.dart';
 import '../camera_capture_screen.dart';
 
@@ -62,10 +63,7 @@ class _SettingsDropdown<T> extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
-                  style: GoogleFonts.inter(
-                    color: kLightGrey,
-                    fontSize: 11,
-                  ),
+                  style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
                 ),
               ],
             ),
@@ -199,7 +197,8 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.first;
         debugPrint(
-            '[GroupSettings] File selected: ${file.name}, bytes: ${file.bytes?.length}');
+          '[GroupSettings] File selected: ${file.name}, bytes: ${file.bytes?.length}',
+        );
         if (file.bytes != null) {
           setState(() {
             _selectedAvatarBytes = file.bytes;
@@ -228,10 +227,8 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
     final result = await Navigator.push<CameraCaptureResult>(
       context,
       MaterialPageRoute(
-        builder: (_) => const CameraCaptureScreen(
-          allowVideo: false,
-          showCaption: false,
-        ),
+        builder: (_) =>
+            const CameraCaptureScreen(allowVideo: false, showCaption: false),
       ),
     );
     if (!mounted || result == null || result.bytes.isEmpty) return;
@@ -271,9 +268,9 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
     if (!mounted) return;
     setState(() => _loadingJoinRequests = true);
     try {
-      final requests = await widget.room.requestParticipants(
-        const [Membership.knock],
-      );
+      final requests = await widget.room.requestParticipants(const [
+        Membership.knock,
+      ]);
       if (!mounted) return;
       setState(() {
         _joinRequests = requests;
@@ -313,12 +310,15 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
       await action();
       if (!mounted) return;
       setState(() {
-        _joinRequests =
-            _joinRequests.where((item) => item.id != user.id).toList();
+        _joinRequests = _joinRequests
+            .where((item) => item.id != user.id)
+            .toList();
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${user.calcDisplayname()} $actionLabel'),
+          content: Text(
+            '${MatrixIdentity.displayName(userId: user.id, candidate: user.displayName)} $actionLabel',
+          ),
           backgroundColor: kLimeGreen,
         ),
       );
@@ -364,14 +364,15 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
         );
       }
 
-      final immutableJoinMode =
-          RoomControlsService.immutableJoinModeFor(widget.room);
+      final immutableJoinMode = RoomControlsService.immutableJoinModeFor(
+        widget.room,
+      );
       await RoomControlsService.setJoinMode(widget.room, immutableJoinMode);
       final directoryVisibilitySaved =
           await RoomControlsService.setRoomDirectoryVisibility(
-        widget.room,
-        immutableJoinMode,
-      );
+            widget.room,
+            immutableJoinMode,
+          );
       await RoomControlsService.setSlowModeSeconds(
         widget.room,
         _slowModeSeconds,
@@ -395,8 +396,9 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                   ? 'Settings saved successfully'
                   : 'Settings saved. Server did not allow public directory listing.',
             ),
-            backgroundColor:
-                directoryVisibilitySaved ? kLimeGreen : Colors.orangeAccent,
+            backgroundColor: directoryVisibilitySaved
+                ? kLimeGreen
+                : Colors.orangeAccent,
           ),
         );
         Navigator.pop(context, true);
@@ -509,18 +511,12 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
           Expanded(
             child: Text(
               action,
-              style: GoogleFonts.inter(
-                color: kWhite,
-                fontSize: 12,
-              ),
+              style: GoogleFonts.inter(color: kWhite, fontSize: 12),
             ),
           ),
           Text(
             level,
-            style: GoogleFonts.inter(
-              color: kLightGrey,
-              fontSize: 11,
-            ),
+            style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
           ),
         ],
       ),
@@ -597,12 +593,16 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
 
   Widget _buildJoinRequestTile(User user) {
     final busy = _joinRequestActions.contains(user.id);
+    final displayName = MatrixIdentity.displayName(
+      userId: user.id,
+      candidate: user.displayName,
+    );
     return Padding(
       padding: const EdgeInsets.only(top: 10),
       child: Row(
         children: [
           StoryAvatar(
-            userName: user.calcDisplayname(),
+            userName: displayName,
             avatarUrl: user.avatarUrl?.toString(),
             size: 38,
           ),
@@ -612,7 +612,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  user.calcDisplayname(),
+                  displayName,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.inter(
@@ -622,7 +622,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                   ),
                 ),
                 Text(
-                  user.id,
+                  MatrixIdentity.usernameLabel(user.id),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
@@ -809,10 +809,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                   const SizedBox(height: 6),
                   Text(
                     'Tap to change avatar',
-                    style: GoogleFonts.inter(
-                      color: kLightGrey,
-                      fontSize: 11,
-                    ),
+                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
                   ),
                 ],
               ),
@@ -841,8 +838,10 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
                 ),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -904,8 +903,11 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.admin_panel_settings_outlined,
-                          color: kLimeGreen, size: 18),
+                      const Icon(
+                        Icons.admin_panel_settings_outlined,
+                        color: kLimeGreen,
+                        size: 18,
+                      ),
                       const SizedBox(width: 8),
                       Text(
                         'Permissions',
@@ -986,9 +988,13 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                   _buildPermissionRow('Invite Users', 'Moderators and above'),
                   _buildPermissionRow('Pin Messages', 'Moderators and above'),
                   _buildPermissionRow(
-                      'Kick/Ban Members', 'Moderators and above'),
+                    'Kick/Ban Members',
+                    'Moderators and above',
+                  ),
                   _buildPermissionRow(
-                      'Delete Messages', 'Moderators and above'),
+                    'Delete Messages',
+                    'Moderators and above',
+                  ),
                   _buildPermissionRow('Edit Group Info', 'Admins only'),
                   const SizedBox(height: 6),
                   Text(

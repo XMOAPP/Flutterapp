@@ -14,7 +14,8 @@ import '../../screens/web_video_view_stub.dart'
     if (dart.library.js_interop) '../../screens/web_video_view.dart'
     as web_video;
 import '../../screens/native_share_stub.dart'
-    if (dart.library.io) '../../screens/native_share.dart' as native_share;
+    if (dart.library.io) '../../screens/native_share.dart'
+    as native_share;
 import 'native_video_controller_stub.dart'
     if (dart.library.io) 'native_video_controller_io.dart';
 
@@ -26,6 +27,7 @@ class FullscreenVideoPlayer extends StatefulWidget {
   final Future<MatrixFile>? videoFuture;
   final Future<MatrixFile> Function()? downloadFuture;
   final Uri? videoUrl;
+  final Uri? videoContentUri;
   final Map<String, String> videoHeaders;
   final String loadingLabel;
   final Future<void> Function()? onReply;
@@ -42,9 +44,10 @@ class FullscreenVideoPlayer extends StatefulWidget {
     this.onReply,
     this.onDelete,
     this.onDispose,
-  })  : videoFuture = null,
-        videoUrl = null,
-        videoHeaders = const <String, String>{};
+  }) : videoFuture = null,
+       videoUrl = null,
+       videoContentUri = null,
+       videoHeaders = const <String, String>{};
 
   const FullscreenVideoPlayer.loading({
     super.key,
@@ -55,10 +58,11 @@ class FullscreenVideoPlayer extends StatefulWidget {
     this.onReply,
     this.onDelete,
     this.onDispose,
-  })  : videoBytes = null,
-        mimeType = null,
-        videoUrl = null,
-        videoHeaders = const <String, String>{};
+  }) : videoBytes = null,
+       mimeType = null,
+       videoUrl = null,
+       videoContentUri = null,
+       videoHeaders = const <String, String>{};
 
   const FullscreenVideoPlayer.network({
     super.key,
@@ -71,8 +75,24 @@ class FullscreenVideoPlayer extends StatefulWidget {
     this.onReply,
     this.onDelete,
     this.onDispose,
-  })  : videoBytes = null,
-        videoFuture = null;
+  }) : videoBytes = null,
+       videoFuture = null,
+       videoContentUri = null;
+
+  const FullscreenVideoPlayer.contentUri({
+    super.key,
+    required this.videoContentUri,
+    required this.title,
+    required this.mimeType,
+    this.loadingLabel = 'Opening...',
+    this.downloadFuture,
+    this.onReply,
+    this.onDelete,
+    this.onDispose,
+  }) : videoBytes = null,
+       videoFuture = null,
+       videoUrl = null,
+       videoHeaders = const <String, String>{};
 
   @override
   State<FullscreenVideoPlayer> createState() => _FullscreenVideoPlayerState();
@@ -96,7 +116,9 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
     _videoBytes = widget.videoBytes;
     _mimeType = widget.mimeType;
     final future = widget.videoFuture;
-    if (widget.videoUrl != null) {
+    if (widget.videoContentUri != null) {
+      _nativeInit = _initContentUriVideo();
+    } else if (widget.videoUrl != null) {
       _nativeInit = _initNetworkVideo();
     } else if (future != null) {
       _nativeInit = _loadAndInitVideo(future);
@@ -169,6 +191,17 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
     setState(() => _nativeController = controller);
   }
 
+  Future<void> _initContentUriVideo() async {
+    final uri = widget.videoContentUri;
+    if (uri == null) return;
+    final controller = await createNativeContentUriVideoController(uri: uri);
+    if (!mounted) {
+      await controller.dispose();
+      return;
+    }
+    setState(() => _nativeController = controller);
+  }
+
   Future<void> _loadAndInitVideo(Future<MatrixFile> future) async {
     try {
       final matrixFile = await future;
@@ -208,9 +241,11 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(kIsWeb
-              ? 'Downloaded: ${video.fileName}'
-              : 'Downloaded successfully'),
+          content: Text(
+            kIsWeb
+                ? 'Downloaded: ${video.fileName}'
+                : 'Downloaded successfully',
+          ),
           backgroundColor: kLimeGreen,
           duration: const Duration(seconds: 2),
         ),
@@ -352,8 +387,9 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
   }
 
   String _videoFileName(String mimeType) {
-    final title =
-        widget.title.trim().isEmpty ? 'xmo_video' : widget.title.trim();
+    final title = widget.title.trim().isEmpty
+        ? 'xmo_video'
+        : widget.title.trim();
     final dotIndex = title.lastIndexOf('.');
     if (dotIndex > 0 && dotIndex < title.length - 1) return title;
 
@@ -441,8 +477,10 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
                           const SizedBox(width: 12),
                           Text(
                             'Reply',
-                            style:
-                                GoogleFonts.inter(color: kWhite, fontSize: 14),
+                            style: GoogleFonts.inter(
+                              color: kWhite,
+                              fontSize: 14,
+                            ),
                           ),
                         ],
                       ),
@@ -452,13 +490,18 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
                       value: 'delete',
                       child: Row(
                         children: [
-                          const Icon(Icons.delete_outline,
-                              color: Colors.red, size: 20),
+                          const Icon(
+                            Icons.delete_outline,
+                            color: Colors.red,
+                            size: 20,
+                          ),
                           const SizedBox(width: 12),
                           Text(
                             'Delete Message',
                             style: GoogleFonts.inter(
-                                color: Colors.red, fontSize: 14),
+                              color: Colors.red,
+                              fontSize: 14,
+                            ),
                           ),
                         ],
                       ),
@@ -503,11 +546,7 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
       if (bytes == null || mimeType == null) {
         return _buildLoading();
       }
-      return web_video.createVideoView(
-        bytes,
-        mimeType,
-        _viewId,
-      );
+      return web_video.createVideoView(bytes, mimeType, _viewId);
     }
 
     return FutureBuilder<void>(
@@ -721,8 +760,11 @@ class _NativeVideoControlsState extends State<_NativeVideoControls> {
                 onPressed: _toggleMute,
               ),
               IconButton(
-                icon: const Icon(Icons.screen_rotation_rounded,
-                    color: kWhite, size: 24),
+                icon: const Icon(
+                  Icons.screen_rotation_rounded,
+                  color: kWhite,
+                  size: 24,
+                ),
                 onPressed: widget.onRotate,
               ),
             ],

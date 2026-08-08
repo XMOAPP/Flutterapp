@@ -75,8 +75,9 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     if (_currentUserIndex == -1) {
       // My stories
       setState(() {
-        _currentUserStories =
-            storyProvider.myStories.where((s) => !s.isExpired).toList();
+        _currentUserStories = storyProvider.myStories
+            .where((s) => !s.isExpired)
+            .toList();
         _applyInitialStoryIndex();
       });
     } else if (_currentUserIndex >= 0 &&
@@ -312,9 +313,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     setState(() => _isPaused = true);
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => const StoryCreatorScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const StoryCreatorScreen()),
     ).then((_) {
       if (!mounted) return;
       setState(() => _isPaused = false);
@@ -326,18 +325,15 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     final text = _replyController.text.trim();
     if (text.isEmpty || _sendingStoryReply) return;
 
-    await _sendStoryDirectMessage(
-      story,
-      text,
-      successMessage: 'Reply sent',
-    );
+    await _sendStoryDirectMessage(story, text, successMessage: 'Reply sent');
   }
 
   void _applyInitialStoryIndex() {
     final initialStoryId = widget.initialStoryId;
     if (initialStoryId == null || initialStoryId.isEmpty) return;
-    final index =
-        _currentUserStories.indexWhere((story) => story.id == initialStoryId);
+    final index = _currentUserStories.indexWhere(
+      (story) => story.id == initialStoryId,
+    );
     if (index != -1) _currentStoryIndex = index;
   }
 
@@ -466,16 +462,14 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     if (_currentUserStories.isEmpty) {
       return const Scaffold(
         backgroundColor: kBlack,
-        body: Center(
-          child: CircularProgressIndicator(color: kLimeGreen),
-        ),
+        body: Center(child: CircularProgressIndicator(color: kLimeGreen)),
       );
     }
 
     final currentStory = _currentUserStories[_currentStoryIndex];
     final isMyStory = _isOwnStory(currentStory);
     final canReply = !isMyStory && currentStory.userId.isNotEmpty;
-    final bottomInset = MediaQuery.of(context).padding.bottom;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
     final caption = currentStory.caption?.trim();
     final hasCaption = caption != null && caption.isNotEmpty;
 
@@ -483,13 +477,13 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
       backgroundColor: kBlack,
       body: GestureDetector(
         onTapDown: (details) {
-          final mediaQuery = MediaQuery.of(context);
-          final screenWidth = mediaQuery.size.width;
-          final screenHeight = mediaQuery.size.height;
+          final screenSize = MediaQuery.sizeOf(context);
+          final screenWidth = screenSize.width;
+          final screenHeight = screenSize.height;
           final tapY = details.globalPosition.dy;
 
           // Let header and bottom action buttons handle their own taps.
-          if (tapY < mediaQuery.padding.top + 72 ||
+          if (tapY < MediaQuery.paddingOf(context).top + 72 ||
               ((isMyStory || canReply) &&
                   tapY >
                       screenHeight - (bottomInset + (hasCaption ? 150 : 92)))) {
@@ -531,7 +525,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
 
             // Progress bars
             Positioned(
-              top: MediaQuery.of(context).padding.top + 8,
+              top: MediaQuery.paddingOf(context).top + 8,
               left: 8,
               right: 8,
               child: _buildProgressBars(),
@@ -539,7 +533,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
 
             // Header
             Positioned(
-              top: MediaQuery.of(context).padding.top + 28,
+              top: MediaQuery.paddingOf(context).top + 28,
               left: 12,
               right: 12,
               child: _buildHeader(currentStory, isMyStory),
@@ -547,9 +541,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
 
             if (isMyStory || canReply)
               Positioned(
-                key: ValueKey(
-                  'story-actions:${currentStory.id}:$isMyStory',
-                ),
+                key: ValueKey('story-actions:${currentStory.id}:$isMyStory'),
                 left: 0,
                 right: 0,
                 bottom: 0,
@@ -585,8 +577,9 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   Widget _buildStoryContent(Story story) {
     if (_isVideoStory(story)) {
       final matrixProvider = context.read<MatrixProvider>();
-      final mediaRequest =
-          matrixProvider.service.getMediaRequest(story.mediaUrl);
+      final mediaRequest = matrixProvider.service.getMediaRequest(
+        story.mediaUrl,
+      );
 
       if (mediaRequest != null) {
         return StoryVideoPlayer.url(
@@ -616,8 +609,9 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     if (_isImageStory(story)) {
       // Convert MXC URL to HTTP URL
       final matrixProvider = context.read<MatrixProvider>();
-      final mediaRequest =
-          matrixProvider.service.getMediaRequest(story.mediaUrl);
+      final mediaRequest = matrixProvider.service.getMediaRequest(
+        story.mediaUrl,
+      );
 
       if (mediaRequest != null) {
         return Center(
@@ -632,7 +626,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
                   color: kLimeGreen,
                   value: loadingProgress.expectedTotalBytes != null
                       ? loadingProgress.cumulativeBytesLoaded /
-                          loadingProgress.expectedTotalBytes!
+                            loadingProgress.expectedTotalBytes!
                       : null,
                 ),
               );
@@ -703,8 +697,8 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
                   widthFactor: index == _currentStoryIndex
                       ? progress
                       : index < _currentStoryIndex
-                          ? 1.0
-                          : 0.0,
+                      ? 1.0
+                      : 0.0,
                   child: Container(
                     decoration: BoxDecoration(
                       color: kWhite,
@@ -745,10 +739,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
               ),
               Text(
                 _formatTimeAgo(story.createdAt),
-                style: GoogleFonts.inter(
-                  color: Colors.white70,
-                  fontSize: 11,
-                ),
+                style: GoogleFonts.inter(color: Colors.white70, fontSize: 11),
               ),
             ],
           ),
@@ -768,10 +759,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
       child: Text(
         caption,
         textAlign: TextAlign.center,
-        style: GoogleFonts.inter(
-          color: kWhite,
-          fontSize: 15,
-        ),
+        style: GoogleFonts.inter(color: kWhite, fontSize: 15),
       ),
     );
   }
@@ -785,14 +773,8 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
           label: '${story.viewCount}',
           onTap: _viewStoryViewers,
         ),
-        _buildActionButton(
-          icon: Icons.add_circle_outline,
-          onTap: _addStory,
-        ),
-        _buildActionButton(
-          icon: Icons.delete_outline,
-          onTap: _deleteStory,
-        ),
+        _buildActionButton(icon: Icons.add_circle_outline, onTap: _addStory),
+        _buildActionButton(icon: Icons.delete_outline, onTap: _deleteStory),
       ],
     );
   }
@@ -815,8 +797,10 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
             children: [
               Expanded(
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: kDarkGrey,
                     borderRadius: BorderRadius.circular(24),
@@ -835,8 +819,9 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
                             emojiPickerOpen
                                 ? Icons.keyboard_alt_outlined
                                 : Icons.emoji_emotions_outlined,
-                            color:
-                                _sendingStoryReply ? kMediumGrey : kLightGrey,
+                            color: _sendingStoryReply
+                                ? kMediumGrey
+                                : kLightGrey,
                             size: 24,
                           ),
                         ),
@@ -854,10 +839,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
                           textInputAction: TextInputAction.newline,
                           textCapitalization: TextCapitalization.sentences,
                           textAlignVertical: TextAlignVertical.center,
-                          style: GoogleFonts.inter(
-                            color: kWhite,
-                            fontSize: 17,
-                          ),
+                          style: GoogleFonts.inter(color: kWhite, fontSize: 17),
                           decoration: InputDecoration(
                             hintText: 'Reply to story',
                             hintStyle: GoogleFonts.inter(

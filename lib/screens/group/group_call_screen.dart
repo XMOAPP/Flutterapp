@@ -9,15 +9,13 @@ import 'package:matrix/matrix.dart';
 import '../../services/matrix_service.dart';
 import '../../services/voip_service.dart';
 import '../../theme.dart';
+import '../../utils/matrix_identity.dart';
 import '../../widgets/story/story_avatar.dart';
 
 class GroupCallScreen extends StatefulWidget {
   final XmoGroupCall groupCall;
 
-  const GroupCallScreen({
-    super.key,
-    required this.groupCall,
-  });
+  const GroupCallScreen({super.key, required this.groupCall});
 
   @override
   State<GroupCallScreen> createState() => _GroupCallScreenState();
@@ -43,12 +41,8 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
   void initState() {
     super.initState();
     VoipService().enterFullscreenCallRoute();
-    _subscriptions.add(
-      _call.eventStream.listen((_) => _handleCallUpdate()),
-    );
-    _subscriptions.add(
-      _call.stateStream.listen((_) => _handleCallUpdate()),
-    );
+    _subscriptions.add(_call.eventStream.listen((_) => _handleCallUpdate()));
+    _subscriptions.add(_call.stateStream.listen((_) => _handleCallUpdate()));
     _subscriptions.add(
       _call.streamAddStream.listen((_) => _handleCallUpdate()),
     );
@@ -182,9 +176,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(
-        const SnackBar(content: Text('Call link copied')),
-      );
+      ..showSnackBar(const SnackBar(content: Text('Call link copied')));
   }
 
   Future<void> _enableSpeaker() async {
@@ -261,10 +253,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
               Positioned(
                 top: 8,
                 right: 8,
-                child: _topBarButton(
-                  icon: Icons.link,
-                  onTap: _copyCallLink,
-                ),
+                child: _topBarButton(icon: Icons.link, onTap: _copyCallLink),
               ),
             ],
           ),
@@ -278,8 +267,9 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
   ) {
     final byUserId = <String, _GroupCallParticipant>{};
     for (final stream in streams) {
-      final user =
-          _call.room.getParticipants().where((u) => u.id == stream.userId);
+      final user = _call.room.getParticipants().where(
+        (u) => u.id == stream.userId,
+      );
       byUserId[stream.userId] = _GroupCallParticipant.fromStream(
         stream,
         user: user.isEmpty ? null : user.first,
@@ -290,19 +280,21 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
         user.id,
         () => _GroupCallParticipant(
           userId: user.id,
-          name: user.calcDisplayname(),
+          name: MatrixIdentity.displayName(
+            userId: user.id,
+            candidate: user.displayName,
+          ),
           avatarUrl: user.avatarUrl?.toString(),
         ),
       );
     }
-    return byUserId.values.toList()
-      ..sort((a, b) {
-        if (a.userId == _call.activeSpeaker) return -1;
-        if (b.userId == _call.activeSpeaker) return 1;
-        if (a.isLocal) return -1;
-        if (b.isLocal) return 1;
-        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-      });
+    return byUserId.values.toList()..sort((a, b) {
+      if (a.userId == _call.activeSpeaker) return -1;
+      if (b.userId == _call.activeSpeaker) return 1;
+      if (a.isLocal) return -1;
+      if (b.isLocal) return 1;
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
   }
 
   Widget _buildHeader(String roomName) {
@@ -336,10 +328,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
     );
   }
 
-  Widget _topBarButton({
-    required IconData icon,
-    required VoidCallback onTap,
-  }) {
+  Widget _topBarButton({required IconData icon, required VoidCallback onTap}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -371,8 +360,8 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
           final stripHeight = secondaryStreams.isEmpty
               ? 0.0
               : constraints.maxHeight < 520
-                  ? 112.0
-                  : 138.0;
+              ? 112.0
+              : 138.0;
 
           return Column(
             children: [
@@ -428,8 +417,9 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
     }
     final activeSpeaker = _call.activeSpeaker;
     if (activeSpeaker != null) {
-      final activeMatches =
-          streams.where((stream) => stream.userId == activeSpeaker);
+      final activeMatches = streams.where(
+        (stream) => stream.userId == activeSpeaker,
+      );
       if (activeMatches.isNotEmpty) return activeMatches.first;
     }
     final remoteWithVideo = streams.where(
@@ -445,8 +435,8 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
 
   String? _avatarUrlForStream(WrappedMediaStream stream) {
     final users = _call.room.getParticipants().where(
-          (user) => user.id == stream.userId,
-        );
+      (user) => user.id == stream.userId,
+    );
     if (users.isEmpty) return null;
     return users.first.avatarUrl?.toString();
   }
@@ -581,9 +571,10 @@ class _GroupCallParticipant {
       userId: stream.userId,
       name: stream.isLocal()
           ? 'You'
-          : stream.displayName ??
-              user?.calcDisplayname() ??
-              MatrixService.cleanName(stream.userId),
+          : MatrixIdentity.displayName(
+              userId: stream.userId,
+              candidate: stream.displayName ?? user?.displayName,
+            ),
       avatarUrl: user?.avatarUrl?.toString(),
       muted: stream.isAudioMuted(),
       isLocal: stream.isLocal(),
@@ -614,7 +605,10 @@ class _VideoParticipantTile extends StatelessWidget {
     final rtcRenderer = VoipService().rendererFor(stream);
     final showVideo =
         rtcRenderer != null && stream.stream != null && !stream.isVideoMuted();
-    final name = stream.displayName ?? MatrixService.cleanName(stream.userId);
+    final name = MatrixIdentity.displayName(
+      userId: stream.userId,
+      candidate: stream.displayName,
+    );
 
     return Container(
       decoration: BoxDecoration(

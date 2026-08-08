@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -9,6 +11,7 @@ import '../../theme.dart';
 class StoryAvatar extends StatelessWidget {
   final String userName;
   final String? avatarUrl;
+  final Uint8List? avatarBytes;
   final double size;
   final Color backgroundColor;
   final Color textColor;
@@ -20,6 +23,7 @@ class StoryAvatar extends StatelessWidget {
     super.key,
     required this.userName,
     this.avatarUrl,
+    this.avatarBytes,
     required this.size,
     this.backgroundColor = const Color(0xFF2C2C2E),
     this.textColor = kLimeGreen,
@@ -39,13 +43,15 @@ class StoryAvatar extends StatelessWidget {
         color: backgroundColor,
         border: border,
       ),
-      child: ClipOval(
-        child: _buildContent(mediaRequest),
-      ),
+      child: ClipOval(child: _buildContent(mediaRequest)),
     );
   }
 
   Widget _buildContent(MatrixMediaRequest? mediaRequest) {
+    final bytes = avatarBytes;
+    if (bytes != null && bytes.isNotEmpty) {
+      return Image.memory(bytes, fit: BoxFit.cover);
+    }
     if (mediaRequest != null) {
       return Image.network(
         mediaRequest.uri.toString(),
@@ -67,10 +73,10 @@ class StoryAvatar extends StatelessWidget {
     }
 
     return context.read<MatrixProvider>().service.getMediaRequest(
-          value,
-          width: size.round() * 3,
-          height: size.round() * 3,
-        );
+      value,
+      width: size.round() * 3,
+      height: size.round() * 3,
+    );
   }
 
   Widget _buildFallback() {

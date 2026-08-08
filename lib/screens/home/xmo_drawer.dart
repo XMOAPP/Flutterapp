@@ -1,6 +1,7 @@
 // ignore_for_file: deprecated_member_use, use_build_context_synchronously
 
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -36,6 +37,7 @@ class XmoDrawer extends StatelessWidget {
           displayName: provider.displayName ?? 'Unknown',
           userId: provider.userId ?? '',
           avatarUrl: provider.avatarUrl,
+          avatarBytes: provider.avatarBytes,
         ),
         builder: (context, data, _) {
           return Column(
@@ -127,34 +129,34 @@ class XmoDrawer extends StatelessWidget {
             _openSavedMessages(context);
             return;
           }
+          if (label == 'Contacts') {
+            final messenger = ScaffoldMessenger.of(context);
+            Navigator.pop(context);
+            messenger.showSnackBar(
+              const SnackBar(content: Text('Contacts coming soon')),
+            );
+            return;
+          }
           Navigator.pop(context);
           if (label == 'My Profile') {
             Navigator.push(
               context,
-              MaterialPageRoute(
-                builder: (_) => const ProfileSettingsScreen(),
-              ),
+              MaterialPageRoute(builder: (_) => const ProfileSettingsScreen()),
             );
           } else if (label == 'Settings') {
             Navigator.push(
               context,
-              MaterialPageRoute(
-                builder: (_) => const AppSettingsScreen(),
-              ),
+              MaterialPageRoute(builder: (_) => const AppSettingsScreen()),
             );
           } else if (label == 'Archived Chats') {
             Navigator.push(
               context,
-              MaterialPageRoute(
-                builder: (_) => const ArchivedChatsScreen(),
-              ),
+              MaterialPageRoute(builder: (_) => const ArchivedChatsScreen()),
             );
           } else if (label == 'Donation') {
             Navigator.push(
               context,
-              MaterialPageRoute(
-                builder: (_) => const DonationScreen(),
-              ),
+              MaterialPageRoute(builder: (_) => const DonationScreen()),
             );
           } else if (label == 'Calls') {
             context.read<ChatFilterProvider>().setFilter(ChatFilter.calls);
@@ -175,10 +177,8 @@ class XmoDrawer extends StatelessWidget {
       unawaited(provider.deleteDuplicateSavedMessagesRooms());
       navigator.push(
         MaterialPageRoute(
-          builder: (_) => MatrixChatScreen(
-            room: room,
-            matrixProvider: provider,
-          ),
+          builder: (_) =>
+              MatrixChatScreen(room: room, matrixProvider: provider),
         ),
       );
     } catch (e) {
@@ -197,11 +197,13 @@ class DrawerData {
   final String displayName;
   final String userId;
   final String? avatarUrl;
+  final Uint8List? avatarBytes;
 
   const DrawerData({
     required this.displayName,
     required this.userId,
     this.avatarUrl,
+    this.avatarBytes,
   });
 }
 
@@ -227,6 +229,7 @@ class DrawerHeader extends StatelessWidget {
             StoryAvatar(
               userName: data.displayName,
               avatarUrl: data.avatarUrl,
+              avatarBytes: data.avatarBytes,
               size: 44,
               backgroundColor: const Color(0xFF2C2C2E),
             ),
@@ -320,14 +323,18 @@ class NewGroupTile extends StatelessWidget {
                 maxLines: 1,
               ),
               const SizedBox(height: 20),
-              Text('Group Type',
-                  style: GoogleFonts.inter(color: kLightGrey, fontSize: 12)),
+              Text(
+                'Group Type',
+                style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+              ),
               Row(
                 children: [
                   Expanded(
                     child: RadioListTile<GroupType>(
-                      title: const Text('Private (encrypted)',
-                          style: TextStyle(color: kWhite, fontSize: 14)),
+                      title: const Text(
+                        'Private (encrypted)',
+                        style: TextStyle(color: kWhite, fontSize: 14),
+                      ),
                       value: GroupType.private,
                       groupValue: groupType,
                       activeColor: kLimeGreen,
@@ -339,8 +346,10 @@ class NewGroupTile extends StatelessWidget {
                   ),
                   Expanded(
                     child: RadioListTile<GroupType>(
-                      title: const Text('Public (not encrypted)',
-                          style: TextStyle(color: kWhite, fontSize: 14)),
+                      title: const Text(
+                        'Public (not encrypted)',
+                        style: TextStyle(color: kWhite, fontSize: 14),
+                      ),
                       value: GroupType.public,
                       groupValue: groupType,
                       activeColor: kLimeGreen,
@@ -361,8 +370,10 @@ class NewGroupTile extends StatelessWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child:
-                  const Text('Cancel', style: TextStyle(color: Colors.white54)),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: Colors.white54),
+              ),
             ),
             TextButton(
               onPressed: () async {
@@ -409,9 +420,7 @@ Future<void> _createAndOpenRoom({
     barrierDismissible: false,
     builder: (dialogContext) {
       loaderContext = dialogContext;
-      return const Center(
-        child: CircularProgressIndicator(color: kLimeGreen),
-      );
+      return const Center(child: CircularProgressIndicator(color: kLimeGreen));
     },
   );
 
@@ -434,10 +443,8 @@ Future<void> _createAndOpenRoom({
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => MatrixChatScreen(
-            room: room,
-            matrixProvider: provider,
-          ),
+          builder: (_) =>
+              MatrixChatScreen(room: room, matrixProvider: provider),
         ),
       );
       return;
@@ -453,10 +460,7 @@ Future<void> _createAndOpenRoom({
     closeLoader();
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('$errorPrefix: $e'),
-        backgroundColor: Colors.red,
-      ),
+      SnackBar(content: Text('$errorPrefix: $e'), backgroundColor: Colors.red),
     );
   }
 }
@@ -603,8 +607,10 @@ class NewChannelTile extends StatelessWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child:
-                  const Text('Cancel', style: TextStyle(color: Colors.white54)),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: Colors.white54),
+              ),
             ),
             TextButton(
               onPressed: () async {

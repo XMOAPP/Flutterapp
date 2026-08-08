@@ -1,0 +1,58 @@
+:root {
+  --ak-accent: #5542ff;
+  --pf-global--primary-color--100: #5542ff;
+  --pf-global--primary-color--200: #6c5cff;
+  --pf-global--link--Color: #dfdff2;
+  --pf-global--link--Color--hover: #ffffff;
+}
+
+body {
+  background-color: #050a0d;
+  background-image:
+    linear-gradient(rgba(5, 10, 13, 0.86), rgba(5, 10, 13, 0.92)),
+    url("https://xmo.dpdns.org/img/xmo-chat-pattern.svg");
+  background-size: cover;
+  background-position: center;
+  letter-spacing: 0;
+}
+
+ak-brand,
+.pf-c-brand,
+img[alt="authentik"],
+img[alt="Authentik"] {
+  content: url("https://xmo.dpdns.org/img/cropped_circle_image%281%29%281%29.png");
+  max-height: 48px;
+}
+
+.pf-c-button.pf-m-primary,
+button[type="submit"] {
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.pf-c-button.pf-m-primary {
+  background: #5542ff;
+  color: #ffffff;
+}
+
+.pf-c-button.pf-m-primary:hover,
+.pf-c-button.pf-m-primary:focus {
+  background: #6c5cff;
+  color: #ffffff;
+}
+
+a[href*="goauthentik.io"],
+a[href*="authentik.io"],
+.ak-brand-footer,
+footer {
+  display: none !important;
+}
+
+ak-flow-executor::part(card),
+ak-flow-executor::part(instance) {
+  border-radius: 18px;
+}
+
+ak-flow-executor::part(locale-select) {
+  display: none;
+}

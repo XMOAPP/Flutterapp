@@ -1,5 +1,6 @@
 import 'package:matrix/matrix.dart';
 
+import '../utils/matrix_identity.dart';
 import '../utils/message_presentation.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -131,7 +132,10 @@ class GroupMember {
 
     return GroupMember(
       userId: user.id,
-      displayName: user.displayName ?? user.id,
+      displayName: MatrixIdentity.displayName(
+        userId: user.id,
+        candidate: user.displayName,
+      ),
       avatarUrl: user.avatarUrl?.toString(),
       role: role,
       powerLevel: powerLevel,
@@ -308,7 +312,7 @@ enum RestrictionType {
   noMedia, // Can't send files/images
   noLinks, // Can't send URLs
   noStickers, // Can't send stickers
-  fullBan // Completely banned
+  fullBan, // Completely banned
 }
 
 class MemberRestriction {
@@ -409,8 +413,10 @@ class PinnedMessage {
       eventId: event.eventId,
       content: matrixVisibleBody(event),
       senderId: event.senderId,
-      senderName:
-          event.senderFromMemoryOrFallback.displayName ?? event.senderId,
+      senderName: MatrixIdentity.displayName(
+        userId: event.senderId,
+        candidate: event.senderFromMemoryOrFallback.displayName,
+      ),
       pinnedAt: DateTime.now(),
       pinnedBy: pinnedBy,
       originalTimestamp: event.originServerTs,
@@ -528,7 +534,8 @@ class AdminAction {
       performedBy: json['performed_by'] as String? ?? '',
       targetUser: json['target_user'] as String?,
       targetMessage: json['target_message'] as String?,
-      timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+      timestamp:
+          DateTime.tryParse(json['timestamp'] as String? ?? '') ??
           DateTime.fromMillisecondsSinceEpoch(0),
       metadata: _metadataFromJson(json['metadata']),
     );
@@ -560,10 +567,13 @@ class MessageReply {
     return MessageReply(
       eventId: event.eventId,
       senderId: event.senderId,
-      senderName:
-          event.senderFromMemoryOrFallback.displayName ?? event.senderId,
-      messagePreview:
-          preview.length > 100 ? '${preview.substring(0, 100)}...' : preview,
+      senderName: MatrixIdentity.displayName(
+        userId: event.senderId,
+        candidate: event.senderFromMemoryOrFallback.displayName,
+      ),
+      messagePreview: preview.length > 100
+          ? '${preview.substring(0, 100)}...'
+          : preview,
       timestamp: event.originServerTs,
     );
   }

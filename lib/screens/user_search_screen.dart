@@ -8,9 +8,9 @@ import 'package:provider/provider.dart';
 import '../providers/matrix_provider.dart';
 import '../models/group_models.dart';
 import '../services/group_service.dart';
-import '../services/matrix_service.dart';
 import '../services/privacy_service.dart';
 import '../theme.dart';
+import '../utils/matrix_username_search.dart';
 import '../widgets/story/story_avatar.dart';
 import 'matrix_chat_screen.dart';
 import 'user_profile_preview_screen.dart';
@@ -34,11 +34,11 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
   List<Profile> _results = [];
   List<PublicRoomsChunk> _publicResults = [];
   final Map<String, bool> _publicRoomChannelFlags = {};
-  final Set<String> _joiningRoomIds = {};
   bool _searching = false;
   bool _startingChat = false;
   String? _error;
   Timer? _debounce;
+  int _searchRequestId = 0;
 
   @override
   void dispose() {
@@ -49,6 +49,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
 
   void _onSearchChanged(String query) {
     _debounce?.cancel();
+    final requestId = ++_searchRequestId;
     if (query.trim().isEmpty) {
       setState(() {
         _results = [];
@@ -59,12 +60,12 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
       return;
     }
     _debounce = Timer(const Duration(milliseconds: 400), () {
-      _performSearch(query.trim());
+      _performSearch(query.trim(), requestId);
     });
   }
 
-  Future<void> _performSearch(String query) async {
-    if (!mounted) return;
+  Future<void> _performSearch(String query, int requestId) async {
+    if (!mounted || requestId != _searchRequestId) return;
 
     setState(() {
       _searching = true;
@@ -73,6 +74,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
 
     final provider = context.read<MatrixProvider>();
     final filteredUsers = await _searchUsers(provider, query);
+    if (!mounted || requestId != _searchRequestId) return;
 
     var publicRooms = <PublicRoomsChunk>[];
     try {
@@ -80,6 +82,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
     } catch (e) {
       debugPrint('[NewChatSearch] Public room search failed: $e');
     }
+    if (!mounted || requestId != _searchRequestId) return;
 
     if (filteredUsers.isNotEmpty || publicRooms.isNotEmpty) {
       if (mounted) {
@@ -109,17 +112,17 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
     MatrixProvider provider,
     String query,
   ) async {
+    if (!isMatrixUsernameQuery(query)) return const [];
+
     final privacyService = PrivacyService(provider.service);
     final publicAccounts = await privacyService.searchPublicAccounts(query);
-    final explicitPrivateUserIds =
-        await privacyService.searchPrivateAccountIds(query);
     final byUserId = <String, Profile>{};
     final myId = provider.userId;
 
     void addProfile(Profile profile) {
       final userId = profile.userId;
       if (userId == myId) return;
-      if (explicitPrivateUserIds.contains(userId)) return;
+      if (!matrixUserIdMatchesUsernameQuery(userId, query)) return;
       byUserId[userId] = profile;
     }
 
@@ -135,92 +138,9 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
       );
     }
 
-    for (final profile in await _searchMatrixUserDirectory(provider, query)) {
-      addProfile(profile);
-    }
-
-    final exactProfile = await _lookupExactMatrixUser(provider, query);
-    if (exactProfile != null) {
-      addProfile(exactProfile);
-    }
-
     final results = byUserId.values.toList()
-      ..sort((a, b) {
-        final aName = (a.displayName ?? a.userId).toLowerCase();
-        final bName = (b.displayName ?? b.userId).toLowerCase();
-        return aName.compareTo(bName);
-      });
+      ..sort((a, b) => a.userId.compareTo(b.userId));
     return results.take(20).toList();
-  }
-
-  Future<List<Profile>> _searchMatrixUserDirectory(
-    MatrixProvider provider,
-    String query,
-  ) async {
-    final resultsByUserId = <String, Profile>{};
-
-    void addAll(List<Profile> profiles) {
-      for (final profile in profiles) {
-        final userId = profile.userId;
-        if (userId.isEmpty) continue;
-        resultsByUserId[userId] = profile;
-      }
-    }
-
-    try {
-      addAll(await provider.searchUsers(query));
-      final localpart = _localpartFromQuery(query);
-      if (localpart != null && localpart != query.trim()) {
-        addAll(await provider.searchUsers(localpart));
-      }
-    } catch (e) {
-      debugPrint('[NewChatSearch] XMO user search failed: $e');
-    }
-
-    return resultsByUserId.values.toList();
-  }
-
-  Future<Profile?> _lookupExactMatrixUser(
-    MatrixProvider provider,
-    String query,
-  ) async {
-    final userId = _matrixUserIdFromQuery(query);
-    if (userId == null) return null;
-
-    try {
-      final profile = await provider.service.client.getProfileFromUserId(
-        userId,
-      );
-      return Profile(
-        userId: userId,
-        displayName: profile.displayName,
-        avatarUrl: profile.avatarUrl,
-      );
-    } catch (e) {
-      debugPrint('[NewChatSearch] Exact profile lookup failed for $userId: $e');
-      return null;
-    }
-  }
-
-  String? _localpartFromQuery(String query) {
-    var value = query.trim();
-    if (value.isEmpty) return null;
-    if (value.startsWith('@')) value = value.substring(1);
-    final separatorIndex = value.indexOf(':');
-    if (separatorIndex >= 0) value = value.substring(0, separatorIndex);
-    return value.trim().isEmpty ? null : value.trim();
-  }
-
-  String? _matrixUserIdFromQuery(String query) {
-    final localpart = _localpartFromQuery(query);
-    if (localpart == null) return null;
-    if (!RegExp(r'^[a-z0-9._=\-/]+$').hasMatch(localpart)) return null;
-
-    final trimmed = query.trim();
-    if (trimmed.startsWith('@') && trimmed.contains(':')) {
-      return trimmed;
-    }
-    return '@$localpart:${MatrixService.matrixServerName}';
   }
 
   Future<void> _resolvePublicRoomTypes(List<PublicRoomsChunk> rooms) async {
@@ -246,10 +166,8 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => MatrixChatScreen(
-            room: existingRoom,
-            matrixProvider: provider,
-          ),
+          builder: (_) =>
+              MatrixChatScreen(room: existingRoom, matrixProvider: provider),
         ),
       );
       return;
@@ -282,13 +200,6 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
 
       final room = provider.service.getRoomById(roomId);
       if (room != null) return room;
-
-      try {
-        await provider.service.client.oneShotSync();
-      } catch (e) {
-        debugPrint(
-            '[RoomOpen] oneShotSync failed while waiting for $roomId: $e');
-      }
     }
 
     return provider.service.getRoomById(roomId);
@@ -320,13 +231,6 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
         return matrixService.getResolvedDisplayName(room).trim() == roomName;
       }).toList();
       if (matches.isNotEmpty) return matches.first;
-
-      try {
-        await provider.service.client.oneShotSync();
-      } catch (e) {
-        debugPrint(
-            '[RoomOpen] oneShotSync failed while finding "$roomName": $e');
-      }
     }
 
     final matches = provider.rooms.where((room) {
@@ -348,10 +252,8 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => MatrixChatScreen(
-            room: room,
-            matrixProvider: provider,
-          ),
+          builder: (_) =>
+              MatrixChatScreen(room: room, matrixProvider: provider),
         ),
       );
       return;
@@ -366,7 +268,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
     );
   }
 
-  Future<void> _openOrJoinPublicRoom(PublicRoomsChunk publicRoom) async {
+  void _openPublicRoom(PublicRoomsChunk publicRoom) {
     final provider = context.read<MatrixProvider>();
     final existingRoom = provider.service.getJoinedRoomById(publicRoom.roomId);
 
@@ -374,47 +276,24 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => MatrixChatScreen(
-            room: existingRoom,
-            matrixProvider: provider,
-          ),
+          builder: (_) =>
+              MatrixChatScreen(room: existingRoom, matrixProvider: provider),
         ),
       );
       return;
     }
 
-    setState(() => _joiningRoomIds.add(publicRoom.roomId));
-    try {
-      await provider.service.joinRoom(publicRoom.roomId);
-      await Future.delayed(const Duration(milliseconds: 600));
-      await provider.service.client.oneShotSync();
-      provider.refreshRooms();
-
-      final joined = provider.service.getJoinedRoomById(publicRoom.roomId);
-      if (!mounted) return;
-      setState(() => _joiningRoomIds.remove(publicRoom.roomId));
-
-      if (joined != null) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => MatrixChatScreen(
-              room: joined,
-              matrixProvider: provider,
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _joiningRoomIds.remove(publicRoom.roomId));
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to join: $e'),
-          backgroundColor: Colors.redAccent,
+    final isChannel = _publicRoomChannelFlags[publicRoom.roomId] ?? false;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MatrixChatScreen(
+          previewChannel: publicRoom,
+          previewIsChannelHint: isChannel,
+          matrixProvider: provider,
         ),
-      );
-    }
+      ),
+    );
   }
 
   void _showCreateChannelDialog() {
@@ -496,8 +375,10 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child:
-                  const Text('Cancel', style: TextStyle(color: Colors.white54)),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: Colors.white54),
+              ),
             ),
             TextButton(
               onPressed: () async {
@@ -567,15 +448,19 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                   maxLines: 1,
                 ),
                 const SizedBox(height: 20),
-                Text('Group Type',
-                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 12)),
+                Text(
+                  'Group Type',
+                  style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+                ),
                 const SizedBox(height: 8),
                 Row(
                   children: [
                     Expanded(
                       child: RadioListTile<GroupType>(
-                        title: const Text('Private (encrypted)',
-                            style: TextStyle(color: kWhite, fontSize: 14)),
+                        title: const Text(
+                          'Private (encrypted)',
+                          style: TextStyle(color: kWhite, fontSize: 14),
+                        ),
                         value: GroupType.private,
                         groupValue: groupType,
                         activeColor: kLimeGreen,
@@ -587,8 +472,10 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                     ),
                     Expanded(
                       child: RadioListTile<GroupType>(
-                        title: const Text('Public (not encrypted)',
-                            style: TextStyle(color: kWhite, fontSize: 14)),
+                        title: const Text(
+                          'Public (not encrypted)',
+                          style: TextStyle(color: kWhite, fontSize: 14),
+                        ),
                         value: GroupType.public,
                         groupValue: groupType,
                         activeColor: kLimeGreen,
@@ -610,8 +497,10 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child:
-                  const Text('Cancel', style: TextStyle(color: Colors.white54)),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: Colors.white54),
+              ),
             ),
             TextButton(
               onPressed: () async {
@@ -623,8 +512,9 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                 final navigator = Navigator.of(context);
                 final groupName = nameCtrl.text.trim();
                 final groupDescription = descCtrl.text.trim();
-                final existingRoomIds =
-                    matrixProvider.rooms.map((room) => room.id).toSet();
+                final existingRoomIds = matrixProvider.rooms
+                    .map((room) => room.id)
+                    .toSet();
 
                 String? roomId;
                 try {
@@ -633,15 +523,17 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                   final groupService = GroupService(matrixProvider.service);
                   roomId = await groupService.createGroup(
                     name: groupName,
-                    description:
-                        groupDescription.isEmpty ? null : groupDescription,
+                    description: groupDescription.isEmpty
+                        ? null
+                        : groupDescription,
                     type: groupType,
                     joinRule: groupType == GroupType.public
                         ? JoinRule.open
                         : JoinRule.invite,
                   );
                   debugPrint(
-                      '[GroupCreation] Group created with roomId: $roomId');
+                    '[GroupCreation] Group created with roomId: $roomId',
+                  );
                   await _openCreatedRoom(matrixProvider, roomId);
                 } catch (e) {
                   debugPrint('[GroupCreation] Error: $e');
@@ -731,8 +623,10 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
               _searchCtrl.text.isEmpty)
             Expanded(
               child: ListView(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 children: [
                   ListTile(
                     leading: const CircleAvatar(
@@ -742,7 +636,9 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                     title: Text(
                       'New Channel',
                       style: GoogleFonts.inter(
-                          color: kWhite, fontWeight: FontWeight.w600),
+                        color: kWhite,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     onTap: () {
                       _showCreateChannelDialog();
@@ -756,7 +652,9 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                     title: Text(
                       'New Group',
                       style: GoogleFonts.inter(
-                          color: kWhite, fontWeight: FontWeight.w600),
+                        color: kWhite,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     onTap: _showCreateGroupDialog,
                   ),
@@ -809,7 +707,6 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
   Widget _buildPublicRoomTile(PublicRoomsChunk room) {
     final provider = context.read<MatrixProvider>();
     final joinedRoom = provider.service.getJoinedRoomById(room.roomId);
-    final isJoining = _joiningRoomIds.contains(room.roomId);
     final isChannel =
         joinedRoom?.isChannel ?? _publicRoomChannelFlags[room.roomId] ?? false;
     final name = room.name ?? room.canonicalAlias ?? room.roomId;
@@ -870,17 +767,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
         overflow: TextOverflow.ellipsis,
         style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
       ),
-      trailing: isJoining
-          ? const SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(
-                color: kLimeGreen,
-                strokeWidth: 2,
-              ),
-            )
-          : null,
-      onTap: isJoining ? null : () => _openOrJoinPublicRoom(room),
+      onTap: () => _openPublicRoom(room),
     );
   }
 }

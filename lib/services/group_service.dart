@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 import '../models/group_models.dart';
 import '../models/matrix_mentions.dart';
+import '../utils/matrix_identity.dart';
 import 'matrix_service.dart';
 import 'room_controls_service.dart';
 
@@ -30,14 +31,17 @@ class GroupService {
     bool historyVisible = true,
   }) async {
     debugPrint(
-        '[GroupService] Creating group: $name (type: $type, joinRule: $joinRule)');
+      '[GroupService] Creating group: $name (type: $type, joinRule: $joinRule)',
+    );
 
-    final effectiveJoinRule =
-        type == GroupType.public ? JoinRule.open : JoinRule.invite;
+    final effectiveJoinRule = type == GroupType.public
+        ? JoinRule.open
+        : JoinRule.invite;
 
     // Convert our enums to Matrix types
-    final matrixVisibility =
-        type == GroupType.public ? Visibility.public : Visibility.private;
+    final matrixVisibility = type == GroupType.public
+        ? Visibility.public
+        : Visibility.private;
     final matrixJoinRules = _convertJoinRule(effectiveJoinRule);
     const matrixHistoryVisibility = 'shared';
 
@@ -132,7 +136,9 @@ class GroupService {
 
   /// Updates group settings
   Future<void> updateGroupSettings(
-      String roomId, GroupSettings settings) async {
+    String roomId,
+    GroupSettings settings,
+  ) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
 
@@ -218,7 +224,10 @@ class GroupService {
     if (hasBytes) {
       if (avatarBytes.isEmpty) {
         throw ArgumentError.value(
-            avatarBytes, 'avatarBytes', 'Cannot be empty');
+          avatarBytes,
+          'avatarBytes',
+          'Cannot be empty',
+        );
       }
       avatarUri = await room.client.uploadContent(
         avatarBytes,
@@ -237,9 +246,7 @@ class GroupService {
       roomId,
       EventTypes.RoomAvatar,
       '',
-      <String, dynamic>{
-        if (avatarUri != null) 'url': avatarUri.toString(),
-      },
+      <String, dynamic>{if (avatarUri != null) 'url': avatarUri.toString()},
     );
 
     await _recordAdminAction(
@@ -304,9 +311,10 @@ class GroupService {
 
     return participants
         .map(
-          (user) => GroupMember.fromUser(user, room).copyWith(
-            restriction: restrictions[user.id],
-          ),
+          (user) => GroupMember.fromUser(
+            user,
+            room,
+          ).copyWith(restriction: restrictions[user.id]),
         )
         .toList()
       ..sort((a, b) {
@@ -334,8 +342,11 @@ class GroupService {
   }
 
   /// Removes a member from the group (kick)
-  Future<void> removeMember(String roomId, String userId,
-      {String? reason}) async {
+  Future<void> removeMember(
+    String roomId,
+    String userId, {
+    String? reason,
+  }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
     await _ensureCanModerateMember(room, userId, 'remove');
@@ -395,16 +406,20 @@ class GroupService {
           final userId = state.stateKey!;
           final displayName = state.content['displayname'];
           final avatarUrl = state.content['avatar_url'];
-          bannedUsers.add(GroupMember(
-            userId: userId,
-            displayName: displayName is String ? displayName : userId,
-            avatarUrl: avatarUrl is String ? avatarUrl : null,
-            role: MemberRole.restricted,
-            powerLevel: -1,
-            joinedAt:
-                state is Event ? state.originServerTs : DateTime.now(),
-            isBanned: true,
-          ));
+          bannedUsers.add(
+            GroupMember(
+              userId: userId,
+              displayName: MatrixIdentity.displayName(
+                userId: userId,
+                candidate: displayName is String ? displayName : null,
+              ),
+              avatarUrl: avatarUrl is String ? avatarUrl : null,
+              role: MemberRole.restricted,
+              powerLevel: -1,
+              joinedAt: state is Event ? state.originServerTs : DateTime.now(),
+              isBanned: true,
+            ),
+          );
         }
       }
     }
@@ -459,9 +474,9 @@ class GroupService {
     if (room == null) throw Exception('Room not found: $roomId');
 
     final user = room.getParticipants().firstWhere(
-          (u) => u.id == userId,
-          orElse: () => throw Exception('User not found in room'),
-        );
+      (u) => u.id == userId,
+      orElse: () => throw Exception('User not found in room'),
+    );
 
     return AdminPermissions.fromPowerLevel(user.powerLevel.level);
   }
@@ -582,12 +597,15 @@ class GroupService {
     final actionStates = room.states[_adminActionStateType];
     if (actionStates == null) return const [];
 
-    final actions = actionStates.values
-        .map((state) => AdminAction.fromJson(state.content))
-        .where((action) => action.actionId.isNotEmpty)
-        .where((action) => cutoff == null || action.timestamp.isAfter(cutoff))
-        .toList()
-      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    final actions =
+        actionStates.values
+            .map((state) => AdminAction.fromJson(state.content))
+            .where((action) => action.actionId.isNotEmpty)
+            .where(
+              (action) => cutoff == null || action.timestamp.isAfter(cutoff),
+            )
+            .toList()
+          ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
 
     return actions;
   }
@@ -668,10 +686,7 @@ class GroupService {
     }
 
     // Send message with reply relation
-    await room.sendTextEvent(
-      text,
-      inReplyTo: originalEvent,
-    );
+    await room.sendTextEvent(text, inReplyTo: originalEvent);
   }
 
   /// Sends a message with mentions
@@ -684,7 +699,8 @@ class GroupService {
     if (room == null) throw Exception('Room not found: $roomId');
 
     debugPrint(
-        '[GroupService] Sending message with ${mentionedUserIds.length} mentions');
+      '[GroupService] Sending message with ${mentionedUserIds.length} mentions',
+    );
 
     final mentionContent = MatrixMentions.forUserIds(
       mentionedUserIds,
@@ -769,9 +785,9 @@ class GroupService {
   /// Checks if user has permission to perform an action
   bool hasPermission(Room room, String userId, String action) {
     final user = room.getParticipants().firstWhere(
-          (u) => u.id == userId,
-          orElse: () => throw Exception('User not found'),
-        );
+      (u) => u.id == userId,
+      orElse: () => throw Exception('User not found'),
+    );
 
     final powerLevel = user.powerLevel.level;
     final powerLevelsState = room.getState(EventTypes.RoomPowerLevels);

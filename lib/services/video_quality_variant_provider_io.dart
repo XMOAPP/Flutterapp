@@ -27,12 +27,17 @@ class NativeVideoCompressionQualityVariantProvider {
     }
 
     final workDir = await _createWorkDir();
-    final sourceFile =
-        File(_joinPath(workDir.path, _safeFileName(source.fileName)));
+    final providedSourcePath = source.sourcePath;
+    final sourceFile = providedSourcePath != null
+        ? File(providedSourcePath)
+        : File(_joinPath(workDir.path, _safeFileName(source.fileName)));
+    final ownsSourceFile = providedSourcePath == null;
     File? normalizedFile;
 
     try {
-      await sourceFile.writeAsBytes(source.bytes, flush: true);
+      if (ownsSourceFile) {
+        await sourceFile.writeAsBytes(source.bytes, flush: true);
+      }
       _throwIfCancelled(source);
 
       final info = await _compressWithCancellation(
@@ -62,7 +67,7 @@ class NativeVideoCompressionQualityVariantProvider {
       await VideoCompress.cancelCompression();
       rethrow;
     } finally {
-      await _deleteQuietly(sourceFile);
+      if (ownsSourceFile) await _deleteQuietly(sourceFile);
       if (normalizedFile != null) {
         await _deleteQuietly(normalizedFile);
       }
@@ -80,13 +85,18 @@ class NativeVideoCompressionQualityVariantProvider {
     }
 
     final workDir = await _createWorkDir();
-    final sourceFile =
-        File(_joinPath(workDir.path, _safeFileName(source.fileName)));
+    final providedSourcePath = source.sourcePath;
+    final sourceFile = providedSourcePath != null
+        ? File(providedSourcePath)
+        : File(_joinPath(workDir.path, _safeFileName(source.fileName)));
+    final ownsSourceFile = providedSourcePath == null;
     final variants = <XmoVideoQualityVariant>[];
     final compressedFiles = <File>[];
 
     try {
-      await sourceFile.writeAsBytes(source.bytes, flush: true);
+      if (ownsSourceFile) {
+        await sourceFile.writeAsBytes(source.bytes, flush: true);
+      }
       _throwIfCancelled(source);
 
       final requests = <_CompressionRequest>[
@@ -134,7 +144,7 @@ class NativeVideoCompressionQualityVariantProvider {
       await VideoCompress.cancelCompression();
       rethrow;
     } finally {
-      await _deleteQuietly(sourceFile);
+      if (ownsSourceFile) await _deleteQuietly(sourceFile);
       for (final file in compressedFiles) {
         await _deleteQuietly(file);
       }

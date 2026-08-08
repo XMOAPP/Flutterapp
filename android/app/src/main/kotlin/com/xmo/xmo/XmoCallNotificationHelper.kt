@@ -227,11 +227,19 @@ object XmoCallNotificationHelper {
     }
 
     private fun titleFromPayload(data: Map<String, String>, title: String?): String {
-        return title?.takeIf { it.isNotBlank() }
+        val rawTitle = title?.takeIf { it.isNotBlank() }
             ?: data["room_name"]?.takeIf { it.isNotBlank() }
             ?: data["sender_display_name"]?.takeIf { it.isNotBlank() }
             ?: data["sender"]?.takeIf { it.isNotBlank() }
             ?: "Incoming call"
+        return friendlyTitle(rawTitle)
+    }
+
+    private fun friendlyTitle(value: String): String {
+        val trimmed = value.trim()
+        if (!Regex("^@[^:\\s]+:[^\\s]+$").matches(trimmed)) return trimmed
+        val localpart = trimmed.removePrefix("@").substringBefore(':')
+        return localpart.replaceFirstChar { character -> character.uppercase() }
     }
 
     private fun looksLikeVideoCall(

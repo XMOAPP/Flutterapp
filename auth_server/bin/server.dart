@@ -13,11 +13,13 @@ import 'package:xmo_auth_server/src/email_service.dart';
 import 'package:xmo_auth_server/src/endpoint_modules.dart';
 import 'package:xmo_auth_server/src/health_status.dart';
 import 'package:xmo_auth_server/src/request_guard.dart';
+import 'package:xmo_auth_server/src/secure_login_enrollment_proof_store.dart';
 import 'package:xmo_auth_server/src/structured_logger.dart';
 import 'package:xmo_auth_server/src/wallet_auth_service.dart';
 
 part '../lib/src/handlers/azure_blob_handler.dart';
 part '../lib/src/handlers/account_deletion_handler.dart';
+part '../lib/src/handlers/authentik_provisioning_handler.dart';
 part '../lib/src/handlers/channel_analytics_handler.dart';
 part '../lib/src/handlers/donation_handler.dart';
 part '../lib/src/handlers/invite_handler.dart';
@@ -44,6 +46,9 @@ final String _firebaseProjectId =
     Platform.environment['XMO_FIREBASE_PROJECT_ID'] ?? '';
 
 final _otpStore = <String, _OtpRecord>{};
+final _secureLoginEnrollmentProofs = SecureLoginEnrollmentProofStore(
+  ttl: _secureLoginEnrollmentProofTtl,
+);
 final _passwordResetStore = <String, _PasswordResetRecord>{};
 final _random = Random.secure();
 final _rateLimiter = RequestRateLimiter();
@@ -85,6 +90,7 @@ const _azureBlobEndpoints = AzureBlobEndpointModule(
 const _userDirectoryEndpoints = UserDirectoryEndpointModule(
   upsert: _upsertUserDirectoryEntry,
   search: _searchUserDirectory,
+  provisionSecureLogin: _provisionSecureLogin,
 );
 const _reportEndpoints = ReportEndpointModule(
   submit: _submitReport,
@@ -104,6 +110,7 @@ const _channelAnalyticsEndpoints = ChannelAnalyticsEndpointModule(
 const _pushEndpoints = PushGatewayEndpointModule(_handleMatrixPush);
 
 const _otpTtl = Duration(minutes: 1);
+const _secureLoginEnrollmentProofTtl = Duration(minutes: 5);
 const _passwordResetTtl = Duration(minutes: 5);
 const _maxAttempts = 5;
 const _thirdwebBaseUrl = 'https://api.thirdweb.com';
@@ -320,6 +327,12 @@ Future<void> _handleRequest(HttpRequest request) async {
     if (request.method == 'POST' &&
         _userDirectoryEndpoints.handlesSearch(request.uri.path)) {
       await _userDirectoryEndpoints.search(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _userDirectoryEndpoints.handlesProvisionSecureLogin(request.uri.path)) {
+      await _userDirectoryEndpoints.provisionSecureLogin(request);
       return;
     }
 

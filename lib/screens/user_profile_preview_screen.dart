@@ -4,16 +4,13 @@ import 'package:matrix/matrix.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/matrix_provider.dart';
-import '../services/matrix_service.dart';
 import '../theme.dart';
+import '../utils/matrix_identity.dart';
 import '../widgets/story/story_avatar.dart';
 import 'matrix_chat_screen.dart';
 
 class UserProfilePreviewScreen extends StatefulWidget {
-  const UserProfilePreviewScreen({
-    super.key,
-    required this.profile,
-  });
+  const UserProfilePreviewScreen({super.key, required this.profile});
 
   final Profile profile;
 
@@ -75,9 +72,6 @@ class _UserProfilePreviewScreenState extends State<UserProfilePreviewScreen> {
       if (delay != Duration.zero) await Future.delayed(delay);
       final room = provider.service.getRoomById(roomId);
       if (room != null) return room;
-      try {
-        await provider.service.client.oneShotSync();
-      } catch (_) {}
     }
     provider.refreshRooms();
     return provider.service.getRoomById(roomId);
@@ -87,23 +81,19 @@ class _UserProfilePreviewScreenState extends State<UserProfilePreviewScreen> {
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder: (_) => MatrixChatScreen(
-          room: room,
-          matrixProvider: provider,
-        ),
+        builder: (_) => MatrixChatScreen(room: room, matrixProvider: provider),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final cleanUsername = MatrixService.cleanName(widget.profile.userId);
-    final displayName = widget.profile.displayName;
-    final title = displayName == null || displayName.trim().isEmpty
-        ? cleanUsername
-        : displayName.trim();
-    final subtitle =
-        cleanUsername.isEmpty ? widget.profile.userId : '@$cleanUsername';
+    final cleanUsername = MatrixIdentity.localpart(widget.profile.userId);
+    final title = MatrixIdentity.displayName(
+      userId: widget.profile.userId,
+      candidate: widget.profile.displayName,
+    );
+    final subtitle = MatrixIdentity.usernameLabel(widget.profile.userId);
 
     return Scaffold(
       backgroundColor: kBlack,
@@ -181,8 +171,8 @@ class _UserProfilePreviewScreenState extends State<UserProfilePreviewScreen> {
                   ],
                   const Spacer(),
                   SizedBox(
-                    width: 260,
-                    height: 54,
+                    width: 240,
+                    height: 48,
                     child: ElevatedButton(
                       onPressed: _startingChat ? null : _openChat,
                       style: ElevatedButton.styleFrom(
@@ -207,7 +197,7 @@ class _UserProfilePreviewScreenState extends State<UserProfilePreviewScreen> {
                           : Text(
                               'Message',
                               style: GoogleFonts.inter(
-                                fontSize: 16,
+                                fontSize: 15,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),

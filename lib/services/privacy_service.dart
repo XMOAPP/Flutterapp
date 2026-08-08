@@ -5,13 +5,10 @@ import 'package:http/http.dart' as http;
 import 'package:matrix/matrix.dart';
 
 import '../config/app_config.dart';
+import '../utils/matrix_identity.dart';
 import 'matrix_service.dart';
 
-enum XmoPrivacyAudience {
-  contacts,
-  onlySelected,
-  hideSelected,
-}
+enum XmoPrivacyAudience { contacts, onlySelected, hideSelected }
 
 class XmoPrivacySettings {
   final bool accountIsPublic;
@@ -146,18 +143,22 @@ class PrivacyService {
     await broadcastProfileAvatarPrivacy(settings);
   }
 
-  Future<void> syncPublicAccountDirectory(
-    XmoPrivacySettings settings,
-  ) async {
+  Future<void> syncPublicAccountDirectory(XmoPrivacySettings settings) async {
     final myUserId = _client.userID;
     if (myUserId == null) return;
 
-    String displayName = _matrixService.displayName ?? myUserId;
+    String displayName = MatrixIdentity.displayName(
+      userId: myUserId,
+      candidate: _matrixService.displayName,
+    );
     String? avatarUrl = _matrixService.avatarUrl;
 
     try {
       final profile = await _client.getProfileFromUserId(myUserId);
-      displayName = profile.displayName ?? displayName;
+      displayName = MatrixIdentity.displayName(
+        userId: myUserId,
+        candidate: profile.displayName ?? displayName,
+      );
       avatarUrl = profile.avatarUrl?.toString() ?? avatarUrl;
     } catch (_) {}
 
@@ -190,35 +191,7 @@ class PrivacyService {
     }
 
     try {
-      final backendResults = await _searchBackendPublicAccounts(query);
-      if (backendResults.isNotEmpty) return backendResults;
-
-      final latestByUserId = await _latestUserDirectoryEvents();
-      final results = <PublicAccountProfile>[];
-      for (final event in latestByUserId.values) {
-        if (event.content['public'] != true) continue;
-
-        final userId = event.content['user_id'] as String;
-        final displayName = event.content['display_name'] as String? ?? userId;
-        final cleanUserId = MatrixService.cleanName(userId).toLowerCase();
-        final matchText = '$userId $cleanUserId $displayName'.toLowerCase();
-        if (!_matchesAccountQuery(matchText, normalizedQuery)) continue;
-
-        results.add(
-          PublicAccountProfile(
-            userId: userId,
-            displayName: displayName,
-            avatarUrl: event.content['avatar_url'] as String?,
-          ),
-        );
-      }
-
-      results.sort(
-        (a, b) => a.displayName.toLowerCase().compareTo(
-              b.displayName.toLowerCase(),
-            ),
-      );
-      return results.take(20).toList();
+      return await _searchBackendPublicAccounts(query);
     } catch (e) {
       debugPrint('[PrivacyService] Failed to search public accounts: $e');
       return const [];
@@ -283,13 +256,17 @@ class PrivacyService {
       return rawResults
           .whereType<Map>()
           .map(
-              (raw) => raw.map((key, value) => MapEntry(key.toString(), value)))
+            (raw) => raw.map((key, value) => MapEntry(key.toString(), value)),
+          )
           .map((data) {
             final userId = data['userId']?.toString() ?? '';
             if (userId.isEmpty) return null;
             return PublicAccountProfile(
               userId: userId,
-              displayName: data['displayName']?.toString() ?? userId,
+              displayName: MatrixIdentity.displayName(
+                userId: userId,
+                candidate: data['displayName']?.toString(),
+              ),
               avatarUrl: data['avatarUrl']?.toString(),
             );
           })
@@ -308,62 +285,6 @@ class PrivacyService {
         : baseValue;
     final base = Uri.parse(normalized);
     return base.replace(path: '${base.path}/$path');
-  }
-
-  Future<Set<String>> searchPrivateAccountIds(String query) async {
-    final normalizedQuery = query.trim().toLowerCase();
-    if (normalizedQuery.isEmpty) return const {};
-
-    try {
-      final latestByUserId = await _latestUserDirectoryEvents();
-      final privateUserIds = <String>{};
-      for (final event in latestByUserId.values) {
-        if (event.content['public'] != false) continue;
-
-        final userId = event.content['user_id'] as String?;
-        if (userId == null || userId.isEmpty) continue;
-
-        final displayName = event.content['display_name'] as String? ?? userId;
-        final cleanUserId = MatrixService.cleanName(userId).toLowerCase();
-        final matchText = '$userId $cleanUserId $displayName'.toLowerCase();
-        if (_matchesAccountQuery(matchText, normalizedQuery)) {
-          privateUserIds.add(userId);
-        }
-      }
-      return privateUserIds;
-    } catch (e) {
-      debugPrint('[PrivacyService] Failed to read private account ids: $e');
-      return const {};
-    }
-  }
-
-  Future<Map<String, Event>> _latestUserDirectoryEvents() async {
-    final room = await _ensureUserDirectoryRoom();
-    final timeline = await room.getTimeline();
-    final latestByUserId = <String, Event>{};
-
-    for (final event in timeline.events) {
-      if (event.type != userDirectoryEventType || event.redacted) continue;
-      final userId = event.content['user_id'] as String?;
-      if (userId == null || userId.isEmpty) continue;
-
-      final current = latestByUserId[userId];
-      if (current == null ||
-          event.originServerTs.isAfter(current.originServerTs)) {
-        latestByUserId[userId] = event;
-      }
-    }
-
-    return latestByUserId;
-  }
-
-  bool _matchesAccountQuery(String matchText, String normalizedQuery) {
-    if (matchText.contains(normalizedQuery)) return true;
-    final withoutAt = normalizedQuery.startsWith('@')
-        ? normalizedQuery.substring(1)
-        : normalizedQuery;
-    if (withoutAt.isEmpty) return false;
-    return matchText.contains(withoutAt);
   }
 
   Future<Room> _ensureUserDirectoryRoom() async {
@@ -424,17 +345,24 @@ class PrivacyService {
           _matrixService.getDirectPeerUserId(room) ?? room.directChatMatrixID;
       if (userId == null || userId == myUserId) continue;
 
-      String displayName = userId;
+      String displayName = MatrixIdentity.displayName(userId: userId);
       String? avatarUrl;
       try {
         final profile = await _client.getProfileFromUserId(userId);
-        displayName = profile.displayName ?? userId;
+        displayName = MatrixIdentity.displayName(
+          userId: userId,
+          candidate: profile.displayName,
+        );
         avatarUrl = profile.avatarUrl?.toString();
       } catch (_) {
-        final matchingMembers =
-            room.getParticipants().where((user) => user.id == userId);
+        final matchingMembers = room.getParticipants().where(
+          (user) => user.id == userId,
+        );
         final member = matchingMembers.isEmpty ? null : matchingMembers.first;
-        displayName = member?.displayName ?? userId;
+        displayName = MatrixIdentity.displayName(
+          userId: userId,
+          candidate: member?.displayName,
+        );
         avatarUrl = member?.avatarUrl?.toString();
       }
 
@@ -447,9 +375,8 @@ class PrivacyService {
 
     final contacts = contactsById.values.toList()
       ..sort(
-        (a, b) => a.displayName.toLowerCase().compareTo(
-              b.displayName.toLowerCase(),
-            ),
+        (a, b) =>
+            a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
       );
     return contacts;
   }

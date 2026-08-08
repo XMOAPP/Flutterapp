@@ -12,6 +12,7 @@ import '../../../providers/matrix_provider.dart';
 import '../../../providers/story_provider.dart';
 import '../../../services/matrix_media_helper.dart';
 import '../../../utils/message_presentation.dart';
+import '../../../widgets/story/story_avatar.dart';
 import '../../story/story_viewer_screen.dart';
 import '../media_handler.dart';
 import 'audio_message_bubble.dart';
@@ -47,6 +48,7 @@ class TextOrFileMessageBubble extends StatelessWidget {
   final void Function(String roomId, String eventId)? onPrivateReplyTap;
   final List<GroupMember> mentionMembers;
   final ValueChanged<GroupMember>? onMentionTap;
+  final ValueChanged<XmoContactCard>? onMessageContact;
 
   const TextOrFileMessageBubble({
     super.key,
@@ -76,6 +78,7 @@ class TextOrFileMessageBubble extends StatelessWidget {
     this.onPrivateReplyTap,
     this.mentionMembers = const [],
     this.onMentionTap,
+    this.onMessageContact,
   });
 
   @override
@@ -99,8 +102,8 @@ class TextOrFileMessageBubble extends StatelessWidget {
     final replyContextWidth = isAudio
         ? audioBubbleWidth
         : isFile
-            ? fileBubbleWidth
-            : null;
+        ? fileBubbleWidth
+        : null;
 
     return Container(
       padding: EdgeInsets.fromLTRB(
@@ -208,64 +211,44 @@ class TextOrFileMessageBubble extends StatelessWidget {
           else if (isFile && contact != null)
             SizedBox(
               width: fileBubbleWidth,
-              child: Stack(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2, right: 34),
-                    child: _ContactMessageCard(
-                      contact: contact,
-                      isMe: isMe,
-                      onTap: () {
-                        final open = openAttachmentExternally;
-                        if (open != null) {
-                          open(event);
-                        } else {
-                          downloadAndOpenFile(event);
-                        }
-                      },
-                    ),
+                  _ContactMessageCard(
+                    contact: contact,
+                    isMe: isMe,
+                    onMessage: contact.isXmoUser && onMessageContact != null
+                        ? () => onMessageContact!(contact)
+                        : null,
+                    onOpen: () {
+                      final open = openAttachmentExternally;
+                      if (open != null) {
+                        open(event);
+                      } else {
+                        downloadAndOpenFile(event);
+                      }
+                    },
                   ),
-                  Positioned(
-                    top: -2,
-                    right: -8,
-                    child: _FileMessageMenu(
-                      isMe: isMe,
-                      onDownload: () => downloadAndOpenFile(event),
-                      onShare: shareAttachment == null
-                          ? null
-                          : () => shareAttachment!(event),
-                      onOpenWith: openAttachmentExternally == null
-                          ? null
-                          : () => openAttachmentExternally!(event),
-                      onReply: onReply,
-                      onForward: onForward,
-                      onPin: onPin,
-                      onDelete: onDelete,
-                      isPinned: isPinned,
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 66),
-                    child: Align(
-                      alignment: Alignment.centerRight,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            time,
-                            style: GoogleFonts.inter(
-                              color: isMe
-                                  ? kLimeGreen.withValues(alpha: 0.6)
-                                  : kLightGrey,
-                              fontSize: 10,
-                            ),
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          time,
+                          style: GoogleFonts.inter(
+                            color: isMe
+                                ? kLimeGreen.withValues(alpha: 0.6)
+                                : kLightGrey,
+                            fontSize: 10,
                           ),
-                          if (isMe) ...[
-                            const SizedBox(width: 4),
-                            buildMessageStatus(event),
-                          ],
+                        ),
+                        if (isMe) ...[
+                          const SizedBox(width: 4),
+                          buildMessageStatus(event),
                         ],
-                      ),
+                      ],
                     ),
                   ),
                 ],
@@ -370,10 +353,7 @@ class TextOrFileMessageBubble extends StatelessWidget {
                     onTap: onReplyTap,
                   ),
                   if (hasReply) const SizedBox(height: 6),
-                  _StoryReplyContextPreview(
-                    storyReply: storyReply,
-                    isMe: isMe,
-                  ),
+                  _StoryReplyContextPreview(storyReply: storyReply, isMe: isMe),
                   _PrivateReplyContextPreview(
                     event: event,
                     isMe: isMe,
@@ -438,71 +418,122 @@ class TextOrFileMessageBubble extends StatelessWidget {
 class _ContactMessageCard extends StatelessWidget {
   final XmoContactCard contact;
   final bool isMe;
-  final VoidCallback onTap;
+  final VoidCallback? onMessage;
+  final VoidCallback onOpen;
 
   const _ContactMessageCard({
     required this.contact,
     required this.isMe,
-    required this.onTap,
+    required this.onMessage,
+    required this.onOpen,
   });
 
   @override
   Widget build(BuildContext context) {
-    final foreground = isMe ? kLimeGreen : kWhite;
+    const foreground = kLimeGreen;
+    final action = onMessage ?? onOpen;
     return Material(
       color: isMe
-          ? kLimeGreen.withValues(alpha: 0.1)
-          : kWhite.withValues(alpha: 0.07),
-      borderRadius: BorderRadius.circular(10),
+          ? const Color(0xFF29452B)
+          : Colors.white.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(8),
       clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-          child: Row(
+      child: Stack(
+        children: [
+          Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: foreground.withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
+              Padding(
+                padding: const EdgeInsets.only(top: 9, bottom: 8),
+                child: SizedBox(
+                  height: 42,
+                  child: Stack(
+                    children: [
+                      Positioned(
+                        left: 16,
+                        child: StoryAvatar(
+                          userName: contact.displayLabel,
+                          avatarUrl: contact.avatarUrl,
+                          size: 42,
+                          backgroundColor: foreground.withValues(alpha: 0.12),
+                          textColor: foreground,
+                        ),
+                      ),
+                      Positioned.fill(
+                        left: 58,
+                        right: 58,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Text(
+                              contact.displayLabel,
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.inter(
+                                color: foreground,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              contact.subtitle,
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.inter(
+                                color: kLightGrey,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                child: Icon(Icons.person_outline, color: foreground, size: 25),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      contact.displayName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+              Divider(
+                height: 1,
+                thickness: 1,
+                indent: 12,
+                endIndent: 12,
+                color: foreground.withValues(alpha: 0.18),
+              ),
+              InkWell(
+                onTap: action,
+                child: SizedBox(
+                  height: 36,
+                  child: Center(
+                    child: Text(
+                      contact.isXmoUser ? 'MESSAGE' : 'OPEN CONTACT',
                       style: GoogleFonts.inter(
                         color: foreground,
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      contact.subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
-                        color: isMe
-                            ? kLimeGreen.withValues(alpha: 0.68)
-                            : kLightGrey,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ],
           ),
-        ),
+          Positioned(
+            left: 6,
+            top: 6,
+            bottom: 6,
+            child: Container(
+              width: 3,
+              decoration: BoxDecoration(
+                color: foreground,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -539,9 +570,7 @@ class _FileMessageMenu extends StatelessWidget {
       color: const Color(0xFF262728),
       elevation: 8,
       constraints: const BoxConstraints(minWidth: 168),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: const SizedBox(
         width: 24,
         height: 24,
@@ -613,10 +642,7 @@ class _FileMessageMenu extends StatelessWidget {
             child: Icon(icon, color: color, size: 20),
           ),
           const SizedBox(width: 12),
-          Text(
-            label,
-            style: GoogleFonts.inter(color: color, fontSize: 14),
-          ),
+          Text(label, style: GoogleFonts.inter(color: color, fontSize: 14)),
         ],
       ),
     );
@@ -634,7 +660,8 @@ bool _isEmojiOnlyMessage(String text) {
       continue;
     }
 
-    final isEmojiJoinerOrModifier = rune == 0x200D ||
+    final isEmojiJoinerOrModifier =
+        rune == 0x200D ||
         rune == 0x20E3 ||
         rune == 0xFE0E ||
         rune == 0xFE0F ||
@@ -668,7 +695,8 @@ bool _isEmojiCluster(String character) {
       continue;
     }
 
-    final isEmojiJoinerOrModifier = rune == 0x200D ||
+    final isEmojiJoinerOrModifier =
+        rune == 0x200D ||
         rune == 0xFE0E ||
         rune == 0xFE0F ||
         (rune >= 0xE0020 && rune <= 0xE007F);
@@ -732,16 +760,17 @@ class _MentionAwareTextState extends State<_MentionAwareText> {
   }
 
   List<TextSpan> _buildSpans() {
-    final mentionTargets = widget.members
-        .where((member) => member.displayName.trim().isNotEmpty)
-        .map(
-          (member) => _MentionTarget(
-            member: member,
-            token: '@${member.displayName.trim()}',
-          ),
-        )
-        .toList()
-      ..sort((a, b) => b.token.length.compareTo(a.token.length));
+    final mentionTargets =
+        widget.members
+            .where((member) => member.displayName.trim().isNotEmpty)
+            .map(
+              (member) => _MentionTarget(
+                member: member,
+                token: '@${member.displayName.trim()}',
+              ),
+            )
+            .toList()
+          ..sort((a, b) => b.token.length.compareTo(a.token.length));
 
     final spans = <TextSpan>[];
     var index = 0;
@@ -851,9 +880,7 @@ class _MentionAwareTextState extends State<_MentionAwareText> {
       end: match.end,
       span: TextSpan(
         text: visibleText,
-        style: widget.baseStyle.copyWith(
-          color: kAudioBlue,
-        ),
+        style: widget.baseStyle.copyWith(color: kAudioBlue),
         recognizer: recognizer,
       ),
     );
@@ -882,7 +909,8 @@ class _MentionAwareTextState extends State<_MentionAwareText> {
     final uri = _uriForLink(rawLink);
     if (uri == null) return;
 
-    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication) ||
+    final opened =
+        await launchUrl(uri, mode: LaunchMode.externalApplication) ||
         await launchUrl(uri, mode: LaunchMode.platformDefault);
 
     if (!opened && mounted) {
@@ -929,10 +957,7 @@ class _MentionTarget {
   final GroupMember member;
   final String token;
 
-  const _MentionTarget({
-    required this.member,
-    required this.token,
-  });
+  const _MentionTarget({required this.member, required this.token});
 }
 
 Map<String, dynamic>? _privateReplyContent(Event event) {
@@ -975,7 +1000,7 @@ Future<Uint8List?>? _cachedReplyPreviewMediaFuture(
   return _replyPreviewMediaFutures.putIfAbsent(key, () {
     return isImage
         ? loadImageBytes?.call(event, getThumbnail: true) ??
-            Future<Uint8List?>.value(null)
+              Future<Uint8List?>.value(null)
         : loadVideoThumbnail?.call(event) ?? Future<Uint8List?>.value(null);
   });
 }
@@ -1023,7 +1048,8 @@ class _PrivateReplyContextPreview extends StatelessWidget {
                 fallback: preview ?? 'Original message',
               );
 
-        final canOpenSource = sourceRoomId?.isNotEmpty == true &&
+        final canOpenSource =
+            sourceRoomId?.isNotEmpty == true &&
             sourceEventId?.isNotEmpty == true &&
             onTap != null;
 
@@ -1199,10 +1225,8 @@ class _PrivateReplyMediaPreview extends StatelessWidget {
                   Image.memory(
                     bytes,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => _PrivateReplyTypeIcon(
-                      msgtype: msgtype,
-                      isMe: isMe,
-                    ),
+                    errorBuilder: (_, __, ___) =>
+                        _PrivateReplyTypeIcon(msgtype: msgtype, isMe: isMe),
                   ),
                   if (msgtype == MessageTypes.Video)
                     Container(
@@ -1242,10 +1266,7 @@ class _PrivateReplyTypeIcon extends StatelessWidget {
   final String msgtype;
   final bool isMe;
 
-  const _PrivateReplyTypeIcon({
-    required this.msgtype,
-    required this.isMe,
-  });
+  const _PrivateReplyTypeIcon({required this.msgtype, required this.isMe});
 
   @override
   Widget build(BuildContext context) {
@@ -1257,11 +1278,7 @@ class _PrivateReplyTypeIcon extends StatelessWidget {
       _ => Icons.chat_bubble_rounded,
     };
 
-    return Icon(
-      icon,
-      color: isMe ? kLimeGreen : kLightGrey,
-      size: 20,
-    );
+    return Icon(icon, color: isMe ? kLimeGreen : kLightGrey, size: 20);
   }
 }
 
@@ -1280,10 +1297,7 @@ _StoryReplyContent? _storyReplyContent(Event event) {
   return null;
 }
 
-String _storyReplyDisplayBody(
-  String body,
-  _StoryReplyContent? storyReply,
-) {
+String _storyReplyDisplayBody(String body, _StoryReplyContent? storyReply) {
   if (storyReply == null) return body;
   if (body.startsWith('Replied to your story\n')) {
     return body.substring('Replied to your story\n'.length).trim();
@@ -1316,16 +1330,16 @@ class _StoryReplyContent {
   }) : legacy = false;
 
   const _StoryReplyContent.legacy()
-      : storyId = null,
-        storyOwnerId = null,
-        storyOwnerName = null,
-        mediaType = null,
-        mediaUrl = null,
-        thumbnailUrl = null,
-        textContent = null,
-        caption = null,
-        expiresAt = null,
-        legacy = true;
+    : storyId = null,
+      storyOwnerId = null,
+      storyOwnerName = null,
+      mediaType = null,
+      mediaUrl = null,
+      thumbnailUrl = null,
+      textContent = null,
+      caption = null,
+      expiresAt = null,
+      legacy = true;
 
   factory _StoryReplyContent.fromJson(Map<String, dynamic> json) {
     final expiresAtMs = json['expires_at'];
@@ -1451,10 +1465,9 @@ class _StoryReplyContextPreview extends StatelessWidget {
         storyReply.storyOwnerId != myUserId) {
       return false;
     }
-    return context
-        .read<StoryProvider>()
-        .myStories
-        .any((story) => story.id == storyReply.storyId && !story.isExpired);
+    return context.read<StoryProvider>().myStories.any(
+      (story) => story.id == storyReply.storyId && !story.isExpired,
+    );
   }
 
   void _openStory(BuildContext context, _StoryReplyContent storyReply) {
@@ -1474,10 +1487,7 @@ class _StoryReplyThumb extends StatelessWidget {
   final _StoryReplyContent storyReply;
   final bool isMe;
 
-  const _StoryReplyThumb({
-    required this.storyReply,
-    required this.isMe,
-  });
+  const _StoryReplyThumb({required this.storyReply, required this.isMe});
 
   @override
   Widget build(BuildContext context) {
@@ -1500,7 +1510,9 @@ class _StoryReplyThumb extends StatelessWidget {
                   headers: request.headers,
                   fit: BoxFit.cover,
                   errorBuilder: (_, __, ___) => _StoryReplyThumbFallback(
-                      storyReply: storyReply, isMe: isMe),
+                    storyReply: storyReply,
+                    isMe: isMe,
+                  ),
                 ),
                 if (storyReply.mediaType == 'video' && !storyReply.isExpired)
                   Container(

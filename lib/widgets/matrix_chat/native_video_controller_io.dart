@@ -60,6 +60,24 @@ Future<VideoPlayerController> createNativeNetworkVideoController({
   return controller;
 }
 
+Future<VideoPlayerController> createNativeContentUriVideoController({
+  required Uri uri,
+}) async {
+  final controller = await _initializeController(
+    () => VideoPlayerController.contentUri(
+      uri,
+      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+      viewType: _preferredVideoViewType,
+    ),
+    fallbackFactory: () => VideoPlayerController.contentUri(
+      uri,
+      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+    ),
+  );
+  await controller.play();
+  return controller;
+}
+
 VideoViewType get _preferredVideoViewType {
   return defaultTargetPlatform == TargetPlatform.android
       ? VideoViewType.platformView

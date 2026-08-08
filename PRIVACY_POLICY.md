@@ -276,7 +276,7 @@ For privacy questions or requests, contact:
 
 `xmoapp@proton.me`
 
-If XMO is operated by a company or organization, add the legal entity name and registered address here before publishing this policy.
+XMO is operated by XMO Technologies, based in Kerala, India.
 
 ## 20. Reference Policies Reviewed
 

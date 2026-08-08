@@ -35,12 +35,12 @@ class SharedMediaLinkItem {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'url': url,
-        'eventId': eventId,
-        'timestamp': timestamp.millisecondsSinceEpoch,
-        'senderId': senderId,
-      };
+    'id': id,
+    'url': url,
+    'eventId': eventId,
+    'timestamp': timestamp.millisecondsSinceEpoch,
+    'senderId': senderId,
+  };
 }
 
 class SharedMediaIndexSnapshot {
@@ -80,6 +80,7 @@ class SharedMediaIndexService {
 
   static final SharedMediaIndexService instance = SharedMediaIndexService._();
   static const String boxName = 'xmo_shared_media_index';
+  static const int _schemaVersion = 3;
   final Set<String> _cancelledHistoryRuns = <String>{};
 
   static final RegExp _linkPattern = RegExp(
@@ -98,7 +99,8 @@ class SharedMediaIndexService {
   }) async {
     final box = await _box();
     return _snapshotFromState(
-        _stateFromRaw(box.get(_key(ownerUserId, roomId))));
+      _stateFromRaw(box.get(_key(ownerUserId, roomId))),
+    );
   }
 
   Future<SharedMediaIndexSnapshot> indexTimeline({
@@ -111,7 +113,10 @@ class SharedMediaIndexService {
   }) async {
     final box = await _box();
     final key = _key(ownerUserId, room.id);
-    final state = _stateFromRaw(box.get(key));
+    final rebuildCompleteTimeline = historyComplete && eventsToIndex == null;
+    final state = rebuildCompleteTimeline
+        ? _emptyState()
+        : _stateFromRaw(box.get(key));
     _indexEvents(
       state,
       eventsToIndex ?? timeline.events,
@@ -170,8 +175,9 @@ class SharedMediaIndexService {
           await timeline.requestHistory(historyCount: pageSize);
           loaded = timeline.events.length > beforeEventCount;
           if (loaded) {
-            fetchedEvents =
-                timeline.events.skip(beforeEventCount).toList(growable: false);
+            fetchedEvents = timeline.events
+                .skip(beforeEventCount)
+                .toList(growable: false);
           }
         } catch (error) {
           lastError = error;
@@ -238,9 +244,15 @@ class SharedMediaIndexService {
 
   Map<String, dynamic> _stateFromRaw(Object? raw) {
     if (raw is Map) {
-      return raw.map((key, value) => MapEntry(key.toString(), value));
+      final state = raw.map((key, value) => MapEntry(key.toString(), value));
+      if (state['schemaVersion'] == _schemaVersion) return state;
     }
+    return _emptyState();
+  }
+
+  Map<String, dynamic> _emptyState() {
     return <String, dynamic>{
+      'schemaVersion': _schemaVersion,
       'media': <String, dynamic>{},
       'links': <String, dynamic>{},
       'indexedEventIds': <String, dynamic>{},
@@ -332,38 +344,43 @@ class SharedMediaIndexService {
     final media = _nestedMap(state, 'media');
     final links = _nestedMap(state, 'links');
 
-    final mediaItems = media.values
-        .whereType<Map>()
-        .map((value) {
-          try {
-            return _mediaFromJson(
-              value.map((key, value) => MapEntry(key.toString(), value)),
-            );
-          } catch (e) {
-            debugPrint('[SharedMediaIndex] Invalid media entry skipped: $e');
-            return null;
-          }
-        })
-        .whereType<SharedMediaItem>()
-        .toList()
-      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    final mediaItems =
+        media.values
+            .whereType<Map>()
+            .map((value) {
+              try {
+                return _mediaFromJson(
+                  value.map((key, value) => MapEntry(key.toString(), value)),
+                );
+              } catch (e) {
+                debugPrint(
+                  '[SharedMediaIndex] Invalid media entry skipped: $e',
+                );
+                return null;
+              }
+            })
+            .whereType<SharedMediaItem>()
+            .where((item) => item.eventId.isNotEmpty)
+            .toList()
+          ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
 
-    final linkItems = links.values
-        .whereType<Map>()
-        .map((value) {
-          try {
-            return SharedMediaLinkItem.fromJson(
-              value.map((key, value) => MapEntry(key.toString(), value)),
-            );
-          } catch (e) {
-            debugPrint('[SharedMediaIndex] Invalid link entry skipped: $e');
-            return null;
-          }
-        })
-        .whereType<SharedMediaLinkItem>()
-        .where((item) => item.url.isNotEmpty && item.eventId.isNotEmpty)
-        .toList()
-      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    final linkItems =
+        links.values
+            .whereType<Map>()
+            .map((value) {
+              try {
+                return SharedMediaLinkItem.fromJson(
+                  value.map((key, value) => MapEntry(key.toString(), value)),
+                );
+              } catch (e) {
+                debugPrint('[SharedMediaIndex] Invalid link entry skipped: $e');
+                return null;
+              }
+            })
+            .whereType<SharedMediaLinkItem>()
+            .where((item) => item.url.isNotEmpty && item.eventId.isNotEmpty)
+            .toList()
+          ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
 
     return SharedMediaIndexSnapshot(
       photos: mediaItems.where((m) => m.type == MediaType.image).toList(),

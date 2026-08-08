@@ -4,6 +4,7 @@ import 'package:reown_appkit/reown_appkit.dart';
 
 import 'call_link_service.dart';
 import 'invite_link_service.dart';
+import 'matrix_sso_service.dart';
 
 class WalletDeepLinkHandler {
   static const _methodChannel = MethodChannel('com.xmo.xmo/wallet_methods');
@@ -17,9 +18,9 @@ class WalletDeepLinkHandler {
     if (kIsWeb || _listening) return;
     _listening = true;
     _eventChannel.receiveBroadcastStream().listen(
-          _onLink,
-          onError: (error) => debugPrint('[WalletDeepLink] $error'),
-        );
+      _onLink,
+      onError: (error) => debugPrint('[WalletDeepLink] $error'),
+    );
   }
 
   static void attach(IReownAppKitModal appKitModal) {
@@ -43,6 +44,8 @@ class WalletDeepLinkHandler {
   static Future<void> _onLink(dynamic link) async {
     final value = link?.toString();
     if (value == null || value.isEmpty) return;
+
+    if (MatrixSsoService.instance.handleLink(value)) return;
 
     final appKitModal = _appKitModal;
     if (appKitModal == null && isSupportedWalletLink(value)) {

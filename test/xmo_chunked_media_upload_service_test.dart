@@ -174,13 +174,17 @@ void main() {
     });
 
     test('normalizes video source when provider returns smaller mp4', () async {
+      String? receivedSourcePath;
       final service = XmoChunkedMediaUploadService(
-        sourceNormalizer: (source) async => XmoVideoQualityVariant(
-          name: 'source',
-          bytes: Uint8List.fromList([1, 2, 3]),
-          fileName: 'clip.mp4',
-          mimeType: 'video/mp4',
-        ),
+        sourceNormalizer: (source) async {
+          receivedSourcePath = source.sourcePath;
+          return XmoVideoQualityVariant(
+            name: 'source',
+            bytes: Uint8List.fromList([1, 2, 3]),
+            fileName: 'clip.mp4',
+            mimeType: 'video/mp4',
+          );
+        },
       );
 
       final normalized = await service.normalizeVideoSource(
@@ -188,12 +192,14 @@ void main() {
         videoFileName: 'clip.mov',
         videoMimeType: 'video/quicktime',
         durationMs: 1000,
+        sourcePath: '/queue/clip.mov',
       );
 
       expect(normalized, isNotNull);
       expect(normalized!.fileName, 'clip.mp4');
       expect(normalized.mimeType, 'video/mp4');
       expect(normalized.bytes, [1, 2, 3]);
+      expect(receivedSourcePath, '/queue/clip.mov');
     });
 
     test('keeps original source when normalized video is larger', () async {

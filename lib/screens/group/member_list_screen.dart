@@ -186,7 +186,10 @@ class _MemberListScreenState extends State<MemberListScreen> {
           canChangePermissions: false,
         );
         await _groupService.promoteToAdmin(
-            widget.room.id, member.userId, permissions);
+          widget.room.id,
+          member.userId,
+          permissions,
+        );
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -203,10 +206,7 @@ class _MemberListScreenState extends State<MemberListScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -231,8 +231,10 @@ class _MemberListScreenState extends State<MemberListScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child:
-                Text('Remove', style: GoogleFonts.inter(color: Colors.orange)),
+            child: Text(
+              'Remove',
+              style: GoogleFonts.inter(color: Colors.orange),
+            ),
           ),
         ],
       ),
@@ -255,10 +257,7 @@ class _MemberListScreenState extends State<MemberListScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -306,10 +305,7 @@ class _MemberListScreenState extends State<MemberListScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -334,8 +330,10 @@ class _MemberListScreenState extends State<MemberListScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Restrict',
-                style: GoogleFonts.inter(color: Colors.orange)),
+            child: Text(
+              'Restrict',
+              style: GoogleFonts.inter(color: Colors.orange),
+            ),
           ),
         ],
       ),
@@ -437,8 +435,10 @@ class _MemberListScreenState extends State<MemberListScreen> {
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
                 ),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
               ),
               onChanged: _filterMembers,
             ),
@@ -448,7 +448,8 @@ class _MemberListScreenState extends State<MemberListScreen> {
           Expanded(
             child: _loading
                 ? const Center(
-                    child: CircularProgressIndicator(color: kLimeGreen))
+                    child: CircularProgressIndicator(color: kLimeGreen),
+                  )
                 : ListView.builder(
                     itemCount: _filteredMembers.length,
                     itemBuilder: (_, i) =>

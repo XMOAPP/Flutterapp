@@ -15,7 +15,11 @@ param(
         "XMO_ACCOUNT_DELETION_SERVER_URL=https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp",
         "XMO_ACCOUNT_DELETION_WEB_URL=https://xmo.dpdns.org/account-deletion",
         "XMO_INVITE_SERVER_URL=https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp",
-        "XMO_INVITE_WEB_BASE_URL=https://xmo.dpdns.org"
+        "XMO_INVITE_WEB_BASE_URL=https://xmo.dpdns.org",
+        "XMO_ENABLE_SSO_LOGIN=true",
+        "XMO_SSO_IDP_ID=oidc-authentik",
+        "XMO_SSO_CALLBACK_URL=https://xmo.dpdns.org/auth/callback",
+        "XMO_MFA_SETUP_URL=https://auth.xmo.dpdns.org/if/flow/xmo-totp-setup/"
     )
 )
 

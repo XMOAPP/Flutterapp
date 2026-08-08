@@ -1,5 +1,7 @@
 import 'package:matrix/matrix.dart';
 
+import '../utils/matrix_identity.dart';
+
 /// Channel-specific models for broadcast channels
 
 /// Channel subscriber information
@@ -25,7 +27,10 @@ class ChannelSubscriber {
   factory ChannelSubscriber.fromUser(User user, Room room) {
     return ChannelSubscriber(
       userId: user.id,
-      displayName: user.displayName ?? user.id,
+      displayName: MatrixIdentity.displayName(
+        userId: user.id,
+        candidate: user.displayName,
+      ),
       avatarUrl: user.avatarUrl?.toString(),
       joinedAt: DateTime.now(), // Matrix doesn't store join time easily
       isBanned: false,
@@ -56,10 +61,14 @@ class ChannelAdmin {
   factory ChannelAdmin.fromUser(User user) {
     return ChannelAdmin(
       userId: user.id,
-      displayName: user.displayName ?? user.id,
+      displayName: MatrixIdentity.displayName(
+        userId: user.id,
+        candidate: user.displayName,
+      ),
       avatarUrl: user.avatarUrl?.toString(),
-      permissions:
-          ChannelAdminPermissions.fromPowerLevel(user.powerLevel.level),
+      permissions: ChannelAdminPermissions.fromPowerLevel(
+        user.powerLevel.level,
+      ),
       promotedAt: DateTime.now(),
       powerLevel: user.powerLevel.level,
     );

@@ -18,7 +18,8 @@ import '../../services/story_service.dart';
 import '../../widgets/story/story_video_player.dart';
 import '../camera_capture_screen.dart';
 import '../web_video_view_stub.dart'
-    if (dart.library.js_interop) '../web_video_view.dart' as web_video;
+    if (dart.library.js_interop) '../web_video_view.dart'
+    as web_video;
 
 /// Story Creator Screen - Create image/video/text stories
 class StoryCreatorScreen extends StatefulWidget {
@@ -42,7 +43,6 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
   StoryMediaType _mediaType = StoryMediaType.text;
   bool _uploading = false;
   StoryCreationProgress? _creationProgress;
-  StoryCreationCancellationToken? _cancellationToken;
   late String _clientRequestId;
 
   @override
@@ -58,7 +58,6 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
 
   @override
   void dispose() {
-    _cancellationToken?.cancel();
     _captionController.removeListener(_handleDraftTextChanged);
     _deleteOwnedSelectedMedia();
     _captionController.dispose();
@@ -101,8 +100,10 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
       }
 
       if (videoBytes != null && videoBytes.isNotEmpty) {
-        final webThumbnail =
-            await web_video.generateVideoThumbnail(videoBytes, mimeType);
+        final webThumbnail = await web_video.generateVideoThumbnail(
+          videoBytes,
+          mimeType,
+        );
         if (webThumbnail != null && webThumbnail.isNotEmpty) {
           return webThumbnail;
         }
@@ -170,7 +171,8 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
       _replaceSelectedFile();
       _selectedMedia = bytes;
       _selectedVideoThumbnail = null;
-      _selectedMediaMimeType = pickedFile.mimeType ??
+      _selectedMediaMimeType =
+          pickedFile.mimeType ??
           lookupMimeType(pickedFile.name, headerBytes: bytes) ??
           lookupMimeType(pickedFile.path, headerBytes: bytes) ??
           'image/jpeg';
@@ -182,7 +184,8 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
   }
 
   Future<void> _setPickedGalleryMedia(XFile pickedFile) async {
-    final mimeType = pickedFile.mimeType ??
+    final mimeType =
+        pickedFile.mimeType ??
         lookupMimeType(pickedFile.name) ??
         lookupMimeType(pickedFile.path) ??
         'image/jpeg';
@@ -380,13 +383,11 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
       return;
     }
 
-    final cancellationToken = StoryCreationCancellationToken();
     setState(() {
       _uploading = true;
       _creationProgress = const StoryCreationProgress(
         phase: StoryCreationPhase.preparing,
       );
-      _cancellationToken = cancellationToken;
     });
 
     try {
@@ -408,8 +409,9 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
         mediaSizeBytes: _selectedMediaSizeBytes,
         mediaMimeType: _selectedMediaMimeType,
         mediaFileName: _selectedMediaFileName,
-        thumbnailBytes:
-            _mediaType == StoryMediaType.video ? _selectedVideoThumbnail : null,
+        thumbnailBytes: _mediaType == StoryMediaType.video
+            ? _selectedVideoThumbnail
+            : null,
         caption: _captionController.text.trim().isNotEmpty
             ? _captionController.text.trim()
             : null,
@@ -419,40 +421,24 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
         privacy: storyPrivacy,
         customPrivacyList:
             privacySettings.storyAudience == XmoPrivacyAudience.contacts
-                ? null
-                : privacySettings.storyUserIds,
+            ? null
+            : privacySettings.storyUserIds,
       );
 
-      final story = await storyProvider.createStory(
-        request,
-        cancellationToken: cancellationToken,
-        onProgress: (progress) {
-          if (mounted) setState(() => _creationProgress = progress);
-        },
-      );
+      await storyProvider.queueStory(request);
 
-      if (story != null && mounted) {
+      if (mounted) {
         _deleteOwnedSelectedMedia();
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Story posted!'),
-            backgroundColor: kLimeGreen,
-            duration: Duration(seconds: 2),
-          ),
-        );
       }
     } catch (e) {
       if (mounted) {
         final message =
             e is StoryValidationException || e is StoryUploadException
-                ? e.toString()
-                : 'Could not post story. Please try again.';
+            ? e.toString()
+            : 'Could not post story. Please try again.';
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text(message), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -460,7 +446,6 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
         setState(() {
           _uploading = false;
           _creationProgress = null;
-          _cancellationToken = null;
         });
       }
     }
@@ -468,146 +453,148 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: kBlack,
-      appBar: AppBar(
+    return PopScope(
+      canPop: !_uploading,
+      child: Scaffold(
         backgroundColor: kBlack,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.close, color: kWhite),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(
-          'Create Story',
-          style: GoogleFonts.inter(
-            color: kWhite,
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
+        appBar: AppBar(
+          backgroundColor: kBlack,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.close, color: kWhite),
+            onPressed: _uploading ? null : () => Navigator.pop(context),
           ),
+          title: Text(
+            'Create Story',
+            style: GoogleFonts.inter(
+              color: kWhite,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          actions: [
+            if (_uploading)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          value: _creationProgress?.fraction,
+                          color: kLimeGreen,
+                          strokeWidth: 2,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              TextButton(
+                onPressed: _createStory,
+                child: Text(
+                  'Post',
+                  style: GoogleFonts.inter(
+                    color: kLimeGreen,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+          ],
         ),
-        actions: [
-          if (_uploading)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
+        body: IgnorePointer(
+          ignoring: _uploading,
+          child: Column(
+            children: [
+              // Preview area
+              Expanded(
+                child: _selectedMedia != null || _selectedMediaFilePath != null
+                    ? _buildMediaPreview()
+                    : _buildTextPreview(),
+              ),
+
+              // Caption input
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: const BoxDecoration(
+                  color: kDarkerGrey,
+                  border: Border(top: BorderSide(color: kMediumGrey, width: 1)),
+                ),
                 child: Row(
                   children: [
-                    SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        value: _creationProgress?.fraction,
-                        color: kLimeGreen,
-                        strokeWidth: 2,
+                    Expanded(
+                      child: TextField(
+                        controller: _captionController,
+                        style: GoogleFonts.inter(color: kWhite, fontSize: 14),
+                        decoration: InputDecoration(
+                          hintText:
+                              _selectedMedia != null ||
+                                  _selectedMediaFilePath != null
+                              ? 'Add a caption...'
+                              : 'Type your story...',
+                          hintStyle: GoogleFonts.inter(
+                            color: kLightGrey,
+                            fontSize: 14,
+                          ),
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        maxLines: 3,
+                        minLines: 1,
                       ),
-                    ),
-                    IconButton(
-                      tooltip: 'Cancel upload',
-                      onPressed: () => _cancellationToken?.cancel(),
-                      icon: const Icon(Icons.close, color: kWhite),
                     ),
                   ],
                 ),
               ),
-            )
-          else
-            TextButton(
-              onPressed: _createStory,
-              child: Text(
-                'Post',
-                style: GoogleFonts.inter(
-                  color: kLimeGreen,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // Preview area
-          Expanded(
-            child: _selectedMedia != null || _selectedMediaFilePath != null
-                ? _buildMediaPreview()
-                : _buildTextPreview(),
-          ),
 
-          // Caption input
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: const BoxDecoration(
-              color: kDarkerGrey,
-              border: Border(
-                top: BorderSide(color: kMediumGrey, width: 1),
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _captionController,
-                    style: GoogleFonts.inter(color: kWhite, fontSize: 14),
-                    decoration: InputDecoration(
-                      hintText: _selectedMedia != null ||
-                              _selectedMediaFilePath != null
-                          ? 'Add a caption...'
-                          : 'Type your story...',
-                      hintStyle: GoogleFonts.inter(
-                        color: kLightGrey,
-                        fontSize: 14,
-                      ),
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.zero,
+              // Media picker buttons
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                decoration: const BoxDecoration(color: kDarkerGrey),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _buildMediaButton(
+                      icon: Icons.photo_library,
+                      label: 'Gallery',
+                      onTap: _pickGalleryMedia,
                     ),
-                    maxLines: 3,
-                    minLines: 1,
-                  ),
+                    _buildMediaButton(
+                      icon: Icons.camera_alt,
+                      label: 'Camera',
+                      onTap: _showCameraPicker,
+                    ),
+                    if (_selectedMedia != null ||
+                        _selectedMediaFilePath != null)
+                      _buildMediaButton(
+                        icon: Icons.delete_outline,
+                        label: 'Remove',
+                        color: Colors.red,
+                        onTap: () {
+                          setState(() {
+                            _resetPublishIdentity();
+                            _replaceSelectedFile();
+                            _selectedMedia = null;
+                            _selectedVideoThumbnail = null;
+                            _selectedMediaMimeType = null;
+                            _selectedMediaFileName = null;
+                            _mediaType = StoryMediaType.text;
+                          });
+                        },
+                      ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-
-          // Media picker buttons
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: const BoxDecoration(
-              color: kDarkerGrey,
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _buildMediaButton(
-                  icon: Icons.photo_library,
-                  label: 'Gallery',
-                  onTap: _pickGalleryMedia,
-                ),
-                _buildMediaButton(
-                  icon: Icons.camera_alt,
-                  label: 'Camera',
-                  onTap: _showCameraPicker,
-                ),
-                if (_selectedMedia != null || _selectedMediaFilePath != null)
-                  _buildMediaButton(
-                    icon: Icons.delete_outline,
-                    label: 'Remove',
-                    color: Colors.red,
-                    onTap: () {
-                      setState(() {
-                        _resetPublishIdentity();
-                        _replaceSelectedFile();
-                        _selectedMedia = null;
-                        _selectedVideoThumbnail = null;
-                        _selectedMediaMimeType = null;
-                        _selectedMediaFileName = null;
-                        _mediaType = StoryMediaType.text;
-                      });
-                    },
-                  ),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -617,21 +604,18 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
       color: kBlack,
       child: Center(
         child: _mediaType == StoryMediaType.image
-            ? Image.memory(
-                _selectedMedia!,
-                fit: BoxFit.contain,
-              )
+            ? Image.memory(_selectedMedia!, fit: BoxFit.contain)
             : _selectedMediaFilePath != null
-                ? StoryVideoPlayer.file(
-                    key: ValueKey(_selectedMediaFilePath),
-                    filePath: _selectedMediaFilePath!,
-                    mimeType: _selectedMediaMimeType ?? 'video/mp4',
-                  )
-                : StoryVideoPlayer.bytes(
-                    key: ValueKey(_selectedMedia),
-                    bytes: _selectedMedia!,
-                    mimeType: _selectedMediaMimeType ?? 'video/mp4',
-                  ),
+            ? StoryVideoPlayer.file(
+                key: ValueKey(_selectedMediaFilePath),
+                filePath: _selectedMediaFilePath!,
+                mimeType: _selectedMediaMimeType ?? 'video/mp4',
+              )
+            : StoryVideoPlayer.bytes(
+                key: ValueKey(_selectedMedia),
+                bytes: _selectedMedia!,
+                mimeType: _selectedMediaMimeType ?? 'video/mp4',
+              ),
       ),
     );
   }
@@ -672,18 +656,11 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              icon,
-              color: color ?? kWhite,
-              size: 26,
-            ),
+            Icon(icon, color: color ?? kWhite, size: 26),
             const SizedBox(height: 4),
             Text(
               label,
-              style: GoogleFonts.inter(
-                color: color ?? kWhite,
-                fontSize: 11,
-              ),
+              style: GoogleFonts.inter(color: color ?? kWhite, fontSize: 11),
             ),
           ],
         ),

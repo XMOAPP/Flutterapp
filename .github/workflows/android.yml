@@ -229,6 +229,8 @@ jobs:
           XMO_ACCOUNT_DELETION_WEB_URL: ${{ vars.XMO_ACCOUNT_DELETION_WEB_URL }}
           XMO_INVITE_SERVER_URL: ${{ vars.XMO_INVITE_SERVER_URL }}
           XMO_INVITE_WEB_BASE_URL: ${{ vars.XMO_INVITE_WEB_BASE_URL }}
+          XMO_SSO_IDP_ID: ${{ vars.XMO_SSO_IDP_ID }}
+          XMO_MFA_SETUP_URL: ${{ vars.XMO_MFA_SETUP_URL }}
         run: |
           set -euo pipefail
           for variable in \
@@ -240,7 +242,9 @@ jobs:
             XMO_ACCOUNT_DELETION_SERVER_URL \
             XMO_ACCOUNT_DELETION_WEB_URL \
             XMO_INVITE_SERVER_URL \
-            XMO_INVITE_WEB_BASE_URL; do
+            XMO_INVITE_WEB_BASE_URL \
+            XMO_SSO_IDP_ID \
+            XMO_MFA_SETUP_URL; do
             test -n "${!variable}"
           done
           bash tools/ci/run_with_timeout.sh 1800 build/quality-logs/release-build.log \
@@ -253,7 +257,11 @@ jobs:
             --dart-define=XMO_ACCOUNT_DELETION_SERVER_URL="$XMO_ACCOUNT_DELETION_SERVER_URL" \
             --dart-define=XMO_ACCOUNT_DELETION_WEB_URL="$XMO_ACCOUNT_DELETION_WEB_URL" \
             --dart-define=XMO_INVITE_SERVER_URL="$XMO_INVITE_SERVER_URL" \
-            --dart-define=XMO_INVITE_WEB_BASE_URL="$XMO_INVITE_WEB_BASE_URL"
+            --dart-define=XMO_INVITE_WEB_BASE_URL="$XMO_INVITE_WEB_BASE_URL" \
+            --dart-define=XMO_ENABLE_SSO_LOGIN=true \
+            --dart-define=XMO_SSO_IDP_ID="$XMO_SSO_IDP_ID" \
+            --dart-define=XMO_SSO_CALLBACK_URL=https://xmo.dpdns.org/auth/callback \
+            --dart-define=XMO_MFA_SETUP_URL="$XMO_MFA_SETUP_URL"
       - name: Verify Vodozemac and 16 KB artifact compatibility
         run: |
           set -euo pipefail

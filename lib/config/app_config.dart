@@ -1,12 +1,12 @@
 class AppConfig {
   static const homeserverUrl = String.fromEnvironment(
     'XMO_HOMESERVER_URL',
-    defaultValue: 'http://localhost:8008',
+    defaultValue: 'https://xmo-matrix.centralindia.cloudapp.azure.com',
   );
 
   static const matrixServerName = String.fromEnvironment(
     'XMO_MATRIX_SERVER_NAME',
-    defaultValue: 'localhost',
+    defaultValue: 'xmo-matrix.centralindia.cloudapp.azure.com',
   );
 
   static const otpServerUrl = String.fromEnvironment(
@@ -49,6 +49,21 @@ class AppConfig {
     defaultValue: 'https://xmo.dpdns.org/account-deletion',
   );
 
+  static const publicWebsiteUrl = String.fromEnvironment(
+    'XMO_PUBLIC_WEBSITE_URL',
+    defaultValue: 'https://xmo.dpdns.org/',
+  );
+
+  static const secureAccountUrl = String.fromEnvironment(
+    'XMO_SECURE_ACCOUNT_URL',
+    defaultValue: 'https://auth.xmo.dpdns.org/if/user/',
+  );
+
+  static const mfaSetupUrl = String.fromEnvironment(
+    'XMO_MFA_SETUP_URL',
+    defaultValue: 'https://auth.xmo.dpdns.org/if/flow/xmo-totp-setup/',
+  );
+
   static const walletAuthServerUrl = String.fromEnvironment(
     'XMO_WALLET_AUTH_SERVER_URL',
     defaultValue:
@@ -70,11 +85,61 @@ class AppConfig {
     defaultValue: false,
   );
 
+  /// Enables the browser-based Matrix SSO flow during the OIDC migration.
+  /// Keep this disabled until Synapse has an OIDC provider configured.
+  static const enableSsoLogin = bool.fromEnvironment(
+    'XMO_ENABLE_SSO_LOGIN',
+    defaultValue: false,
+  );
+
+  /// The Synapse OIDC provider identifier, for example `authentik`.
+  static const ssoIdpId = String.fromEnvironment(
+    'XMO_SSO_IDP_ID',
+    defaultValue: '',
+  );
+
+  /// Verified Android App Link used to return the one-time Matrix login token.
+  static const ssoCallbackUrl = String.fromEnvironment(
+    'XMO_SSO_CALLBACK_URL',
+    defaultValue: 'https://xmo.dpdns.org/auth/callback',
+  );
+
+  /// Temporary rollback switch for pre-App-Link deployments only.
+  static const enableLegacySsoCallback = bool.fromEnvironment(
+    'XMO_ENABLE_LEGACY_SSO_CALLBACK',
+    defaultValue: false,
+  );
+
+  static bool get isSsoLoginConfigured =>
+      enableSsoLogin &&
+      RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(ssoIdpId) &&
+      _isValidSsoCallbackUrl(ssoCallbackUrl);
+
+  static bool _isValidSsoCallbackUrl(String value) {
+    final uri = Uri.tryParse(value.trim());
+    if (uri == null || uri.query.isNotEmpty || uri.fragment.isNotEmpty) {
+      return false;
+    }
+    if (uri.scheme == 'https' &&
+        uri.host.toLowerCase() == 'xmo.dpdns.org' &&
+        uri.path == '/auth/callback') {
+      return true;
+    }
+    return enableLegacySsoCallback &&
+        uri.scheme == 'xmo' &&
+        uri.host == 'auth' &&
+        uri.path == '/callback';
+  }
+
+  /// Public Reown client project identifier. Reown project IDs are shipped to
+  /// clients by design; production access must be restricted in Reown's
+  /// allowlist. A dart-define can replace this identifier without a code edit.
   static const reownProjectId = String.fromEnvironment(
     'XMO_REOWN_PROJECT_ID',
     defaultValue: 'aeb4b4a85b194d2c749a857947220b2d',
   );
 
+  /// Public Thirdweb client identifier. Payment secrets remain server-side.
   static const thirdwebClientId = String.fromEnvironment(
     'XMO_THIRDWEB_CLIENT_ID',
     defaultValue: '81d97ee5ab262c8d202bc75ca83cc6f5',
@@ -119,4 +184,37 @@ class AppConfig {
   static bool get useAzureBlobChunks =>
       streamChunkStorage.toLowerCase() == 'azure' &&
       azureChunkSignUrl.trim().isNotEmpty;
+
+  static List<String> productionConfigurationErrors() {
+    final errors = <String>[];
+    final httpsValues = <String, String>{
+      'XMO_HOMESERVER_URL': homeserverUrl,
+      'XMO_OTP_SERVER_URL': otpServerUrl,
+      'XMO_USER_DIRECTORY_SERVER_URL': userDirectoryServerUrl,
+      'XMO_ACCOUNT_DELETION_SERVER_URL': accountDeletionServerUrl,
+      'XMO_INVITE_SERVER_URL': inviteServerUrl,
+      'XMO_PUBLIC_WEBSITE_URL': publicWebsiteUrl,
+      'XMO_SECURE_ACCOUNT_URL': secureAccountUrl,
+      'XMO_MFA_SETUP_URL': mfaSetupUrl,
+    };
+    for (final entry in httpsValues.entries) {
+      final uri = Uri.tryParse(entry.value.trim());
+      if (uri == null || uri.scheme != 'https' || uri.host.isEmpty) {
+        errors.add('${entry.key} must be a valid HTTPS URL');
+      }
+    }
+    if (!isSsoLoginConfigured) {
+      errors.add(
+        'Secure sign-in requires XMO_ENABLE_SSO_LOGIN=true, a valid '
+        'XMO_SSO_IDP_ID, and the verified HTTPS XMO_SSO_CALLBACK_URL',
+      );
+    }
+    if (streamChunkStorage.toLowerCase() == 'azure') {
+      final uri = Uri.tryParse(azureChunkSignUrl.trim());
+      if (uri == null || uri.scheme != 'https' || uri.host.isEmpty) {
+        errors.add('Azure chunk storage requires XMO_AZURE_CHUNK_SIGN_URL');
+      }
+    }
+    return errors;
+  }
 }

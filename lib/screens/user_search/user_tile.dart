@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
-import '../../services/matrix_service.dart';
 import '../../theme.dart';
+import '../../utils/matrix_identity.dart';
 import '../../widgets/story/story_avatar.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -24,9 +24,11 @@ class _UserTileState extends State<UserTile> {
 
   @override
   Widget build(BuildContext context) {
-    final cleanUsername = MatrixService.cleanName(widget.profile.userId);
-    final displayName = widget.profile.displayName;
-    final hasDisplayName = displayName != null && displayName.isNotEmpty;
+    final cleanUsername = MatrixIdentity.localpart(widget.profile.userId);
+    final displayName = MatrixIdentity.displayName(
+      userId: widget.profile.userId,
+      candidate: widget.profile.displayName,
+    );
 
     return RepaintBoundary(
       child: MouseRegion(
@@ -46,13 +48,7 @@ class _UserTileState extends State<UserTile> {
               children: [
                 _buildAvatar(cleanUsername),
                 const SizedBox(width: 14),
-                Expanded(
-                  child: _buildUserInfo(
-                    cleanUsername,
-                    displayName,
-                    hasDisplayName,
-                  ),
-                ),
+                Expanded(child: _buildUserInfo(displayName)),
                 _buildChatIcon(),
               ],
             ),
@@ -70,20 +66,13 @@ class _UserTileState extends State<UserTile> {
     );
   }
 
-  Widget _buildUserInfo(
-    String cleanUsername,
-    String? displayName,
-    bool hasDisplayName,
-  ) {
+  Widget _buildUserInfo(String displayName) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Text(displayName, style: _nameTextStyle),
         Text(
-          hasDisplayName ? displayName! : cleanUsername,
-          style: _nameTextStyle,
-        ),
-        Text(
-          '@$cleanUsername',
+          MatrixIdentity.usernameLabel(widget.profile.userId),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: _usernameTextStyle,

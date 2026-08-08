@@ -62,10 +62,8 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     final result = await Navigator.push<CameraCaptureResult>(
       context,
       MaterialPageRoute(
-        builder: (_) => const CameraCaptureScreen(
-          allowVideo: false,
-          showCaption: false,
-        ),
+        builder: (_) =>
+            const CameraCaptureScreen(allowVideo: false, showCaption: false),
       ),
     );
     if (!mounted || result == null || result.bytes.isEmpty) return;
@@ -123,26 +121,26 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
 
     setState(() => _saving = true);
     final provider = context.read<MatrixProvider>();
-    final success = await provider.updateProfile(
+    final messenger = ScaffoldMessenger.of(context);
+    final update = provider.updateProfile(
       displayName: name,
       avatarBytes: _selectedAvatarBytes,
       avatarFileName: _selectedAvatarName,
       removeAvatar: _removeAvatar,
     );
+    Navigator.pop(context);
 
-    if (!mounted) return;
-    setState(() => _saving = false);
+    final success = await update;
 
     if (success) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         const SnackBar(
           content: Text('Profile updated'),
           backgroundColor: kLimeGreen,
         ),
       );
-      Navigator.pop(context);
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(
           content: Text(provider.error ?? 'Failed to update profile'),
           backgroundColor: Colors.red,
@@ -203,8 +201,9 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                       child: _selectedAvatarBytes == null
                           ? StoryAvatar(
                               userName: provider.displayName ?? '',
-                              avatarUrl:
-                                  _removeAvatar ? null : provider.avatarUrl,
+                              avatarUrl: _removeAvatar
+                                  ? null
+                                  : provider.avatarUrl,
                               size: 104,
                               backgroundColor: const Color(0xFF2C2C2E),
                               textColor: kLimeGreen,
@@ -223,7 +222,8 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                         itemBuilder: (context) {
-                          final hasAvatar = _selectedAvatarBytes != null ||
+                          final hasAvatar =
+                              _selectedAvatarBytes != null ||
                               (!_removeAvatar && provider.avatarUrl != null);
                           return [
                             _avatarMenuItem(

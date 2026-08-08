@@ -200,8 +200,8 @@ class _CallHistoryTile extends StatelessWidget {
     final statusColor = entry.isMissed || entry.isRejected
         ? Colors.redAccent
         : entry.isOutgoing
-            ? kLimeGreen
-            : const Color(0xFF72B7F2);
+        ? kLimeGreen
+        : const Color(0xFF72B7F2);
     final icon = entry.video ? Icons.videocam : Icons.call;
 
     return ListTile(

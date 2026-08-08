@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:reown_appkit/reown_appkit.dart';
 import '../theme.dart';
 import 'core/app_dependencies.dart';
+import '../models/story_models.dart';
 import '../providers/chat_filter_provider.dart';
 import '../providers/matrix_provider.dart';
 import '../providers/group_provider.dart';
@@ -17,23 +19,37 @@ import '../services/invite_link_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/streaming_media_service.dart';
 import '../services/story_service.dart';
+import '../services/story_upload_queue_service.dart';
 import '../services/voip_service.dart';
 import '../services/wallet_deep_link_handler.dart';
+import '../services/visible_chat_route_service.dart';
 import 'screens/direct_chat/call_pip_overlay.dart';
 import 'screens/direct_chat/incoming_call_banner.dart';
 import 'screens/matrix_chat_screen.dart';
 import 'screens/splash_screen.dart';
 import 'widgets/app_lock_gate.dart';
 import 'widgets/connection_status_banner.dart';
+import 'widgets/global_transfer_indicator.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'config/app_config.dart';
 import 'firebase_options.dart';
 
 final xmoNavigatorKey = GlobalKey<NavigatorState>();
 String? _lastPushRouteKey;
 DateTime? _lastPushRouteAt;
+StreamSubscription<Story>? _storyUploadCompletionSubscription;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (kReleaseMode) {
+    final configurationErrors = AppConfig.productionConfigurationErrors();
+    if (configurationErrors.isNotEmpty) {
+      throw StateError(
+        'Invalid XMO production configuration: '
+        '${configurationErrors.join('; ')}',
+      );
+    }
+  }
   CallLinkService.instance.init(navigatorKey: xmoNavigatorKey);
   WalletDeepLinkHandler.initListener();
 
@@ -51,8 +67,10 @@ Future<void> main() async {
   );
   runApp(XmoApp(matrixProvider: matrixProvider));
   unawaited(
-    _bootstrapServices(matrixProvider)
-        .catchError((Object error, StackTrace stack) {
+    _bootstrapServices(matrixProvider).catchError((
+      Object error,
+      StackTrace stack,
+    ) {
       debugPrint('[main] Startup bootstrap failed: $error');
       debugPrintStack(stackTrace: stack);
     }),
@@ -85,6 +103,19 @@ Future<void> _bootstrapServices(MatrixProvider matrixProvider) async {
     },
   );
   try {
+    await _storyUploadCompletionSubscription?.cancel();
+    _storyUploadCompletionSubscription = StoryUploadQueueService
+        .instance
+        .completedStories
+        .listen((_) => _showStoryUploadCompleted());
+    await StoryUploadQueueService.instance.attach(
+      StoryService(matrixProvider.service),
+    );
+  } catch (e, stack) {
+    debugPrint('[main] Story upload recovery skipped: $e');
+    debugPrintStack(stackTrace: stack);
+  }
+  try {
     await PushNotificationService().init(
       matrixService: matrixProvider.service,
       onOpenChat: (route) => _openPushChat(matrixProvider, route),
@@ -100,6 +131,18 @@ Future<void> _bootstrapServices(MatrixProvider matrixProvider) async {
     debugPrint('[main] Initial deep link handling skipped: $e');
     debugPrintStack(stackTrace: stack);
   }
+}
+
+void _showStoryUploadCompleted() {
+  final context = xmoNavigatorKey.currentContext;
+  if (context == null) return;
+  ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+    const SnackBar(
+      content: Text('Story uploaded successfully'),
+      backgroundColor: kLimeGreen,
+      duration: Duration(seconds: 2),
+    ),
+  );
 }
 
 Future<void> _openPushChat(
@@ -156,7 +199,22 @@ class XmoApp extends StatelessWidget {
   final AppDependencies dependencies;
 
   XmoApp({super.key, required this.matrixProvider})
-      : dependencies = AppDependencies.from(matrixProvider.service);
+    : dependencies = AppDependencies.from(matrixProvider.service);
+
+  void _openUploadChat(String roomId) {
+    if (VisibleChatRouteService.instance.roomId.value == roomId) return;
+    final room = matrixProvider.service.getRoomById(roomId);
+    final navigator = xmoNavigatorKey.currentState;
+    if (room == null || navigator == null) return;
+    unawaited(
+      navigator.push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              MatrixChatScreen(room: room, matrixProvider: matrixProvider),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -178,6 +236,7 @@ class XmoApp extends StatelessWidget {
           isDarkMode: true,
           child: MaterialApp(
             navigatorKey: xmoNavigatorKey,
+            navigatorObservers: [xmoRouteObserver],
             title: 'xmo',
             debugShowCheckedModeBanner: false,
             theme: buildXmoTheme(),
@@ -199,6 +258,7 @@ class XmoApp extends StatelessWidget {
                     children: [
                       child!,
                       const ConnectionStatusBanner(),
+                      GlobalTransferIndicator(onOpenChat: _openUploadChat),
                       ValueListenableBuilder<bool>(
                         valueListenable: VoipService().pipMode,
                         builder: (_, isPip, __) {

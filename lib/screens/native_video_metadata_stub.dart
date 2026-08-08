@@ -14,3 +14,7 @@ Future<NativeVideoMetadata?> readNativeVideoMetadata(
     List<int> videoBytes) async {
   return null;
 }
+
+Future<NativeVideoMetadata?> readNativeVideoMetadataFromPath(
+  String videoPath,
+) async => null;

@@ -7,6 +7,7 @@ import '../services/matrix_service.dart';
 import '../services/privacy_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/transfer_queue_service.dart';
+import '../services/story_upload_queue_service.dart';
 
 enum MatrixAuthState { uninitialized, loggedOut, loggingIn, loggedIn, error }
 
@@ -91,21 +92,38 @@ class MatrixProvider extends ChangeNotifier {
   bool get isLoggedIn => _state == MatrixAuthState.loggedIn;
   bool get isLoading => _state == MatrixAuthState.loggingIn;
   String? get userId => _svc.userId;
-  String? get displayName => _svc.displayName;
-  String? get avatarUrl => _svc.avatarUrl;
+  String? get displayName => _optimisticDisplayName ?? _svc.displayName;
+  String? get avatarUrl {
+    if (_optimisticDisplayName != null &&
+        (_optimisticAvatarRemoved || _optimisticAvatarBytes != null)) {
+      return null;
+    }
+    return _svc.avatarUrl;
+  }
+
+  Uint8List? get avatarBytes => _optimisticAvatarBytes;
+
+  String? _optimisticDisplayName;
+  Uint8List? _optimisticAvatarBytes;
+  bool _optimisticAvatarRemoved = false;
+  int _profileUpdateVersion = 0;
 
   MatrixConnectionStatus _connectionStatus = MatrixConnectionStatus.offline;
   MatrixConnectionStatus get connectionStatus => _connectionStatus;
   DateTime? _lastSyncAt;
   DateTime? get lastSyncAt => _lastSyncAt;
   int get pendingTransferCount => TransferQueueService.instance.jobs
-      .where((job) =>
-          job.status == TransferStatus.queued ||
-          job.status == TransferStatus.running ||
-          job.status == TransferStatus.failed)
+      .where(
+        (job) =>
+            job.status == TransferStatus.queued ||
+            job.status == TransferStatus.running ||
+            job.status == TransferStatus.failed,
+      )
       .length;
   StreamSubscription<List<Room>>? _syncSubscription;
   Timer? _connectionWatchdog;
+  final Map<String, Future<String?>> _directChatStarts = {};
+  final Map<String, DateTime> _directChatRetryAfter = {};
 
   List<Room> get rooms => _svc.getRooms();
 
@@ -119,6 +137,7 @@ class MatrixProvider extends ChangeNotifier {
           : MatrixAuthState.loggedOut;
       await CallHistoryService().setCurrentUser(_svc.userId);
       await TransferQueueService.instance.setCurrentUser(_svc.userId);
+      await _setStoryUploadOwner(_svc.userId);
       if (_svc.isLoggedIn) {
         await _svc.refreshProfile();
         await _syncPublicAccountDirectory();
@@ -150,6 +169,7 @@ class MatrixProvider extends ChangeNotifier {
       await _svc.loginOrRegisterWithPhone(phone, email);
       await CallHistoryService().setCurrentUser(_svc.userId);
       await TransferQueueService.instance.setCurrentUser(_svc.userId);
+      await _setStoryUploadOwner(_svc.userId);
       await _svc.refreshProfile();
       await _syncPublicAccountDirectory();
       await _ensureSavedMessagesReady();
@@ -180,6 +200,36 @@ class MatrixProvider extends ChangeNotifier {
       await _svc.login(username, password);
       await CallHistoryService().setCurrentUser(_svc.userId);
       await TransferQueueService.instance.setCurrentUser(_svc.userId);
+      await _setStoryUploadOwner(_svc.userId);
+      await _svc.refreshProfile();
+      await _syncPublicAccountDirectory();
+      await _ensureSavedMessagesReady();
+      _state = MatrixAuthState.loggedIn;
+      _listenSync();
+      _svc.startSync();
+      await PushNotificationService().registerCurrentUser();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _state = MatrixAuthState.loggedOut;
+      _error = _friendlyError(e.toString());
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> loginWithSsoToken(String token) async {
+    if (_state == MatrixAuthState.loggingIn) return false;
+
+    _state = MatrixAuthState.loggingIn;
+    _error = null;
+    notifyListeners();
+
+    try {
+      await _svc.loginWithSsoToken(token);
+      await CallHistoryService().setCurrentUser(_svc.userId);
+      await TransferQueueService.instance.setCurrentUser(_svc.userId);
+      await _setStoryUploadOwner(_svc.userId);
       await _svc.refreshProfile();
       await _syncPublicAccountDirectory();
       await _ensureSavedMessagesReady();
@@ -206,8 +256,12 @@ class MatrixProvider extends ChangeNotifier {
 
     try {
       await _svc.register(username, password);
+      if ((_svc.accessToken ?? '').isEmpty) {
+        await _svc.login(username, password);
+      }
       await CallHistoryService().setCurrentUser(_svc.userId);
       await TransferQueueService.instance.setCurrentUser(_svc.userId);
+      await _setStoryUploadOwner(_svc.userId);
       await _svc.refreshProfile();
       await _syncPublicAccountDirectory();
       await _ensureSavedMessagesReady();
@@ -230,15 +284,13 @@ class MatrixProvider extends ChangeNotifier {
     await _svc.logout();
     await CallHistoryService().setCurrentUser(null);
     await TransferQueueService.instance.setCurrentUser(null);
+    await _setStoryUploadOwner(null);
     _state = MatrixAuthState.loggedOut;
     _connectionStatus = MatrixConnectionStatus.offline;
     notifyListeners();
   }
 
-  Future<bool> deleteAccount({
-    String? password,
-    bool erase = true,
-  }) async {
+  Future<bool> deleteAccount({String? password, bool erase = true}) async {
     if (_state != MatrixAuthState.loggedIn) return false;
 
     _error = null;
@@ -257,6 +309,8 @@ class MatrixProvider extends ChangeNotifier {
       await _svc.deactivateAccount(password: password, erase: erase);
       await CallHistoryService().setCurrentUser(null);
       await TransferQueueService.instance.setCurrentUser(null);
+      await _discardStoryUploads();
+      await _setStoryUploadOwner(null);
       _state = MatrixAuthState.loggedOut;
       _connectionStatus = MatrixConnectionStatus.offline;
       _lastSyncAt = null;
@@ -275,27 +329,53 @@ class MatrixProvider extends ChangeNotifier {
     String? avatarFileName,
     bool removeAvatar = false,
   }) async {
+    final cleanDisplayName = displayName.trim();
+    if (cleanDisplayName.isEmpty) {
+      _error = 'Display name cannot be empty';
+      notifyListeners();
+      return false;
+    }
+
+    final updateVersion = ++_profileUpdateVersion;
+    _error = null;
+    _optimisticDisplayName = cleanDisplayName;
+    _optimisticAvatarBytes = removeAvatar ? null : avatarBytes;
+    _optimisticAvatarRemoved = removeAvatar;
+    notifyListeners();
+
     try {
-      _error = null;
       await _svc.updateProfile(
-        displayName: displayName,
+        displayName: cleanDisplayName,
         avatarBytes: avatarBytes,
         avatarFileName: avatarFileName ?? 'avatar.jpg',
         removeAvatar: removeAvatar,
       );
-      await _svc.refreshProfile();
-      final privacyService = PrivacyService(_svc);
-      final privacySettings = await privacyService.loadSettings();
-      if (privacySettings.accountIsPublic) {
-        await privacyService.syncPublicAccountDirectory(privacySettings);
+      if (updateVersion == _profileUpdateVersion) {
+        _clearOptimisticProfile();
+        notifyListeners();
       }
-      notifyListeners();
+      unawaited(
+        _syncPublicAccountDirectory().catchError((Object error) {
+          debugPrint(
+            '[MatrixProvider] Profile directory sync deferred: $error',
+          );
+        }),
+      );
       return true;
     } catch (e) {
       _error = e.toString();
-      notifyListeners();
+      if (updateVersion == _profileUpdateVersion) {
+        _clearOptimisticProfile();
+        notifyListeners();
+      }
       return false;
     }
+  }
+
+  void _clearOptimisticProfile() {
+    _optimisticDisplayName = null;
+    _optimisticAvatarBytes = null;
+    _optimisticAvatarRemoved = false;
   }
 
   Future<void> _syncPublicAccountDirectory() async {
@@ -394,36 +474,61 @@ class MatrixProvider extends ChangeNotifier {
   }
 
   Future<String?> startDirectChat(String userId) async {
-    try {
-      final normalizedUserId = normalizeUserId(userId);
+    final normalizedUserId = normalizeUserId(userId);
+    final retryAfter = _directChatRetryAfter[normalizedUserId];
+    if (retryAfter != null && retryAfter.isAfter(DateTime.now())) {
+      final seconds = retryAfter.difference(DateTime.now()).inSeconds + 1;
+      _error = 'Too many requests. Try again in $seconds seconds.';
+      notifyListeners();
+      return null;
+    }
+    _directChatRetryAfter.remove(normalizedUserId);
 
+    final pending = _directChatStarts[normalizedUserId];
+    if (pending != null) return pending;
+
+    final operation = _startDirectChatOnce(normalizedUserId);
+    _directChatStarts[normalizedUserId] = operation;
+    try {
+      return await operation;
+    } finally {
+      if (identical(_directChatStarts[normalizedUserId], operation)) {
+        _directChatStarts.remove(normalizedUserId);
+      }
+    }
+  }
+
+  Future<String?> _startDirectChatOnce(String normalizedUserId) async {
+    try {
       debugPrint(
-          '[startDirectChat] Looking for existing DM with $normalizedUserId');
+        '[startDirectChat] Looking for existing DM with $normalizedUserId',
+      );
       debugPrint(
-          '[startDirectChat] Current rooms count: ${_svc.client.rooms.length}');
+        '[startDirectChat] Current rooms count: ${_svc.client.rooms.length}',
+      );
 
       final cachedRoom = findExistingDirectRoom(normalizedUserId);
       if (cachedRoom != null) {
         debugPrint(
-            '[startDirectChat] Reusing cached direct room: ${cachedRoom.id}');
+          '[startDirectChat] Reusing cached direct room: ${cachedRoom.id}',
+        );
         return cachedRoom.id;
       }
 
-      await _svc.client.oneShotSync();
-      await _svc.acceptAllInvites();
-      await _svc.repairDirectChatMappings();
-
-      final existingDirectRoomId =
-          _svc.client.getDirectChatFromUserId(normalizedUserId);
+      final existingDirectRoomId = _svc.client.getDirectChatFromUserId(
+        normalizedUserId,
+      );
       if (existingDirectRoomId != null) {
         debugPrint(
-            '[startDirectChat] Reusing direct room from m.direct: $existingDirectRoomId');
+          '[startDirectChat] Reusing direct room from m.direct: $existingDirectRoomId',
+        );
         return existingDirectRoomId;
       }
 
       for (final room in _svc.client.rooms) {
         debugPrint(
-            '[startDirectChat] Checking room ${room.id}: membership=${room.membership}, members=${room.summary.mJoinedMemberCount}');
+          '[startDirectChat] Checking room ${room.id}: membership=${room.membership}, members=${room.summary.mJoinedMemberCount}',
+        );
 
         if (room.membership != Membership.join &&
             room.membership != Membership.invite) {
@@ -433,7 +538,8 @@ class MatrixProvider extends ChangeNotifier {
         final directPeerUserId = _svc.getDirectPeerUserId(room);
         if (directPeerUserId == normalizedUserId) {
           debugPrint(
-              '[startDirectChat] Found existing direct room: ${room.id}');
+            '[startDirectChat] Found existing direct room: ${room.id}',
+          );
 
           if (room.membership == Membership.invite) {
             debugPrint('[startDirectChat] Accepting invite to room ${room.id}');
@@ -446,7 +552,8 @@ class MatrixProvider extends ChangeNotifier {
 
         if (_svc.looksLikeLegacyDirectRoom(room, normalizedUserId)) {
           debugPrint(
-              '[startDirectChat] Repairing legacy direct room: ${room.id}');
+            '[startDirectChat] Repairing legacy direct room: ${room.id}',
+          );
 
           if (room.membership == Membership.invite) {
             debugPrint('[startDirectChat] Accepting invite to room ${room.id}');
@@ -459,24 +566,53 @@ class MatrixProvider extends ChangeNotifier {
       }
 
       debugPrint(
-          '[startDirectChat] No existing DM found, creating new room with $normalizedUserId');
+        '[startDirectChat] No existing DM found, creating new room with $normalizedUserId',
+      );
       final roomId = await _svc.createDirectRoom(normalizedUserId);
-
-      await Future.delayed(const Duration(milliseconds: 500));
-      await _svc.client.oneShotSync();
-      await _svc.repairDirectChatMappings();
-
       notifyListeners();
       return roomId;
     } catch (e) {
       debugPrint('[startDirectChat] Error: $e');
-      _error = e.toString();
+      if (e is MatrixException && e.error == MatrixError.M_LIMIT_EXCEEDED) {
+        final delay = Duration(milliseconds: e.retryAfterMs ?? 5000);
+        _directChatRetryAfter[normalizedUserId] = DateTime.now().add(delay);
+      }
+      _error = _directChatError(e);
       notifyListeners();
       return null;
     }
   }
 
+  String _directChatError(Object error) {
+    if (error is MatrixException &&
+        error.error == MatrixError.M_LIMIT_EXCEEDED) {
+      final retryAfterMs = error.retryAfterMs;
+      if (retryAfterMs != null && retryAfterMs > 0) {
+        final seconds = (retryAfterMs / 1000).ceil();
+        return 'Too many requests. Try again in $seconds seconds.';
+      }
+      return 'Too many requests. Please wait and try again.';
+    }
+    return _friendlyError(error.toString());
+  }
+
   // ─── Private ──────────────────────────────────────────────────────────────
+
+  Future<void> _setStoryUploadOwner(String? userId) async {
+    try {
+      await StoryUploadQueueService.instance.setCurrentUser(userId);
+    } catch (error) {
+      debugPrint('[MatrixProvider] Story upload queue unavailable: $error');
+    }
+  }
+
+  Future<void> _discardStoryUploads() async {
+    try {
+      await StoryUploadQueueService.instance.discardCurrentUserJobs();
+    } catch (error) {
+      debugPrint('[MatrixProvider] Failed to discard Story uploads: $error');
+    }
+  }
 
   void _listenSync() {
     _syncSubscription?.cancel();

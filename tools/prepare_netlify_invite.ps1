@@ -22,13 +22,16 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 $outputPath = [IO.Path]::GetFullPath($OutputDirectory)
 $wellKnownPath = Join-Path $outputPath '.well-known'
 $joinPath = Join-Path $outputPath 'join'
+$authCallbackPath = Join-Path $outputPath 'auth\callback'
 
 New-Item -ItemType Directory -Path $wellKnownPath -Force | Out-Null
 New-Item -ItemType Directory -Path $joinPath -Force | Out-Null
+New-Item -ItemType Directory -Path $authCallbackPath -Force | Out-Null
 
 Copy-Item (Join-Path $sourceDirectory '_headers') $outputPath -Force
 Copy-Item (Join-Path $sourceDirectory '_redirects') $outputPath -Force
 Copy-Item (Join-Path $sourceDirectory 'join\index.html') $joinPath -Force
+Copy-Item (Join-Path $sourceDirectory 'auth\callback\index.html') $authCallbackPath -Force
 
 $templatePath = Join-Path $sourceDirectory '.well-known\assetlinks.json.template'
 $assetLinks = [IO.File]::ReadAllText($templatePath).Replace(
@@ -54,3 +57,4 @@ Write-Host "Netlify invite bundle prepared at: $outputPath"
 Write-Host 'Deploy these files into the root of the existing xmo.dpdns.org Netlify site.'
 Write-Host 'Verify: https://xmo.dpdns.org/.well-known/assetlinks.json'
 Write-Host 'Verify: https://xmo.dpdns.org/join/invalid-token'
+Write-Host 'Verify: https://xmo.dpdns.org/auth/callback'

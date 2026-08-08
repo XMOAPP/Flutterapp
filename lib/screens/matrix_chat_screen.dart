@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
@@ -26,6 +27,7 @@ import '../services/shared_media_index_service.dart';
 import '../services/matrix_attachment_downloader.dart';
 import '../services/matrix_media_helper.dart';
 import '../services/transfer_queue_service.dart';
+import '../services/visible_chat_route_service.dart';
 import '../widgets/matrix_chat/album_media_viewer.dart';
 import '../widgets/matrix_chat/fullscreen_image_viewer.dart';
 import '../widgets/matrix_chat/fullscreen_video_player.dart';
@@ -47,6 +49,7 @@ import '../models/xmo_contact_card.dart';
 import '../models/xmo_stream_manifest.dart';
 import '../models/report_models.dart';
 import '../utils/message_presentation.dart';
+import '../utils/matrix_identity.dart';
 import '../services/direct_chat_service.dart';
 import '../services/chat_archive_service.dart';
 import '../services/local_playback_proxy_service.dart';
@@ -71,11 +74,13 @@ import 'matrix_chat/forward_message_sheet.dart';
 import 'matrix_chat/media_handler.dart';
 import 'matrix_chat/message_widgets.dart';
 import 'matrix_chat/widgets/message_reply_context.dart';
-import 'native_share_stub.dart' if (dart.library.io) 'native_share.dart'
+import 'native_share_stub.dart'
+    if (dart.library.io) 'native_share.dart'
     as native_share;
 
 // Web download helper
-import 'web_download_stub.dart' if (dart.library.js_interop) 'web_download.dart'
+import 'web_download_stub.dart'
+    if (dart.library.js_interop) 'web_download.dart'
     as web_download;
 
 // Web video view
@@ -146,17 +151,17 @@ class PrivateReplyDraft {
   });
 
   Map<String, dynamic> toJson() => {
-        'source_room_id': sourceRoomId,
-        'source_room_name': sourceRoomName,
-        'source_event_id': sourceEventId,
-        'sender_id': senderId,
-        'sender_name': senderName,
-        'preview': preview,
-        'msgtype': msgtype,
-      };
+    'source_room_id': sourceRoomId,
+    'source_room_name': sourceRoomName,
+    'source_event_id': sourceEventId,
+    'sender_id': senderId,
+    'sender_name': senderName,
+    'preview': preview,
+    'msgtype': msgtype,
+  };
 }
 
-class _MatrixChatScreenState extends State<MatrixChatScreen> {
+class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
   static const MatrixAttachmentDownloader _attachmentDownloader =
       MatrixAttachmentDownloader();
   final _composerController = ChatComposerController();
@@ -191,7 +196,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   final Map<String, MatrixMentionTarget> _composerMentionTargets = {};
   MemberRestriction? _ownRestriction;
   final _mentionAutocomplete = ValueNotifier<_MentionAutocompleteState>(
-      _MentionAutocompleteState.hidden);
+    _MentionAutocompleteState.hidden,
+  );
   List<String> _typingUsers = []; // Track typing users
   late DirectChatService _directChatService;
   Timer? _typingTimer; // Timer for sending typing indicators
@@ -230,6 +236,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   Timer? _readMarkerDebounce;
   Timer? _sharedMediaIndexDebounce;
   Timer? _stateRefreshDebounce;
+  StreamSubscription<List<TransferJob>>? _transferQueueSubscription;
+  Timer? _transferQueueUiDebounce;
+  final Set<String> _restoringTransferIds = {};
+  ModalRoute<dynamic>? _subscribedRoute;
   bool _uploadProgressFrameScheduled = false;
   bool _uploadPreviewFrameScheduled = false;
   String? _highlightedEventId;
@@ -330,10 +340,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     }
     if (_room != null && _myUserId.isNotEmpty) {
       unawaited(
-        _composerController.bindDraft(
-          userId: _myUserId,
-          roomId: _room!.id,
-        ),
+        _composerController.bindDraft(userId: _myUserId, roomId: _room!.id),
       );
     }
     _mediaHandler = MediaHandler(
@@ -377,6 +384,37 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     }
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route == null || identical(route, _subscribedRoute)) return;
+    if (_subscribedRoute != null) xmoRouteObserver.unsubscribe(this);
+    _subscribedRoute = route;
+    xmoRouteObserver.subscribe(this, route);
+    if (route.isCurrent) _markChatRouteVisible();
+  }
+
+  void _markChatRouteVisible() {
+    VisibleChatRouteService.instance.show(this, _room?.id);
+  }
+
+  void _markChatRouteHidden() {
+    VisibleChatRouteService.instance.hide(this);
+  }
+
+  @override
+  void didPush() => _markChatRouteVisible();
+
+  @override
+  void didPopNext() => _markChatRouteVisible();
+
+  @override
+  void didPushNext() => _markChatRouteHidden();
+
+  @override
+  void didPop() => _markChatRouteHidden();
+
   Future<void> _loadAppSettings() async {
     final settings = await _appSettingsService.load();
     if (!mounted) return;
@@ -392,8 +430,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         _channelAnalyticsService
             .recordView(roomId: room.id, eventId: eventId)
             .catchError((Object error) {
-          debugPrint('[ChannelAnalytics] View tracking failed: $error');
-        }),
+              debugPrint('[ChannelAnalytics] View tracking failed: $error');
+            }),
       );
     }
   }
@@ -401,20 +439,112 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   Future<void> _initializeChat() async {
     await _loadAppSettings();
     if (!mounted) return;
+    await _transferQueue.init();
+    if (!mounted) return;
+    _listenToTransferQueue();
     await _restorePendingTransfers();
     _loadPreviewType();
     _loadTimeline();
   }
 
-  Future<void> _restorePendingTransfers() async {
+  void _listenToTransferQueue() {
     final room = _room;
     if (room == null) return;
-    await _transferQueue.init();
+    unawaited(_transferQueueSubscription?.cancel());
+    _transferQueueSubscription = _transferQueue.stream.listen((jobs) {
+      if (!mounted) return;
+      final roomJobs = <String, TransferJob>{
+        for (final job in jobs)
+          if (job.roomId == room.id &&
+              job.direction == TransferDirection.upload)
+            job.id: job,
+      };
+
+      var changed = false;
+      void syncUpload(_PendingUpload upload) {
+        final job = roomJobs[upload.transferJobId ?? upload.id];
+        if (job == null) return;
+        if (upload.uploadedBytes != job.uploadedBytes ||
+            upload.totalBytes != job.totalBytes ||
+            upload.started != (job.status == TransferStatus.running) ||
+            upload.failed != (job.status == TransferStatus.failed) ||
+            upload.cancelled != (job.status == TransferStatus.cancelled) ||
+            upload.completed != (job.status == TransferStatus.completed) ||
+            upload.error != job.error) {
+          upload.uploadedBytes = job.uploadedBytes;
+          upload.totalBytes = job.totalBytes;
+          upload.started = job.status == TransferStatus.running;
+          upload.failed = job.status == TransferStatus.failed;
+          upload.cancelled = job.status == TransferStatus.cancelled;
+          upload.completed = job.status == TransferStatus.completed;
+          upload.error = job.error;
+          changed = true;
+        }
+      }
+
+      for (final upload in _pendingUploads) {
+        syncUpload(upload);
+      }
+      for (final album in _pendingAlbumUploads) {
+        for (final upload in album.uploads) {
+          syncUpload(upload);
+        }
+      }
+
+      final previousLength = _pendingUploads.length;
+      _pendingUploads.removeWhere((upload) {
+        if (upload.transferJobId == null) return false;
+        final job = roomJobs[upload.transferJobId];
+        return job == null ||
+            job.status == TransferStatus.completed ||
+            job.status == TransferStatus.cancelled;
+      });
+      changed = changed || previousLength != _pendingUploads.length;
+      if (changed) _scheduleTransferQueueRepaint();
+
+      final visibleIds = <String>{
+        for (final upload in _pendingUploads) upload.transferJobId ?? upload.id,
+        for (final album in _pendingAlbumUploads)
+          for (final upload in album.uploads) upload.transferJobId ?? upload.id,
+      };
+      final hasMissingRunningJob = roomJobs.values.any(
+        (job) =>
+            (job.status == TransferStatus.running ||
+                job.status == TransferStatus.failed) &&
+            !visibleIds.contains(job.id) &&
+            !_restoringTransferIds.contains(job.id),
+      );
+      if (hasMissingRunningJob) {
+        unawaited(_restorePendingTransfers(includeQueued: false));
+      }
+    });
+  }
+
+  void _scheduleTransferQueueRepaint() {
+    if (!mounted || _transferQueueUiDebounce?.isActive == true) return;
+    _transferQueueUiDebounce = Timer(const Duration(milliseconds: 120), () {
+      if (mounted) setState(() {});
+    });
+  }
+
+  Future<void> _restorePendingTransfers({bool includeQueued = true}) async {
+    final room = _room;
+    if (room == null) return;
+    final visibleIds = <String>{
+      for (final upload in _pendingUploads) upload.transferJobId ?? upload.id,
+      for (final album in _pendingAlbumUploads)
+        for (final upload in album.uploads) upload.transferJobId ?? upload.id,
+    };
     final jobs = _transferQueue.jobsForRoom(room.id).where((job) {
       return job.direction == TransferDirection.upload &&
-          job.status != TransferStatus.completed;
+          job.status != TransferStatus.completed &&
+          job.status != TransferStatus.cancelled &&
+          (includeQueued || job.status != TransferStatus.queued) &&
+          !visibleIds.contains(job.id) &&
+          !_restoringTransferIds.contains(job.id);
     }).toList();
     if (jobs.isEmpty) return;
+    _restoringTransferIds.addAll(jobs.map((job) => job.id));
 
     final restored = <_PendingUpload>[];
     for (final job in jobs) {
@@ -436,41 +566,57 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         }
         restored.add(
           _PendingUpload(
-            id: job.id,
-            transferJobId: job.id,
-            bytes: bytes,
-            fileName: job.fileName,
-            mimeType: job.mimeType,
-            isVideo: job.kind == TransferKind.video,
-            isAudio: job.kind == TransferKind.audio ||
-                job.kind == TransferKind.voice,
-            isFile: job.kind == TransferKind.file,
-            isVoiceMessage: job.kind == TransferKind.voice,
-            totalBytes: job.totalBytes,
-            createdAt: job.createdAt,
-            thumbnailBytes: thumbnailBytes,
-            replyToEvent: replyToEvent,
-            replyReference: replyReference,
-          )
+              id: job.id,
+              transferJobId: job.id,
+              bytes: bytes,
+              sourcePath: job.localPath,
+              fileName: job.fileName,
+              mimeType: job.mimeType,
+              isVideo: job.kind == TransferKind.video,
+              isAudio:
+                  job.kind == TransferKind.audio ||
+                  job.kind == TransferKind.voice,
+              isFile: job.kind == TransferKind.file,
+              isVoiceMessage: job.kind == TransferKind.voice,
+              totalBytes: job.totalBytes,
+              createdAt: job.createdAt,
+              thumbnailBytes: thumbnailBytes,
+              replyToEvent: replyToEvent,
+              replyReference: replyReference,
+              batchId: job.batchId,
+            )
             ..uploadedBytes = job.uploadedBytes
+            ..started = job.status == TransferStatus.running
             ..failed = job.status == TransferStatus.failed
             ..cancelled = job.status == TransferStatus.cancelled
             ..error = job.error,
         );
       } catch (e) {
         debugPrint('[TransferQueue] Failed to restore ${job.id}: $e');
-        await _transferQueue.markFailed(job.id, e);
+        final isStillActive = _transferQueue.jobs.any(
+          (current) =>
+              current.id == job.id &&
+              current.status != TransferStatus.completed &&
+              current.status != TransferStatus.cancelled,
+        );
+        if (isStillActive) await _transferQueue.markFailed(job.id, e);
+      } finally {
+        _restoringTransferIds.remove(job.id);
       }
     }
 
     if (!mounted || restored.isEmpty) return;
     setState(() => _pendingUploads.addAll(restored));
 
-    final queued = restored.where((upload) {
-      if (upload.cancelled) return false;
-      if (!upload.failed) return true;
-      return _transferQueue.shouldAutoRetry(upload.id);
-    }).toList(growable: false);
+    final queued = restored
+        .where((upload) {
+          if (upload.cancelled) return false;
+          final job = jobs.firstWhere((job) => job.id == upload.id);
+          if (job.status == TransferStatus.queued) return true;
+          if (!upload.failed) return false;
+          return _transferQueue.shouldAutoRetry(upload.id);
+        })
+        .toList(growable: false);
     if (queued.isNotEmpty) {
       for (final upload in queued) {
         if (upload.failed) {
@@ -513,8 +659,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
     try {
       final groupService = GroupService(widget.matrixProvider.service);
-      final restriction =
-          groupService.getMemberRestriction(_room!.id, _myUserId);
+      final restriction = groupService.getMemberRestriction(
+        _room!.id,
+        _myUserId,
+      );
       if (mounted) {
         setState(() => _ownRestriction = restriction);
       }
@@ -591,8 +739,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     _typingSub = _room!.onUpdate.stream.listen((_) {
       if (mounted) {
         final typingIndicators = _directChatService.getTypingUsers(_room!);
-        final typingUserNames =
-            typingIndicators.map((t) => t.displayName).toList();
+        final typingUserNames = typingIndicators
+            .map((t) => t.displayName)
+            .toList();
 
         if (!listEquals(typingUserNames, _typingUsers)) {
           setState(() {
@@ -736,8 +885,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
       setState(() {
         _showJumpToLatestButton = true;
-        _newMessagesBelowCount =
-            (_newMessagesBelowCount + newMessagesBelow).clamp(0, 999);
+        _newMessagesBelowCount = (_newMessagesBelowCount + newMessagesBelow)
+            .clamp(0, 999);
       });
     });
   }
@@ -745,13 +894,15 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   void _scheduleStateRefresh({bool loadStateData = false}) {
     if (loadStateData) {
       _stateRefreshDebounce?.cancel();
-      _stateRefreshDebounce =
-          Timer(const Duration(milliseconds: 200), () async {
-        if (!mounted) return;
-        await _loadPinnedMessages();
-        await _loadOwnRestriction();
-        if (mounted) setState(() {});
-      });
+      _stateRefreshDebounce = Timer(
+        const Duration(milliseconds: 200),
+        () async {
+          if (!mounted) return;
+          await _loadPinnedMessages();
+          await _loadOwnRestriction();
+          if (mounted) setState(() {});
+        },
+      );
       return;
     }
 
@@ -789,8 +940,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final beforeEventCount = timeline.events.length;
     final hadScrollPosition = _scrollCtrl.hasClients;
     final beforeOffset = hadScrollPosition ? _scrollCtrl.offset : 0.0;
-    final beforeMax =
-        hadScrollPosition ? _scrollCtrl.position.maxScrollExtent : 0.0;
+    final beforeMax = hadScrollPosition
+        ? _scrollCtrl.position.maxScrollExtent
+        : 0.0;
 
     if (mounted) setState(() => _loadingHistory = true);
     try {
@@ -1050,6 +1202,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   void _scrollToBottom({bool animate = false}) {
+    if (!mounted) return;
     if (_scrollToBottomScheduled) return;
     _scrollToBottomScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1061,17 +1214,17 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           unawaited(
             _scrollCtrl
                 .animateTo(
-              target,
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-            )
+                  target,
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                )
                 .then((_) {
-              if (!_scrollCtrl.hasClients) return;
-              final finalTarget = _scrollCtrl.position.maxScrollExtent;
-              if ((_scrollCtrl.offset - finalTarget).abs() > 1) {
-                _scrollCtrl.jumpTo(finalTarget);
-              }
-            }),
+                  if (!_scrollCtrl.hasClients) return;
+                  final finalTarget = _scrollCtrl.position.maxScrollExtent;
+                  if ((_scrollCtrl.offset - finalTarget).abs() > 1) {
+                    _scrollCtrl.jumpTo(finalTarget);
+                  }
+                }),
           );
         } else {
           _scrollCtrl.jumpTo(target);
@@ -1132,8 +1285,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   Widget _buildJumpToLatestButton() {
-    final countLabel =
-        _newMessagesBelowCount >= 999 ? '999+' : '$_newMessagesBelowCount';
+    final countLabel = _newMessagesBelowCount >= 999
+        ? '999+'
+        : '$_newMessagesBelowCount';
     final visible = _showJumpToLatestButton;
 
     return Positioned(
@@ -1165,8 +1319,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                         width: 50,
                         height: 50,
                         decoration: BoxDecoration(
-                          color:
-                              const Color(0xFF1B2A36).withValues(alpha: 0.98),
+                          color: const Color(
+                            0xFF1B2A36,
+                          ).withValues(alpha: 0.98),
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
@@ -1254,14 +1409,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     try {
       // Send reply if replying to a message
       if (replyToEvent != null) {
-        await _room!.sendEvent(
-          {
-            'msgtype': MessageTypes.Text,
-            'body': text,
-            ...mentionContent,
-          },
-          inReplyTo: replyToEvent,
-        );
+        await _room!.sendEvent({
+          'msgtype': MessageTypes.Text,
+          'body': text,
+          ...mentionContent,
+        }, inReplyTo: replyToEvent);
       } else if (privateReplyDraft != null) {
         await _room!.sendEvent({
           'msgtype': MessageTypes.Text,
@@ -1395,7 +1547,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         final startedAt = _recordingStartedAt;
         if (startedAt == null || !mounted) return;
         setState(() {
-          _recordingDuration = _recordingAccumulatedDuration +
+          _recordingDuration =
+              _recordingAccumulatedDuration +
               DateTime.now().difference(startedAt);
         });
       });
@@ -1426,8 +1579,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       return;
     }
 
-    final normalized =
-        ((amplitude.current + 45) / 45).clamp(0.08, 1.0).toDouble();
+    final normalized = ((amplitude.current + 45) / 45)
+        .clamp(0.08, 1.0)
+        .toDouble();
     final next = List<double>.from(_recordingWaveform)..add(normalized);
     if (next.length > 56) {
       next.removeRange(0, next.length - 56);
@@ -1542,10 +1696,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   void _showSnackBar(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: kDarkerGrey,
-      ),
+      SnackBar(content: Text(message), backgroundColor: kDarkerGrey),
     );
   }
 
@@ -1605,8 +1756,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       await widget.matrixProvider.service.joinRoom(chunk.roomId);
       widget.matrixProvider.refreshRooms();
       if (mounted) {
-        final room =
-            widget.matrixProvider.service.getJoinedRoomById(chunk.roomId);
+        final room = widget.matrixProvider.service.getJoinedRoomById(
+          chunk.roomId,
+        );
         if (room != null) {
           Navigator.pushReplacement(
             context,
@@ -1622,8 +1774,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content:
-                Text('Joined ${isChannel ? 'channel' : 'group'} successfully!'),
+            content: Text(
+              'Joined ${isChannel ? 'channel' : 'group'} successfully!',
+            ),
             backgroundColor: kLimeGreen,
           ),
         );
@@ -1633,7 +1786,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         setState(() => _loading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text('Failed to join: $e'), backgroundColor: Colors.red),
+            content: Text('Failed to join: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -1652,9 +1807,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   void _removePendingUpload(String id) {
-    if (!mounted) return;
     _pendingUploadProgressUiUpdates.remove(id);
-    setState(() => _pendingUploads.removeWhere((upload) => upload.id == id));
+    if (mounted) {
+      setState(() => _pendingUploads.removeWhere((upload) => upload.id == id));
+    } else {
+      _pendingUploads.removeWhere((upload) => upload.id == id);
+    }
   }
 
   void _cancelPendingUpload(String id) {
@@ -1673,7 +1831,6 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     int uploadedBytes,
     int totalBytes,
   ) {
-    if (!mounted) return;
     final index = _pendingUploads.indexWhere((upload) => upload.id == id);
     if (index == -1) return;
 
@@ -1704,8 +1861,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final previousProgress = previousTotalBytes > 0
         ? previousUploadedBytes / previousTotalBytes
         : 0.0;
-    final nextProgress =
-        clampedTotalBytes > 0 ? clampedUploadedBytes / clampedTotalBytes : 0.0;
+    final nextProgress = clampedTotalBytes > 0
+        ? clampedUploadedBytes / clampedTotalBytes
+        : 0.0;
     final isComplete =
         clampedTotalBytes > 0 && clampedUploadedBytes >= clampedTotalBytes;
     final isFirstProgress = previousUploadedBytes == 0;
@@ -1713,7 +1871,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         (nextProgress - previousProgress).abs() >= 0.02;
     final now = DateTime.now();
     final lastUpdate = _pendingUploadProgressUiUpdates[id];
-    final enoughTimePassed = lastUpdate == null ||
+    final enoughTimePassed =
+        lastUpdate == null ||
         now.difference(lastUpdate) >= const Duration(milliseconds: 160);
 
     upload.uploadedBytes = clampedUploadedBytes;
@@ -1727,11 +1886,13 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     }
 
     _pendingUploadProgressUiUpdates[id] = now;
-    unawaited(_transferQueue.updateProgress(
-      id,
-      clampedUploadedBytes,
-      clampedTotalBytes,
-    ));
+    unawaited(
+      _transferQueue.updateProgress(
+        id,
+        clampedUploadedBytes,
+        clampedTotalBytes,
+      ),
+    );
     _scheduleUploadProgressRepaint();
   }
 
@@ -1744,22 +1905,44 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     });
   }
 
-  Future<void> _ensureTransferJob(
-    String roomId,
-    _PendingUpload upload,
-  ) async {
+  Future<void> _ensureTransferJob(String roomId, _PendingUpload upload) async {
     if (upload.transferJobId != null) return;
     final job = await _transferQueue.createUploadJob(
       id: upload.id,
       roomId: roomId,
       bytes: upload.bytes,
+      sourcePath: upload.sourcePath,
       thumbnailBytes: upload.thumbnailBytes,
       fileName: upload.fileName,
       mimeType: upload.mimeType,
       kind: _transferKindFor(upload),
       replyReference: upload.replyReference,
+      batchId: upload.batchId,
     );
     upload.transferJobId = job.id;
+    upload.sourcePath = job.localPath;
+  }
+
+  Future<void> _prepareBatchTransferJobs(
+    String roomId,
+    List<_PendingUpload> uploads,
+  ) async {
+    final prepared = <_PendingUpload>[];
+    try {
+      for (final upload in uploads) {
+        if (upload.isVideo || (!upload.isAudio && !upload.isFile)) {
+          await upload.previewHydration;
+        }
+        await _ensureTransferJob(roomId, upload);
+        prepared.add(upload);
+      }
+    } catch (_) {
+      for (final upload in prepared) {
+        await _transferQueue.remove(upload.id);
+        upload.transferJobId = null;
+      }
+      rethrow;
+    }
   }
 
   TransferKind _transferKindFor(_PendingUpload upload) {
@@ -1809,9 +1992,14 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }) async {
     _setUploading(true);
     try {
-      await _sendPendingUpload(roomId, upload, caption: caption);
+      final sent = await _sendPendingUpload(roomId, upload, caption: caption);
+      if (!sent) return;
       _removePendingUpload(upload.id);
-      await _transferQueue.remove(upload.id);
+      if (upload.batchId == null) {
+        await _transferQueue.remove(upload.id);
+      } else {
+        await _transferQueue.removeFinishedBatch(upload.batchId);
+      }
       _cancelledPendingUploadIds.remove(upload.id);
     } catch (e) {
       if (e is MatrixUploadCancelledException ||
@@ -1819,12 +2007,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           upload.cancelled) {
         await _transferQueue.cancel(upload.id);
         _removePendingUpload(upload.id);
-      } else if (mounted) {
-        setState(() {
-          upload.failed = true;
-          upload.error = e.toString();
-        });
+      } else {
         await _transferQueue.markFailed(upload.id, e);
+        upload.failed = true;
+        upload.error = e.toString();
+        if (mounted) setState(() {});
         _schedulePendingUploadRetry(roomId, upload);
         _showSnackBar('Failed to send media: $e');
       }
@@ -1834,7 +2021,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     }
   }
 
-  Future<void> _sendPendingUpload(
+  Future<bool> _sendPendingUpload(
     String roomId,
     _PendingUpload upload, {
     String caption = '',
@@ -1849,7 +2036,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final claimed = await _transferQueue.markRunning(upload.id);
     if (!claimed) {
       debugPrint('[TransferQueue] Upload ${upload.id} is already running');
-      return;
+      return false;
     }
     if (mounted) {
       setState(() {
@@ -1872,17 +2059,16 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         bytes: upload.bytes,
         fileName: upload.fileName,
         mimeType: upload.mimeType,
+        sourcePath: upload.sourcePath,
         caption: caption,
         precomputedThumbnailBytes: upload.thumbnailBytes,
         precomputedVideoWidth: upload.width,
         precomputedVideoHeight: upload.height,
         precomputedDurationMs: upload.durationMs,
         onUploadProgress: (uploadedBytes, totalBytes) =>
-            _updatePendingUploadProgress(
-          upload.id,
-          uploadedBytes,
-          totalBytes,
-        ),
+            _updatePendingUploadProgress(upload.id, uploadedBytes, totalBytes),
+        onStageChanged: (stage) =>
+            unawaited(_transferQueue.updateStage(upload.id, stage)),
         isCancelled: isCancelled,
         rethrowErrors: true,
         inReplyTo: replyToEvent,
@@ -1896,11 +2082,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         durationMs: upload.durationMs ?? 0,
         isVoiceMessage: upload.isVoiceMessage,
         onUploadProgress: (uploadedBytes, totalBytes) =>
-            _updatePendingUploadProgress(
-          upload.id,
-          uploadedBytes,
-          totalBytes,
-        ),
+            _updatePendingUploadProgress(upload.id, uploadedBytes, totalBytes),
         isCancelled: isCancelled,
         inReplyTo: replyToEvent,
       );
@@ -1911,11 +2093,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         fileName: upload.fileName,
         mimeType: upload.mimeType,
         onUploadProgress: (uploadedBytes, totalBytes) =>
-            _updatePendingUploadProgress(
-          upload.id,
-          uploadedBytes,
-          totalBytes,
-        ),
+            _updatePendingUploadProgress(upload.id, uploadedBytes, totalBytes),
         isCancelled: isCancelled,
         inReplyTo: replyToEvent,
       );
@@ -1929,17 +2107,14 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         caption: caption,
         precomputedThumbnailBytes: upload.thumbnailBytes,
         onUploadProgress: (uploadedBytes, totalBytes) =>
-            _updatePendingUploadProgress(
-          upload.id,
-          uploadedBytes,
-          totalBytes,
-        ),
+            _updatePendingUploadProgress(upload.id, uploadedBytes, totalBytes),
         isCancelled: isCancelled,
         rethrowErrors: true,
         inReplyTo: replyToEvent,
       );
     }
     await _transferQueue.markCompleted(upload.id);
+    return true;
   }
 
   Future<void> _sendPhotoWithPending(
@@ -1960,14 +2135,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     );
     _attachCurrentReplyToUploads([upload]);
     _addPendingUpload(upload);
-    upload.previewHydration =
-        _hydratePendingUploadPreview(upload, mimeType: mimeType);
-    unawaited(upload.previewHydration);
-    await _runSinglePendingMediaUpload(
-      roomId,
+    upload.previewHydration = _hydratePendingUploadPreview(
       upload,
-      caption: caption,
+      mimeType: mimeType,
     );
+    unawaited(upload.previewHydration);
+    await _runSinglePendingMediaUpload(roomId, upload, caption: caption);
   }
 
   Future<Size?> _readImageSize(Uint8List bytes) async {
@@ -1993,8 +2166,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
     if (upload.isVideo) {
       try {
-        final metadata =
-            await _mediaHandler.readVideoPreviewMetadata(upload.bytes);
+        final metadata = upload.sourcePath != null
+            ? await _mediaHandler.readVideoPreviewMetadataFromPath(
+                upload.sourcePath!,
+              )
+            : await _mediaHandler.readVideoPreviewMetadata(upload.bytes);
         width = metadata?.width;
         height = metadata?.height;
         durationMs = metadata?.durationMs;
@@ -2003,10 +2179,14 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       }
 
       try {
-        thumbnailBytes = await _mediaHandler.createVideoPreviewThumbnail(
-          upload.bytes,
-          mimeType,
-        );
+        thumbnailBytes = upload.sourcePath != null
+            ? await _mediaHandler.createVideoPreviewThumbnailFromPath(
+                upload.sourcePath!,
+              )
+            : await _mediaHandler.createVideoPreviewThumbnail(
+                upload.bytes,
+                mimeType,
+              );
       } catch (e) {
         debugPrint('[UploadPreview] Failed to create video thumbnail: $e');
       }
@@ -2019,8 +2199,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         debugPrint('[UploadPreview] Failed to read image size: $e');
       }
       try {
-        thumbnailBytes =
-            await _mediaHandler.createImagePreviewThumbnail(upload.bytes);
+        thumbnailBytes = await _mediaHandler.createImagePreviewThumbnail(
+          upload.bytes,
+        );
       } catch (e) {
         debugPrint('[UploadPreview] Failed to create image thumbnail: $e');
       }
@@ -2048,6 +2229,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     required Uint8List bytes,
     required String fileName,
     required String mimeType,
+    String? sourcePath,
     required String caption,
   }) async {
     final upload = _PendingUpload(
@@ -2055,20 +2237,19 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       bytes: bytes,
       fileName: fileName,
       mimeType: mimeType,
+      sourcePath: sourcePath,
       isVideo: true,
       totalBytes: bytes.length,
       createdAt: DateTime.now(),
     );
     _attachCurrentReplyToUploads([upload]);
     _addPendingUpload(upload);
-    upload.previewHydration =
-        _hydratePendingUploadPreview(upload, mimeType: mimeType);
-    unawaited(upload.previewHydration);
-    await _runSinglePendingMediaUpload(
-      roomId,
+    upload.previewHydration = _hydratePendingUploadPreview(
       upload,
-      caption: caption,
+      mimeType: mimeType,
     );
+    unawaited(upload.previewHydration);
+    await _runSinglePendingMediaUpload(roomId, upload, caption: caption);
   }
 
   _PendingUpload _createPendingMediaUpload({
@@ -2076,6 +2257,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     required String fileName,
     required String mimeType,
     required bool isVideo,
+    String? sourcePath,
   }) {
     final upload = _PendingUpload(
       id: '${isVideo ? 'video' : 'photo'}_${DateTime.now().microsecondsSinceEpoch}',
@@ -2083,11 +2265,14 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       fileName: fileName,
       mimeType: mimeType,
       isVideo: isVideo,
+      sourcePath: sourcePath,
       totalBytes: bytes.length,
       createdAt: DateTime.now(),
     );
-    upload.previewHydration =
-        _hydratePendingUploadPreview(upload, mimeType: mimeType);
+    upload.previewHydration = _hydratePendingUploadPreview(
+      upload,
+      mimeType: mimeType,
+    );
     return upload;
   }
 
@@ -2104,10 +2289,32 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     }
 
     for (final upload in uploads) {
+      upload.batchId = album.id;
+    }
+
+    for (final upload in uploads) {
       unawaited(upload.previewHydration);
     }
 
-    unawaited(_runPendingAlbumUpload(roomId, album));
+    unawaited(_prepareAndRunPendingAlbumUpload(roomId, album));
+  }
+
+  Future<void> _prepareAndRunPendingAlbumUpload(
+    String roomId,
+    _PendingAlbumUpload album,
+  ) async {
+    try {
+      await _prepareBatchTransferJobs(roomId, album.uploads);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _pendingAlbumUploads.removeWhere((item) => item.id == album.id);
+        });
+        _showSnackBar('Failed to prepare media uploads: $e');
+      }
+      return;
+    }
+    await _runPendingAlbumUpload(roomId, album);
   }
 
   Future<void> _runPendingAlbumUpload(
@@ -2137,7 +2344,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         final claimed = await _transferQueue.markRunning(upload.id);
         if (!claimed) {
           debugPrint('[TransferQueue] Upload ${upload.id} is already running');
-          continue;
+          return;
         }
         if (upload.isVideo) {
           await _mediaHandler.sendVideoBytes(
@@ -2146,6 +2353,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
             bytes: upload.bytes,
             fileName: upload.fileName,
             mimeType: upload.mimeType,
+            sourcePath: upload.sourcePath,
             caption: '',
             precomputedThumbnailBytes: upload.thumbnailBytes,
             precomputedVideoWidth: upload.width,
@@ -2153,11 +2361,13 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
             precomputedDurationMs: upload.durationMs,
             onUploadProgress: (uploadedBytes, totalBytes) =>
                 _updatePendingAlbumUploadProgress(
-              album.id,
-              upload.id,
-              uploadedBytes,
-              totalBytes,
-            ),
+                  album.id,
+                  upload.id,
+                  uploadedBytes,
+                  totalBytes,
+                ),
+            onStageChanged: (stage) =>
+                unawaited(_transferQueue.updateStage(upload.id, stage)),
             isCancelled: () =>
                 album.cancelled ||
                 upload.cancelled ||
@@ -2176,11 +2386,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
             precomputedThumbnailBytes: upload.thumbnailBytes,
             onUploadProgress: (uploadedBytes, totalBytes) =>
                 _updatePendingAlbumUploadProgress(
-              album.id,
-              upload.id,
-              uploadedBytes,
-              totalBytes,
-            ),
+                  album.id,
+                  upload.id,
+                  uploadedBytes,
+                  totalBytes,
+                ),
             isCancelled: () =>
                 album.cancelled ||
                 upload.cancelled ||
@@ -2190,42 +2400,42 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           );
         }
 
-        if (!album.cancelled && !upload.cancelled && mounted) {
+        if (!album.cancelled && !upload.cancelled) {
           await _transferQueue.markCompleted(upload.id);
-          setState(() {
-            if (upload.totalBytes <= 0 ||
-                upload.uploadedBytes >= upload.totalBytes) {
-              upload.completed = true;
-              upload.uploadedBytes = upload.totalBytes;
-              _pendingUploadProgressUiUpdates.remove(upload.id);
-            } else {
-              upload.failed = true;
-            }
-          });
+          upload.completed = true;
+          upload.uploadedBytes = upload.totalBytes;
+          _pendingUploadProgressUiUpdates.remove(upload.id);
+          if (mounted) setState(() {});
         }
       } catch (e) {
-        if (e is MatrixUploadCancelledException ||
-            album.cancelled ||
-            upload.cancelled) {
+        if (album.cancelled) {
           await _transferQueue.cancel(upload.id);
           break;
         }
-        await _transferQueue.markFailed(upload.id, e);
-        if (mounted) {
-          setState(() {
-            upload.failed = true;
-            upload.error = e.toString();
-          });
+        if (e is MatrixUploadCancelledException || upload.cancelled) {
+          upload.cancelled = true;
+          await _transferQueue.cancel(upload.id);
+          continue;
         }
+        await _transferQueue.markFailed(upload.id, e);
+        upload.failed = true;
+        upload.error = e.toString();
+        if (mounted) setState(() {});
         _showSnackBar('Failed to send media: $e');
-        break;
       }
     }
 
-    if (!mounted) return;
+    for (final upload in album.uploads.where((item) => item.failed)) {
+      _schedulePendingUploadRetry(roomId, upload);
+    }
+
     final finished = album.uploads.every(
       (upload) => upload.completed || upload.cancelled || upload.failed,
     );
+    if (!mounted) {
+      await _transferQueue.removeFinishedBatch(album.id);
+      return;
+    }
     if (finished && !album.cancelled) {
       await Future<void>.delayed(const Duration(milliseconds: 900));
       if (!mounted) return;
@@ -2239,6 +2449,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       }
       _uploading = false;
     });
+    await _transferQueue.removeFinishedBatch(album.id);
     _scrollToBottom();
   }
 
@@ -2248,13 +2459,14 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     int uploadedBytes,
     int totalBytes,
   ) {
-    if (!mounted) return;
-    final albumIndex =
-        _pendingAlbumUploads.indexWhere((pending) => pending.id == albumId);
+    final albumIndex = _pendingAlbumUploads.indexWhere(
+      (pending) => pending.id == albumId,
+    );
     if (albumIndex == -1) return;
     final album = _pendingAlbumUploads[albumIndex];
-    final uploadIndex = album.uploads
-        .indexWhere((pendingUpload) => pendingUpload.id == uploadId);
+    final uploadIndex = album.uploads.indexWhere(
+      (pendingUpload) => pendingUpload.id == uploadId,
+    );
     if (uploadIndex == -1) return;
     _applyPendingUploadProgress(
       album.uploads[uploadIndex],
@@ -2327,11 +2539,35 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
   void _startPendingQueuedUploads(String roomId, List<_PendingUpload> uploads) {
     if (uploads.isEmpty) return;
+    final batchId = uploads.length > 1
+        ? 'batch_${DateTime.now().microsecondsSinceEpoch}'
+        : null;
+    for (final upload in uploads) {
+      upload.batchId = batchId;
+    }
     if (mounted) {
       setState(() => _pendingUploads.addAll(uploads));
       _scrollToBottom();
     }
-    unawaited(_runPendingQueuedUploads(roomId, uploads));
+    unawaited(_prepareAndRunPendingQueuedUploads(roomId, uploads));
+  }
+
+  Future<void> _prepareAndRunPendingQueuedUploads(
+    String roomId,
+    List<_PendingUpload> uploads,
+  ) async {
+    try {
+      await _prepareBatchTransferJobs(roomId, uploads);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _pendingUploads.removeWhere(uploads.contains);
+        });
+        _showSnackBar('Failed to prepare uploads: $e');
+      }
+      return;
+    }
+    await _runPendingQueuedUploads(roomId, uploads);
   }
 
   Future<void> _runPendingQueuedUploads(
@@ -2345,9 +2581,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         if (mounted) setState(() => upload.started = true);
 
         try {
-          await _sendPendingUpload(roomId, upload);
+          final sent = await _sendPendingUpload(roomId, upload);
+          if (!sent) continue;
           _removePendingUpload(upload.id);
-          await _transferQueue.remove(upload.id);
+          if (upload.batchId == null) {
+            await _transferQueue.remove(upload.id);
+          }
           _cancelledPendingUploadIds.remove(upload.id);
         } catch (e) {
           if (e is! MatrixUploadCancelledException &&
@@ -2372,6 +2611,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         }
       }
     } finally {
+      for (final batchId
+          in uploads.map((upload) => upload.batchId).nonNulls.toSet()) {
+        await _transferQueue.removeFinishedBatch(batchId);
+      }
       _setUploading(false);
       _scrollToBottom();
     }
@@ -2396,28 +2639,25 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final retryAt = _transferQueue.retryAtFor(upload.id);
     if (retryAt == null) return;
     final delay = retryAt.difference(DateTime.now());
-    unawaited(Future<void>.delayed(delay.isNegative ? Duration.zero : delay,
-        () async {
-      if (!mounted ||
-          upload.cancelled ||
-          _isPendingUploadCancelled(upload.id)) {
-        return;
-      }
-      if (!_transferQueue.shouldAutoRetry(upload.id)) return;
-      try {
-        await _transferQueue.retry(upload.id);
-        if (!mounted) return;
-        setState(() {
+    unawaited(
+      Future<void>.delayed(delay.isNegative ? Duration.zero : delay, () async {
+        if (upload.cancelled || _isPendingUploadCancelled(upload.id)) {
+          return;
+        }
+        if (!_transferQueue.shouldAutoRetry(upload.id)) return;
+        try {
+          await _transferQueue.retry(upload.id);
           upload.failed = false;
           upload.error = null;
           upload.started = false;
           upload.uploadedBytes = 0;
-        });
-        await _runSinglePendingMediaUpload(roomId, upload);
-      } catch (e) {
-        debugPrint('[TransferQueue] Automatic retry failed: $e');
-      }
-    }));
+          if (mounted) setState(() {});
+          await _runSinglePendingMediaUpload(roomId, upload);
+        } catch (e) {
+          debugPrint('[TransferQueue] Automatic retry failed: $e');
+        }
+      }),
+    );
   }
 
   Future<void> _pickAndSendAudioWithPending() async {
@@ -2565,8 +2805,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       final phoneNumber = picked.selectedPhoneNumber?.trim().isNotEmpty == true
           ? picked.selectedPhoneNumber!.trim()
           : picked.phoneNumbers
-              ?.where((number) => number.trim().isNotEmpty)
-              .firstOrNull;
+                ?.where((number) => number.trim().isNotEmpty)
+                .firstOrNull;
       if (phoneNumber == null) {
         _showSnackBar('The selected contact has no phone number.');
         return;
@@ -2619,18 +2859,13 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: const [
-        'jpg',
-        'jpeg',
-        'png',
-        'gif',
-        'webp',
-      ],
+      allowedExtensions: const ['jpg', 'jpeg', 'png', 'gif', 'webp'],
       withData: true,
       allowMultiple: false,
     );
-    final picked =
-        result == null || result.files.isEmpty ? null : result.files.first;
+    final picked = result == null || result.files.isEmpty
+        ? null
+        : result.files.first;
     final bytes = picked?.bytes;
     if (picked == null || bytes == null || bytes.isEmpty) return;
 
@@ -2707,7 +2942,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
     final result = await Navigator.push<CameraCaptureResult>(
       context,
-      MaterialPageRoute(builder: (_) => const CameraCaptureScreen()),
+      MaterialPageRoute(
+        builder: (_) => const CameraCaptureScreen(returnVideoFile: true),
+      ),
     );
     if (!mounted || result == null) return;
     if (_isUploadBusy) {
@@ -2716,11 +2953,20 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     }
 
     if (result.type == CameraCaptureMediaType.video) {
+      final videoPath = result.filePath;
+      if (result.bytes.isEmpty && (videoPath == null || videoPath.isEmpty)) {
+        _showSnackBar('Unable to read the recorded video.');
+        return;
+      }
+      final videoBytes = result.bytes.isNotEmpty
+          ? result.bytes
+          : await File(videoPath!).readAsBytes();
       await _sendVideoWithPending(
         room.id,
-        bytes: result.bytes,
+        bytes: videoBytes,
         fileName: result.fileName,
         mimeType: result.mimeType,
+        sourcePath: videoPath,
         caption: result.caption,
       );
     } else {
@@ -2780,7 +3026,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         if (bytes == null || bytes.isEmpty) continue;
 
         final fileName = picked.name;
-        final mimeType = lookupMimeType(fileName, headerBytes: bytes) ??
+        final mimeType =
+            lookupMimeType(fileName, headerBytes: bytes) ??
             'application/octet-stream';
         final isImage = mimeType.startsWith('image/');
         final isVideo = mimeType.startsWith('video/');
@@ -2790,12 +3037,15 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           return;
         }
 
-        uploads.add(_createPendingMediaUpload(
-          bytes: bytes,
-          fileName: fileName,
-          mimeType: mimeType,
-          isVideo: isVideo,
-        ));
+        uploads.add(
+          _createPendingMediaUpload(
+            bytes: bytes,
+            fileName: fileName,
+            mimeType: mimeType,
+            isVideo: isVideo,
+            sourcePath: picked.path,
+          ),
+        );
       }
 
       if (uploads.isNotEmpty) {
@@ -2810,7 +3060,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     if (bytes == null || bytes.isEmpty) return;
 
     final fileName = picked.name;
-    final mimeType = lookupMimeType(fileName, headerBytes: bytes) ??
+    final mimeType =
+        lookupMimeType(fileName, headerBytes: bytes) ??
         'application/octet-stream';
     final isImage = mimeType.startsWith('image/');
     final isVideo = mimeType.startsWith('video/');
@@ -2833,6 +3084,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
               ? CameraCaptureMediaType.video
               : CameraCaptureMediaType.image,
           bytes: bytes,
+          filePath: isVideo ? picked.path : null,
           fileName: fileName,
           mimeType: mimeType,
         ),
@@ -2850,6 +3102,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         bytes: previewResult.bytes,
         fileName: previewResult.fileName,
         mimeType: previewResult.mimeType,
+        sourcePath: previewResult.filePath,
         caption: previewResult.caption,
       );
     } else {
@@ -2897,10 +3150,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
       final matrixFile = await _downloadAttachmentWithQueue(
         event,
-        activeLabel:
-            'Loading ${matrixAttachmentFileName(event, fallback: 'video')}...',
         failurePrefix: 'Failed to load video',
-        progressLabel: 'Opening',
+        progressLabel: 'Decrypting',
+        showSize: false,
         showCancelAction: false,
       );
 
@@ -3027,14 +3279,13 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         builder: (_) => FullscreenVideoPlayer.loading(
           videoFuture: _downloadAttachmentWithQueue(
             event,
-            activeLabel:
-                'Opening ${matrixAttachmentFileName(event, fallback: 'video')}...',
             failurePrefix: 'Failed to load video',
-            progressLabel: 'Opening',
+            progressLabel: 'Decrypting',
+            showSize: false,
             showCancelAction: false,
           ),
           title: matrixAttachmentFileName(event, fallback: 'Video'),
-          loadingLabel: 'Opening...',
+          loadingLabel: 'Decrypting...',
           onReply: () async => _setReplyTo(event),
           onDelete: _canDeleteMessage(event)
               ? () async => _deleteMessage(event)
@@ -3104,9 +3355,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
   Future<MatrixFile> _downloadAttachmentWithQueue(
     Event event, {
-    required String activeLabel,
     required String failurePrefix,
     String progressLabel = 'Downloading',
+    bool showSize = true,
     bool showCancelAction = true,
     bool showCompletionSnack = false,
     Future<void> Function(MatrixFile file)? onDownloaded,
@@ -3150,35 +3401,17 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
       messenger.showSnackBar(
         SnackBar(
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-                child: Text(
-                  activeLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.inter(
-                    color: kBlack,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              _DownloadSnackBarContent(
-                jobId: downloadJob.id,
-                initialJobs: _transferQueue.jobs,
-                stream: _transferQueue.stream,
-                label: progressLabel,
-                showCancelAction: showCancelAction,
-                onCancel: () {
-                  unawaited(_transferQueue.cancel(downloadJob!.id));
-                  showDownloadCancelledSnackBar();
-                },
-              ),
-            ],
+          content: _DownloadSnackBarContent(
+            jobId: downloadJob.id,
+            initialJobs: _transferQueue.jobs,
+            stream: _transferQueue.stream,
+            label: progressLabel,
+            showSize: showSize,
+            showCancelAction: showCancelAction,
+            onCancel: () {
+              unawaited(_transferQueue.cancel(downloadJob!.id));
+              showDownloadCancelledSnackBar();
+            },
           ),
           backgroundColor: kWhite,
           padding: EdgeInsets.zero,
@@ -3190,11 +3423,13 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         event,
         downloadCallback: _mediaHandler.authenticatedDownloadWithProgress(
           onProgress: (downloadedBytes, totalBytes) {
-            unawaited(_transferQueue.updateProgress(
-              downloadJob!.id,
-              downloadedBytes,
-              totalBytes,
-            ));
+            unawaited(
+              _transferQueue.updateProgress(
+                downloadJob!.id,
+                downloadedBytes,
+                totalBytes,
+              ),
+            );
           },
           isCancelled: () => _transferQueue.isCancelled(downloadJob!.id),
         ),
@@ -3241,9 +3476,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         if (showCompletionSnack) {
           messenger.showSnackBar(
             SnackBar(
-              content: Text(kIsWeb
-                  ? 'Downloaded: ${matrixFile.name}'
-                  : 'Downloaded successfully'),
+              content: Text(
+                kIsWeb
+                    ? 'Downloaded: ${matrixFile.name}'
+                    : 'Downloaded successfully',
+              ),
               backgroundColor: kLimeGreen,
               duration: const Duration(seconds: 2),
             ),
@@ -3284,8 +3521,6 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     try {
       await _downloadAttachmentWithQueue(
         event,
-        activeLabel:
-            'Downloading ${matrixAttachmentFileName(event, fallback: 'file')}...',
         failurePrefix: 'Failed to download',
         showCompletionSnack: true,
         onDownloaded: (file) => web_download.downloadFile(
@@ -3332,10 +3567,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       final displayEvent = _displayEventFor(event);
       await _downloadAttachmentWithQueue(
         displayEvent,
-        activeLabel:
-            'Opening ${matrixAttachmentFileName(displayEvent, fallback: 'file')}...',
         failurePrefix: 'Could not open file',
-        progressLabel: 'Opening',
+        progressLabel: 'Decrypting',
+        showSize: false,
         showCancelAction: false,
         onDownloaded: (file) async {
           if (kIsWeb) {
@@ -3408,15 +3642,17 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
   List<Event> _visibleMessages() {
     return _timeline?.events
-            .where((e) =>
-                !e.redacted &&
-                !_isEditReplacementEvent(e) &&
-                !_isPendingAlbumTimelineEvent(e) &&
-                !MatrixService.isGroupCallPushMarker(e) &&
-                (e.type == EventTypes.Message ||
-                    e.type == EventTypes.Encrypted ||
-                    e.type == EventTypes.Sticker ||
-                    e.type == _pollStartEventType))
+            .where(
+              (e) =>
+                  !e.redacted &&
+                  !_isEditReplacementEvent(e) &&
+                  !_isPendingAlbumTimelineEvent(e) &&
+                  !MatrixService.isGroupCallPushMarker(e) &&
+                  (e.type == EventTypes.Message ||
+                      e.type == EventTypes.Encrypted ||
+                      e.type == EventTypes.Sticker ||
+                      e.type == _pollStartEventType),
+            )
             .toList()
             .reversed
             .toList() ??
@@ -3429,8 +3665,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     }
 
     for (final album in _pendingAlbumUploads) {
-      final earliestVisibleTime =
-          album.createdAt.subtract(const Duration(seconds: 5));
+      final earliestVisibleTime = album.createdAt.subtract(
+        const Duration(seconds: 5),
+      );
       if (event.originServerTs.isBefore(earliestVisibleTime)) continue;
 
       for (final upload in album.uploads) {
@@ -3443,8 +3680,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
   bool _matchesPendingAlbumUpload(Event event, _PendingUpload upload) {
     final displayEvent = _displayEventFor(event);
-    final expectedType =
-        upload.isVideo ? MessageTypes.Video : MessageTypes.Image;
+    final expectedType = upload.isVideo
+        ? MessageTypes.Video
+        : MessageTypes.Image;
     if (displayEvent.messageType != expectedType) return false;
 
     final fileName = displayEvent.content['filename'];
@@ -3517,10 +3755,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         !_historyExhausted &&
         _timeline?.canRequestHistory == true) {
       final beforeCount = _timeline!.events.length;
-      await _loadOlderMessages(
-        historyCount: 100,
-        preserveScroll: false,
-      );
+      await _loadOlderMessages(historyCount: 100, preserveScroll: false);
       found = _visibleMessages().any((event) => event.eventId == eventId);
       if (_timeline!.events.length <= beforeCount) break;
     }
@@ -3650,10 +3885,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   bool _canAppendToMediaAlbum(Event previous, Event next) {
     if (!_canGroupInMediaAlbum(next)) return false;
     if (previous.senderId != next.senderId) return false;
-    if (!isSameLocalCalendarDay(
-      previous.originServerTs,
-      next.originServerTs,
-    )) {
+    if (!isSameLocalCalendarDay(previous.originServerTs, next.originServerTs)) {
       return false;
     }
 
@@ -3698,7 +3930,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final canPin = _canPinMessage(event);
     final canDeleteOwnAttachment = isMe && canDelete;
     final canReact = _canReactToMessage(event);
-    final canShowMenu = canReply ||
+    final canShowMenu =
+        canReply ||
         canCopy ||
         canForward ||
         canDownload ||
@@ -3715,12 +3948,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         color: _isMessageSelected(event)
             ? kLimeGreen.withValues(alpha: 0.16)
             : _activeChatSearchEventId == event.eventId
-                ? kLimeGreen.withValues(alpha: 0.24)
-                : _chatSearchResultEventIds.contains(event.eventId)
-                    ? kLimeGreen.withValues(alpha: 0.09)
-                    : _highlightedEventId == event.eventId
-                        ? kLimeGreen.withValues(alpha: 0.22)
-                        : Colors.transparent,
+            ? kLimeGreen.withValues(alpha: 0.24)
+            : _chatSearchResultEventIds.contains(event.eventId)
+            ? kLimeGreen.withValues(alpha: 0.09)
+            : _highlightedEventId == event.eventId
+            ? kLimeGreen.withValues(alpha: 0.22)
+            : Colors.transparent,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: SwipeToReply(
@@ -3735,13 +3968,14 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
               onLongPress: _isMessageSelectionMode
                   ? () => _toggleMessageSelection(event)
                   : canShowMenu
-                      ? () => _showMessageOptions(event)
-                      : null,
+                  ? () => _showMessageOptions(event)
+                  : null,
               child: IgnorePointer(
                 ignoring: _isMessageSelectionMode,
                 child: Align(
-                  alignment:
-                      isMe ? Alignment.centerRight : Alignment.centerLeft,
+                  alignment: isMe
+                      ? Alignment.centerRight
+                      : Alignment.centerLeft,
                   child: Padding(
                     padding: EdgeInsets.only(
                       top: 4,
@@ -3800,8 +4034,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                             onForward: canForward
                                 ? () => _forwardMessage(event)
                                 : null,
-                            onPin:
-                                canPin ? () => _togglePinMessage(event) : null,
+                            onPin: canPin
+                                ? () => _togglePinMessage(event)
+                                : null,
                             onDelete: canDeleteOwnAttachment
                                 ? () => _deleteMessage(event)
                                 : null,
@@ -3843,8 +4078,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                             onForward: canForward
                                 ? () => _forwardMessage(event)
                                 : null,
-                            onPin:
-                                canPin ? () => _togglePinMessage(event) : null,
+                            onPin: canPin
+                                ? () => _togglePinMessage(event)
+                                : null,
                             onDelete: canDeleteOwnAttachment
                                 ? () => _deleteMessage(event)
                                 : null,
@@ -3860,6 +4096,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                             onPrivateReplyTap: _openPrivateReplySource,
                             mentionMembers: _mentionMembersForCurrentRoom(),
                             onMentionTap: _showMentionProfileSheet,
+                            onMessageContact: _messageSharedContact,
                           ),
                         MessageReactions(
                           reactions: _reactionSummariesFor(event),
@@ -3896,8 +4133,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final relationEvent = replySourceEvent ?? event;
     return Column(
       mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment:
-          isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      crossAxisAlignment: isMe
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
       children: [
         MessageReplyContext(
           event: event,
@@ -3929,8 +4167,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         borderRadius: BorderRadius.circular(18),
       ),
       child: Column(
-        crossAxisAlignment:
-            isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: isMe
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           if (!isMe)
@@ -3991,10 +4230,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                   fontWeight: FontWeight.w500,
                 ),
               ),
-              if (isMe) ...[
-                const SizedBox(width: 4),
-                status,
-              ],
+              if (isMe) ...[const SizedBox(width: 4), status],
             ],
           ),
         ],
@@ -4016,11 +4252,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final ownVote = _ownPollVote(event.eventId);
 
     return Container(
-      width: _responsiveBubbleWidth(
-        context,
-        compact: 285,
-        regular: 320,
-      ),
+      width: _responsiveBubbleWidth(context, compact: 285, regular: 320),
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
       decoration: BoxDecoration(
         color: isMe ? const Color(0xFF1A2A1A) : const Color(0xFF2C2C2E),
@@ -4095,10 +4327,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  if (isMe) ...[
-                    const SizedBox(width: 4),
-                    status,
-                  ],
+                  if (isMe) ...[const SizedBox(width: 4), status],
                 ],
               ),
             ],
@@ -4131,11 +4360,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final body = matrixVisibleBody(event).trim();
 
     return Container(
-      width: _responsiveBubbleWidth(
-        context,
-        compact: 270,
-        regular: 315,
-      ),
+      width: _responsiveBubbleWidth(context, compact: 270, regular: 315),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: isMe ? const Color(0xFF1A2A1A) : const Color(0xFF2C2C2E),
@@ -4307,10 +4532,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                if (isMe) ...[
-                  const SizedBox(width: 4),
-                  status,
-                ],
+                if (isMe) ...[const SizedBox(width: 4), status],
               ],
             ),
           ],
@@ -4327,8 +4549,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   Future<void> _openExternalUrl(Uri uri) async {
-    final launchUri =
-        uri.hasScheme ? uri : Uri.parse('https://${uri.toString()}');
+    final launchUri = uri.hasScheme
+        ? uri
+        : Uri.parse('https://${uri.toString()}');
     if (!await launchUrl(launchUri, mode: LaunchMode.externalApplication)) {
       _showSnackBar('Unable to open link');
     }
@@ -4343,35 +4566,34 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       if (_relationEventId(reaction) != event.eventId) continue;
       final key = _relationKey(reaction);
       if (key == null || key.isEmpty) continue;
-      usersByEmoji.putIfAbsent(key, () => <ReactionUser>[]).add(
-            _reactionUserFor(reaction.senderId),
-          );
+      usersByEmoji
+          .putIfAbsent(key, () => <ReactionUser>[])
+          .add(_reactionUserFor(reaction.senderId));
       if (reaction.senderId == _myUserId) reactedByMe.add(key);
     }
 
-    final summaries = usersByEmoji.entries.map((entry) {
-      return MessageReactionSummary(
-        emoji: entry.key,
-        count: entry.value.length,
-        reactedByMe: reactedByMe.contains(entry.key),
-        users: entry.value,
-      );
-    }).toList(growable: false);
+    final summaries = usersByEmoji.entries
+        .map((entry) {
+          return MessageReactionSummary(
+            emoji: entry.key,
+            count: entry.value.length,
+            reactedByMe: reactedByMe.contains(entry.key),
+            users: entry.value,
+          );
+        })
+        .toList(growable: false);
 
     final quickOrder = {
       for (var i = 0; i < ReactionPicker.quickReactions.length; i++)
         ReactionPicker.quickReactions[i]: i,
     };
-    return summaries.toList()
-      ..sort((a, b) {
-        final byMine = (b.reactedByMe ? 1 : 0) - (a.reactedByMe ? 1 : 0);
-        if (byMine != 0) return byMine;
-        final byCount = b.count.compareTo(a.count);
-        if (byCount != 0) return byCount;
-        return (quickOrder[a.emoji] ?? 999).compareTo(
-          quickOrder[b.emoji] ?? 999,
-        );
-      });
+    return summaries.toList()..sort((a, b) {
+      final byMine = (b.reactedByMe ? 1 : 0) - (a.reactedByMe ? 1 : 0);
+      if (byMine != 0) return byMine;
+      final byCount = b.count.compareTo(a.count);
+      if (byCount != 0) return byCount;
+      return (quickOrder[a.emoji] ?? 999).compareTo(quickOrder[b.emoji] ?? 999);
+    });
   }
 
   Future<void> _toggleReaction(Event event, String emoji) async {
@@ -4412,23 +4634,20 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     if (room != null) {
       for (final user in room.getParticipants()) {
         if (user.id != userId) continue;
-        final displayName = user.displayName?.trim();
         return ReactionUser(
           userId: userId,
-          displayName: displayName == null || displayName.isEmpty
-              ? _shortUserId(userId)
-              : displayName,
+          displayName: MatrixIdentity.displayName(
+            userId: userId,
+            candidate: user.displayName,
+          ),
           avatarUrl: user.avatarUrl?.toString(),
         );
       }
     }
-    return ReactionUser(userId: userId, displayName: _shortUserId(userId));
-  }
-
-  String _shortUserId(String userId) {
-    final localpart = userId.startsWith('@') ? userId.substring(1) : userId;
-    final colon = localpart.indexOf(':');
-    return colon == -1 ? localpart : localpart.substring(0, colon);
+    return ReactionUser(
+      userId: userId,
+      displayName: MatrixIdentity.displayName(userId: userId),
+    );
   }
 
   String? _myReactionFor(Event event) {
@@ -4537,8 +4756,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
   String? _pollResponseAnswerId(Event event) {
     final stable = event.content[_pollResponseContentKey];
-    final response =
-        stable is Map ? stable : event.content[_unstablePollResponseContentKey];
+    final response = stable is Map
+        ? stable
+        : event.content[_unstablePollResponseContentKey];
     if (response is! Map) return null;
     final answers = response['answers'];
     if (answers is List && answers.isNotEmpty) {
@@ -4584,7 +4804,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final isMe = primaryEvent.senderId == _myUserId;
     final senderName = MatrixService.cleanName(primaryEvent.senderId);
     final time = _formatTime(primaryEvent.originServerTs);
-    final canShowMenu = _canReplyToMessage(primaryEvent) ||
+    final canShowMenu =
+        _canReplyToMessage(primaryEvent) ||
         _copyableMessageText(primaryEvent) != null ||
         _canForwardMessage(primaryEvent) ||
         _canDownloadAttachment(primaryEvent) ||
@@ -4600,19 +4821,15 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         curve: Curves.easeOut,
         color: events.any(_isMessageSelected)
             ? kLimeGreen.withValues(alpha: 0.16)
+            : events.any((event) => _activeChatSearchEventId == event.eventId)
+            ? kLimeGreen.withValues(alpha: 0.24)
             : events.any(
-                (event) => _activeChatSearchEventId == event.eventId,
+                (event) => _chatSearchResultEventIds.contains(event.eventId),
               )
-                ? kLimeGreen.withValues(alpha: 0.24)
-                : events.any(
-                    (event) =>
-                        _chatSearchResultEventIds.contains(event.eventId),
-                  )
-                    ? kLimeGreen.withValues(alpha: 0.09)
-                    : events.any(
-                            (event) => _highlightedEventId == event.eventId)
-                        ? kLimeGreen.withValues(alpha: 0.22)
-                        : Colors.transparent,
+            ? kLimeGreen.withValues(alpha: 0.09)
+            : events.any((event) => _highlightedEventId == event.eventId)
+            ? kLimeGreen.withValues(alpha: 0.22)
+            : Colors.transparent,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: SwipeToReply(
@@ -4627,13 +4844,14 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
               onLongPress: _isMessageSelectionMode
                   ? () => _toggleMessageSelectionGroup(events)
                   : canShowMenu
-                      ? () => _showMessageOptions(primaryEvent)
-                      : null,
+                  ? () => _showMessageOptions(primaryEvent)
+                  : null,
               child: IgnorePointer(
                 ignoring: _isMessageSelectionMode,
                 child: Align(
-                  alignment:
-                      isMe ? Alignment.centerRight : Alignment.centerLeft,
+                  alignment: isMe
+                      ? Alignment.centerRight
+                      : Alignment.centerLeft,
                   child: Padding(
                     padding: EdgeInsets.only(
                       top: 4,
@@ -4763,10 +4981,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(
-              flex: 2,
-              child: _buildAlbumTile(events.first, events),
-            ),
+            Expanded(flex: 2, child: _buildAlbumTile(events.first, events)),
             _albumSeparator(width: 1.5),
             Expanded(
               child: Column(
@@ -4848,7 +5063,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   Widget _buildAlbumTile(Event event, List<Event> albumEvents) {
     final displayEvent = _displayEventFor(event);
     final isVideo = displayEvent.messageType == MessageTypes.Video;
-    final canShowMenu = _canReplyToMessage(event) ||
+    final canShowMenu =
+        _canReplyToMessage(event) ||
         _copyableMessageText(event) != null ||
         _canForwardMessage(event) ||
         _canDeleteMessage(event) ||
@@ -4924,8 +5140,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final cachedBytes = MediaHandler.getCachedThumbnail(event.eventId);
     return FutureBuilder<Uint8List?>(
       initialData: cachedBytes,
-      future:
-          cachedBytes == null ? _mediaHandler.loadVideoThumbnail(event) : null,
+      future: cachedBytes == null
+          ? _mediaHandler.loadVideoThumbnail(event)
+          : null,
       builder: (context, snapshot) {
         final bytes = snapshot.data;
         if (bytes == null || bytes.isEmpty) {
@@ -5008,8 +5225,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                 bottom: 8,
                 right: 8,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 7,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.62),
                     borderRadius: BorderRadius.circular(11),
@@ -5170,12 +5389,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
           Image.memory(
             upload.bytes,
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => _buildPendingAlbumPlaceholder(
-              Icons.image,
-            ),
+            errorBuilder: (_, __, ___) =>
+                _buildPendingAlbumPlaceholder(Icons.image),
           ),
         Container(
-            color: Colors.black.withValues(alpha: isWaiting ? 0.28 : 0.1)),
+          color: Colors.black.withValues(alpha: isWaiting ? 0.28 : 0.1),
+        ),
         if (isCurrentUpload)
           Positioned(
             top: 5,
@@ -5190,32 +5409,31 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                   size: 34,
                 )
               : upload.completed
-                  ? Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.56),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.check_rounded,
-                        color: kWhite,
-                        size: 28,
-                      ),
-                    )
-                  : _PendingCancelProgressButton(
-                      progress: progress,
-                      backgroundColor: Colors.black.withValues(alpha: 0.56),
-                      progressColor: Colors.white,
-                      progressBackgroundColor:
-                          Colors.white.withValues(alpha: 0.24),
-                      iconColor: Colors.white,
-                      onCancel: () {
-                        upload.cancelled = true;
-                        unawaited(_transferQueue.cancel(upload.id));
-                        setState(() {});
-                      },
-                    ),
+              ? Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.56),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.check_rounded,
+                    color: kWhite,
+                    size: 28,
+                  ),
+                )
+              : _PendingCancelProgressButton(
+                  progress: progress,
+                  backgroundColor: Colors.black.withValues(alpha: 0.56),
+                  progressColor: Colors.white,
+                  progressBackgroundColor: Colors.white.withValues(alpha: 0.24),
+                  iconColor: Colors.white,
+                  onCancel: () {
+                    upload.cancelled = true;
+                    unawaited(_transferQueue.cancel(upload.id));
+                    setState(() {});
+                  },
+                ),
         ),
       ],
     );
@@ -5298,13 +5516,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   Widget _buildPendingAlbumPlaceholder(IconData icon) {
     return ColoredBox(
       color: kDarkGrey,
-      child: Center(
-        child: Icon(
-          icon,
-          color: kLightGrey,
-          size: 28,
-        ),
-      ),
+      child: Center(child: Icon(icon, color: kLightGrey, size: 28)),
     );
   }
 
@@ -5322,15 +5534,15 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                   onRetry: () => _retryPendingUpload(upload),
                 )
               : upload.isFile
-                  ? _PendingFileUploadBubble(
-                      upload: upload,
-                      onCancel: () => _cancelPendingUpload(upload.id),
-                      onRetry: () => _retryPendingUpload(upload),
-                    )
-                  : _PendingMediaUploadBubble(
-                      upload: upload,
-                      onRetry: () => _retryPendingUpload(upload),
-                    ),
+              ? _PendingFileUploadBubble(
+                  upload: upload,
+                  onCancel: () => _cancelPendingUpload(upload.id),
+                  onRetry: () => _retryPendingUpload(upload),
+                )
+              : _PendingMediaUploadBubble(
+                  upload: upload,
+                  onRetry: () => _retryPendingUpload(upload),
+                ),
         ),
       ),
     );
@@ -5394,7 +5606,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final isMyMessage = event.senderId == _myUserId;
 
     // Can only edit text messages
-    final isTextMessage = event.messageType == MessageTypes.Text ||
+    final isTextMessage =
+        event.messageType == MessageTypes.Text ||
         event.messageType == MessageTypes.Notice ||
         event.messageType == MessageTypes.Emote;
 
@@ -5426,7 +5639,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
     final displayEvent = _displayEventFor(event);
     final msgtype = displayEvent.messageType;
-    final isCopyable = msgtype == MessageTypes.Text ||
+    final isCopyable =
+        msgtype == MessageTypes.Text ||
         msgtype == MessageTypes.Notice ||
         msgtype == MessageTypes.Emote ||
         msgtype == MessageTypes.Image ||
@@ -5473,8 +5687,6 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       final displayEvent = _displayEventFor(event);
       await _downloadAttachmentWithQueue(
         displayEvent,
-        activeLabel:
-            'Preparing ${matrixAttachmentFileName(displayEvent, fallback: 'file')}...',
         failurePrefix: 'Failed to share',
         progressLabel: 'Preparing',
         showCancelAction: false,
@@ -5602,11 +5814,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [
-                Color(0xFF26313A),
-                Color(0xFF1F2831),
-                Color(0xFF202529),
-              ],
+              colors: [Color(0xFF26313A), Color(0xFF1F2831), Color(0xFF202529)],
             ),
             borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
           ),
@@ -5721,6 +5929,27 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     return _getRoomByIdAfterSync(roomId);
   }
 
+  Future<void> _messageSharedContact(XmoContactCard contact) async {
+    final userId = contact.userId;
+    if (userId == null || userId.isEmpty) return;
+    if (userId == widget.matrixProvider.userId) {
+      _showSnackBar('This is your contact.');
+      return;
+    }
+
+    final directRoom = await _directRoomForUserId(userId);
+    if (!mounted || directRoom == null || directRoom.id == _room?.id) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => MatrixChatScreen(
+          room: directRoom,
+          matrixProvider: widget.matrixProvider,
+        ),
+      ),
+    );
+  }
+
   Room? _localDirectRoomForUserId(String userId) {
     var normalizedUserId = userId.trim();
     if (!normalizedUserId.startsWith('@')) {
@@ -5731,8 +5960,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     }
 
     final service = widget.matrixProvider.service;
-    final mappedRoomId =
-        service.client.getDirectChatFromUserId(normalizedUserId);
+    final mappedRoomId = service.client.getDirectChatFromUserId(
+      normalizedUserId,
+    );
     if (mappedRoomId != null) {
       final mappedRoom = service.getRoomById(mappedRoomId);
       if (mappedRoom != null && mappedRoom.membership == Membership.join) {
@@ -5823,8 +6053,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     if (draft.sourceRoomId.isEmpty || draft.sourceEventId.isEmpty) {
       return null;
     }
-    final sourceRoom =
-        widget.matrixProvider.service.getRoomById(draft.sourceRoomId);
+    final sourceRoom = widget.matrixProvider.service.getRoomById(
+      draft.sourceRoomId,
+    );
     if (sourceRoom == null) return null;
 
     try {
@@ -5898,8 +6129,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content:
-              Text('Unable to start ${video ? 'video' : 'voice'} call: $e'),
+          content: Text(
+            'Unable to start ${video ? 'video' : 'voice'} call: $e',
+          ),
           backgroundColor: Colors.red,
         ),
       );
@@ -5970,15 +6202,14 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   bool get _selectionCanCopy => _selectedMessageEvents.values.any(
-        (event) =>
-            _isStableMessageActionTarget(event) &&
-            _copyableMessageText(event) != null,
-      );
+    (event) =>
+        _isStableMessageActionTarget(event) &&
+        _copyableMessageText(event) != null,
+  );
 
   bool get _selectionCanForward => _selectedMessageEvents.values.any(
-        (event) =>
-            _isStableMessageActionTarget(event) && _canForwardMessage(event),
-      );
+    (event) => _isStableMessageActionTarget(event) && _canForwardMessage(event),
+  );
 
   bool get _selectionCanDelete =>
       _selectedMessageEvents.isNotEmpty &&
@@ -5999,9 +6230,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     await Clipboard.setData(ClipboardData(text: parts.join('\n\n')));
     if (!mounted) return;
     setState(_selectedMessageEvents.clear);
-    _showSnackBar(parts.length == 1
-        ? 'Copied to clipboard'
-        : 'Copied ${parts.length} messages');
+    _showSnackBar(
+      parts.length == 1
+          ? 'Copied to clipboard'
+          : 'Copied ${parts.length} messages',
+    );
   }
 
   Future<void> _forwardSelectedMessages() async {
@@ -6063,8 +6296,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     var skipped = 0;
     var failed = 0;
     try {
-      final savedRoom =
-          await widget.matrixProvider.getOrCreateSavedMessagesRoom();
+      final savedRoom = await widget.matrixProvider
+          .getOrCreateSavedMessagesRoom();
       for (final event in events) {
         try {
           if (await _isMessageSaved(event)) {
@@ -6131,17 +6364,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              'Cancel',
-              style: GoogleFonts.inter(color: kLightGrey),
-            ),
+            child: Text('Cancel', style: GoogleFonts.inter(color: kLightGrey)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(
-              'Delete',
-              style: GoogleFonts.inter(color: Colors.red),
-            ),
+            child: Text('Delete', style: GoogleFonts.inter(color: Colors.red)),
           ),
         ],
       ),
@@ -6211,11 +6438,13 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     final canDownload = _canDownloadAttachment(event);
     final canReact = _canReactToMessage(event);
     final canPin = _canPinMessage(event);
-    final canReport = _isSelectableMessage(event) &&
+    final canReport =
+        _isSelectableMessage(event) &&
         event.eventId.isNotEmpty &&
         event.senderId.isNotEmpty &&
         event.senderId != _myUserId;
-    final canReplyPrivately = canReply &&
+    final canReplyPrivately =
+        canReply &&
         _room != null &&
         !_isDirectRoom &&
         !_room!.isChannel &&
@@ -6268,8 +6497,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                   ),
                 if (canReplyPrivately)
                   ListTile(
-                    leading:
-                        const Icon(Icons.chat_bubble_outline, color: kWhite),
+                    leading: const Icon(
+                      Icons.chat_bubble_outline,
+                      color: kWhite,
+                    ),
                     title: Text(
                       'Reply privately',
                       style: GoogleFonts.inter(color: kWhite),
@@ -6293,8 +6524,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                   ),
                 if (canReact)
                   ListTile(
-                    leading:
-                        const Icon(Icons.add_reaction_outlined, color: kWhite),
+                    leading: const Icon(
+                      Icons.add_reaction_outlined,
+                      color: kWhite,
+                    ),
                     title: Text(
                       'Add Reaction',
                       style: GoogleFonts.inter(color: kWhite),
@@ -6409,8 +6642,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                   ),
                 if (canDelete)
                   ListTile(
-                    leading:
-                        const Icon(Icons.delete_outline, color: Colors.red),
+                    leading: const Icon(
+                      Icons.delete_outline,
+                      color: Colors.red,
+                    ),
                     title: Text(
                       'Delete Message',
                       style: GoogleFonts.inter(color: Colors.red),
@@ -6439,8 +6674,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       contextType: _isDirectRoom
           ? XmoReportContextType.direct
           : room.isChannel
-              ? XmoReportContextType.channel
-              : XmoReportContextType.group,
+          ? XmoReportContextType.channel
+          : XmoReportContextType.group,
       title: 'Report message',
       reportedUserId: event.senderId,
       roomId: room.id,
@@ -6506,8 +6741,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   Future<void> _saveMessage(Event event) async {
     if (!_ensureStableMessageActionTarget(event)) return;
     try {
-      final savedRoom =
-          await widget.matrixProvider.getOrCreateSavedMessagesRoom();
+      final savedRoom = await widget.matrixProvider
+          .getOrCreateSavedMessagesRoom();
       await widget.matrixProvider.service.forwardMessage(
         event: event,
         targetRoomId: savedRoom.id,
@@ -6642,10 +6877,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                 const SizedBox(height: 16),
                 Row(
                   children: [
-                    Text(
-                      selected.emoji,
-                      style: const TextStyle(fontSize: 26),
-                    ),
+                    Text(selected.emoji, style: const TextStyle(fontSize: 26)),
                     const SizedBox(width: 9),
                     Text(
                       selected.count == 1
@@ -6743,12 +6975,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
   Future<void> _editMessage(Event event) async {
     if (_isEditingMessage || !_ensureStableMessageActionTarget(event)) return;
-    final currentText = _displayEventFor(event)
-        .calcUnlocalizedBody(
-          hideReply: true,
-          hideEdit: true,
-        )
-        .trim();
+    final currentText = _displayEventFor(
+      event,
+    ).calcUnlocalizedBody(hideReply: true, hideEdit: true).trim();
     if (currentText.isEmpty) return;
 
     final replyBeforeEdit = _replyToEvent;
@@ -6892,10 +7121,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: kDarkerGrey,
-        title: Text(
-          'Delete Message?',
-          style: GoogleFonts.inter(color: kWhite),
-        ),
+        title: Text('Delete Message?', style: GoogleFonts.inter(color: kWhite)),
         content: Text(
           'This message will be deleted for everyone.',
           style: GoogleFonts.inter(color: kLightGrey),
@@ -6903,17 +7129,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              'Cancel',
-              style: GoogleFonts.inter(color: kLightGrey),
-            ),
+            child: Text('Cancel', style: GoogleFonts.inter(color: kLightGrey)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(
-              'Delete',
-              style: GoogleFonts.inter(color: Colors.red),
-            ),
+            child: Text('Delete', style: GoogleFonts.inter(color: Colors.red)),
           ),
         ],
       ),
@@ -6972,7 +7192,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   }
 
   Widget _buildMessageStatus(Event event) {
-    final isRead = _isDirectRoom &&
+    final isRead =
+        _isDirectRoom &&
         event.status.isSynced &&
         _directChatService.isMessageRead(
           event,
@@ -7074,17 +7295,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              'Cancel',
-              style: GoogleFonts.inter(color: kLightGrey),
-            ),
+            child: Text('Cancel', style: GoogleFonts.inter(color: kLightGrey)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(
-              'Delete',
-              style: GoogleFonts.inter(color: Colors.red),
-            ),
+            child: Text('Delete', style: GoogleFonts.inter(color: Colors.red)),
           ),
         ],
       ),
@@ -7149,6 +7364,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
 
   @override
   void dispose() {
+    _markChatRouteHidden();
+    xmoRouteObserver.unsubscribe(this);
     _recordingTimer?.cancel();
     _amplitudeSub?.cancel();
     unawaited(_audioRecorder.dispose());
@@ -7166,6 +7383,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     _readMarkerDebounce?.cancel();
     _sharedMediaIndexDebounce?.cancel();
     _stateRefreshDebounce?.cancel();
+    _transferQueueSubscription?.cancel();
+    _transferQueueUiDebounce?.cancel();
     _mediaHandler.clearCache();
     unawaited(_localPlaybackProxyService.stop());
     super.dispose();
@@ -7192,8 +7411,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
         final roomTitle = MatrixService.cleanName(
           MatrixService().getResolvedDisplayName(groupCall.room),
         );
-        final displayName =
-            roomTitle.trim().isEmpty ? 'Group' : roomTitle.trim();
+        final displayName = roomTitle.trim().isEmpty
+            ? 'Group'
+            : roomTitle.trim();
 
         return SafeArea(
           bottom: false,
@@ -7270,8 +7490,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                         ),
                         onPressed: () async {
                           try {
-                            await VoipService()
-                                .answerIncomingGroupCall(groupCall);
+                            await VoipService().answerIncomingGroupCall(
+                              groupCall,
+                            );
                           } catch (e) {
                             if (!context.mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -7299,11 +7520,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                           width: 34,
                           height: 34,
                         ),
-                        icon: const Icon(
-                          Icons.close,
-                          color: kWhite,
-                          size: 20,
-                        ),
+                        icon: const Icon(Icons.close, color: kWhite, size: 20),
                         onPressed: () {
                           VoipService().rejectGroupCall(groupCall);
                           setState(() {
@@ -7406,10 +7623,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
     );
   }
 
-  List<Event> _matchingChatSearchEvents(
-    Iterable<Event> events,
-    String query,
-  ) {
+  List<Event> _matchingChatSearchEvents(Iterable<Event> events, String query) {
     final byId = <String, Event>{};
     for (final event in events) {
       if (event.eventId.isEmpty ||
@@ -7594,16 +7808,17 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
   Widget _buildChatSearchNavigation() {
     final hasResults = _chatSearchResults.isNotEmpty;
     final canMoveUp = hasResults && _chatSearchResultIndex > 0;
-    final canMoveDown = hasResults &&
+    final canMoveDown =
+        hasResults &&
         _chatSearchResultIndex >= 0 &&
         _chatSearchResultIndex < _chatSearchResults.length - 1;
     final resultLabel = hasResults
         ? '${_chatSearchResultIndex + 1} of ${_chatSearchResults.length}'
         : _chatSearchLoading
-            ? 'Searching older messages...'
-            : _chatSearchController.text.trim().isEmpty
-                ? 'Search messages'
-                : 'No results';
+        ? 'Searching older messages...'
+        : _chatSearchController.text.trim().isEmpty
+        ? 'Search messages'
+        : 'No results';
 
     return SafeArea(
       top: false,
@@ -7641,9 +7856,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
             IconButton(
               tooltip: 'Previous result',
               onPressed: canMoveUp
-                  ? () => _jumpToChatSearchResult(
-                        _chatSearchResultIndex - 1,
-                      )
+                  ? () => _jumpToChatSearchResult(_chatSearchResultIndex - 1)
                   : null,
               icon: Icon(
                 Icons.keyboard_arrow_up,
@@ -7654,9 +7867,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
             IconButton(
               tooltip: 'Next result',
               onPressed: canMoveDown
-                  ? () => _jumpToChatSearchResult(
-                        _chatSearchResultIndex + 1,
-                      )
+                  ? () => _jumpToChatSearchResult(_chatSearchResultIndex + 1)
                   : null,
               icon: Icon(
                 Icons.keyboard_arrow_down,
@@ -7787,38 +7998,37 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
               appBar: _isMessageSelectionMode
                   ? _buildMessageSelectionAppBar()
                   : _isChatSearchMode
-                      ? _buildChatSearchAppBar()
-                      : _isEditingMessage
-                          ? _buildMessageEditAppBar()
-                          : _room != null
-                              ? ChatAppBar(
-                                  room: _room!,
-                                  onBack: () => Navigator.pop(context),
-                                  onDeleteChat: _handleDeleteChat,
-                                  onArchiveChat: _handleArchiveChat,
-                                  onLeaveRoom: _handleLeaveRoom,
-                                  onDeleteGroup: _handleDeleteGroup,
-                                  matrixProvider: widget.matrixProvider,
-                                  onSearch: _openChatSearch,
-                                )
-                              : AppBar(
-                                  backgroundColor: kBlack,
-                                  elevation: 0,
-                                  leading: IconButton(
-                                    icon: const Icon(Icons.arrow_back,
-                                        color: kWhite),
-                                    onPressed: () => Navigator.pop(context),
-                                  ),
-                                  title: Text(
-                                    widget.previewChannel!.name ??
-                                        widget.previewChannel!.roomId,
-                                    style: GoogleFonts.inter(
-                                      color: kWhite,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
+                  ? _buildChatSearchAppBar()
+                  : _isEditingMessage
+                  ? _buildMessageEditAppBar()
+                  : _room != null
+                  ? ChatAppBar(
+                      room: _room!,
+                      onBack: () => Navigator.pop(context),
+                      onDeleteChat: _handleDeleteChat,
+                      onArchiveChat: _handleArchiveChat,
+                      onLeaveRoom: _handleLeaveRoom,
+                      onDeleteGroup: _handleDeleteGroup,
+                      matrixProvider: widget.matrixProvider,
+                      onSearch: _openChatSearch,
+                    )
+                  : AppBar(
+                      backgroundColor: kBlack,
+                      elevation: 0,
+                      leading: IconButton(
+                        icon: const Icon(Icons.arrow_back, color: kWhite),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                      title: Text(
+                        widget.previewChannel!.name ??
+                            widget.previewChannel!.roomId,
+                        style: GoogleFonts.inter(
+                          color: kWhite,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
               body: Stack(
                 children: [
                   const Positioned.fill(
@@ -7838,131 +8048,128 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                         child: _loading
                             ? const Center(
                                 child: CircularProgressIndicator(
-                                    color: kLimeGreen),
+                                  color: kLimeGreen,
+                                ),
                               )
                             : messages.isEmpty &&
-                                    _pendingUploads.isEmpty &&
-                                    _pendingAlbumUploads.isEmpty
-                                ? Center(
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Icon(
-                                          Icons.chat_bubble_outline,
-                                          color: kMediumGrey,
-                                          size: 48,
-                                        ),
-                                        const SizedBox(height: 12),
-                                        Text(
-                                          'No messages yet. Say hello!',
-                                          style: GoogleFonts.inter(
-                                            color: kLightGrey,
-                                            fontSize: 14,
-                                          ),
-                                        ),
-                                      ],
+                                  _pendingUploads.isEmpty &&
+                                  _pendingAlbumUploads.isEmpty
+                            ? Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.chat_bubble_outline,
+                                      color: kMediumGrey,
+                                      size: 48,
                                     ),
-                                  )
-                                : RepaintBoundary(
-                                    child: ListView.builder(
-                                      controller: _scrollCtrl,
-                                      // ignore: deprecated_member_use
-                                      cacheExtent: 900,
-                                      keyboardDismissBehavior:
-                                          ScrollViewKeyboardDismissBehavior
-                                              .onDrag,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 0,
-                                        vertical: 8,
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      'No messages yet. Say hello!',
+                                      style: GoogleFonts.inter(
+                                        color: kLightGrey,
+                                        fontSize: 14,
                                       ),
-                                      itemCount: historyLoaderCount +
-                                          messageItems.length +
-                                          _pendingAlbumUploads.length +
-                                          _pendingUploads.length,
-                                      itemBuilder: (_, i) {
-                                        if (historyLoaderCount == 1 && i == 0) {
-                                          return _buildHistoryLoadingIndicator();
-                                        }
-                                        final contentIndex =
-                                            i - historyLoaderCount;
-                                        if (contentIndex <
-                                            messageItems.length) {
-                                          final item =
-                                              messageItems[contentIndex];
-                                          final separatorDate =
-                                              item.separatorDate;
-                                          if (separatorDate != null) {
-                                            return RepaintBoundary(
-                                              key: _messageListItemKey(item),
-                                              child: ChatDateSeparator(
-                                                date: separatorDate,
-                                              ),
-                                            );
-                                          }
-                                          final events = item.albumEvents ??
-                                              <Event>[item.event!];
-                                          final bubble =
-                                              item.albumEvents == null
-                                                  ? _buildBubble(item.event!)
-                                                  : _buildMediaAlbumBubble(
-                                                      item.albumEvents!,
-                                                    );
-                                          final trackableEventIds = events
-                                              .where((event) =>
-                                                  event.senderId != _myUserId &&
-                                                  !event.redacted &&
-                                                  (event.type ==
-                                                          EventTypes.Message ||
-                                                      event.type ==
-                                                          EventTypes.Sticker))
-                                              .map((event) => event.eventId)
-                                              .toList(growable: false);
-                                          return RepaintBoundary(
-                                            key: _messageListItemKey(item),
-                                            child: !_isChannelRoom ||
-                                                    trackableEventIds.isEmpty
-                                                ? bubble
-                                                : _ChannelPostViewTracker(
-                                                    scrollController:
-                                                        _scrollCtrl,
-                                                    eventIds: trackableEventIds,
-                                                    onViewed:
-                                                        _recordVisibleChannelPosts,
-                                                    child: bubble,
-                                                  ),
-                                          );
-                                        }
-                                        final pendingAlbumIndex =
-                                            contentIndex - messageItems.length;
-                                        if (pendingAlbumIndex <
-                                            _pendingAlbumUploads.length) {
-                                          final pendingAlbum =
-                                              _pendingAlbumUploads[
-                                                  pendingAlbumIndex];
-                                          return RepaintBoundary(
-                                            key: ValueKey(
-                                              'pending_album_${pendingAlbum.id}',
-                                            ),
-                                            child:
-                                                _buildPendingAlbumUploadBubble(
-                                              pendingAlbum,
-                                            ),
-                                          );
-                                        }
-                                        final pendingUpload = _pendingUploads[
-                                            pendingAlbumIndex -
-                                                _pendingAlbumUploads.length];
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : RepaintBoundary(
+                                child: ListView.builder(
+                                  controller: _scrollCtrl,
+                                  // ignore: deprecated_member_use
+                                  cacheExtent: 900,
+                                  keyboardDismissBehavior:
+                                      ScrollViewKeyboardDismissBehavior.onDrag,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 0,
+                                    vertical: 8,
+                                  ),
+                                  itemCount:
+                                      historyLoaderCount +
+                                      messageItems.length +
+                                      _pendingAlbumUploads.length +
+                                      _pendingUploads.length,
+                                  itemBuilder: (_, i) {
+                                    if (historyLoaderCount == 1 && i == 0) {
+                                      return _buildHistoryLoadingIndicator();
+                                    }
+                                    final contentIndex = i - historyLoaderCount;
+                                    if (contentIndex < messageItems.length) {
+                                      final item = messageItems[contentIndex];
+                                      final separatorDate = item.separatorDate;
+                                      if (separatorDate != null) {
                                         return RepaintBoundary(
-                                          key: ValueKey(
-                                            'pending_upload_${pendingUpload.id}',
-                                          ),
-                                          child: _buildPendingUploadBubble(
-                                            pendingUpload,
+                                          key: _messageListItemKey(item),
+                                          child: ChatDateSeparator(
+                                            date: separatorDate,
                                           ),
                                         );
-                                      },
-                                    ),
-                                  ),
+                                      }
+                                      final events =
+                                          item.albumEvents ??
+                                          <Event>[item.event!];
+                                      final bubble = item.albumEvents == null
+                                          ? _buildBubble(item.event!)
+                                          : _buildMediaAlbumBubble(
+                                              item.albumEvents!,
+                                            );
+                                      final trackableEventIds = events
+                                          .where(
+                                            (event) =>
+                                                event.senderId != _myUserId &&
+                                                !event.redacted &&
+                                                (event.type ==
+                                                        EventTypes.Message ||
+                                                    event.type ==
+                                                        EventTypes.Sticker),
+                                          )
+                                          .map((event) => event.eventId)
+                                          .toList(growable: false);
+                                      return RepaintBoundary(
+                                        key: _messageListItemKey(item),
+                                        child:
+                                            !_isChannelRoom ||
+                                                trackableEventIds.isEmpty
+                                            ? bubble
+                                            : _ChannelPostViewTracker(
+                                                scrollController: _scrollCtrl,
+                                                eventIds: trackableEventIds,
+                                                onViewed:
+                                                    _recordVisibleChannelPosts,
+                                                child: bubble,
+                                              ),
+                                      );
+                                    }
+                                    final pendingAlbumIndex =
+                                        contentIndex - messageItems.length;
+                                    if (pendingAlbumIndex <
+                                        _pendingAlbumUploads.length) {
+                                      final pendingAlbum =
+                                          _pendingAlbumUploads[pendingAlbumIndex];
+                                      return RepaintBoundary(
+                                        key: ValueKey(
+                                          'pending_album_${pendingAlbum.id}',
+                                        ),
+                                        child: _buildPendingAlbumUploadBubble(
+                                          pendingAlbum,
+                                        ),
+                                      );
+                                    }
+                                    final pendingUpload =
+                                        _pendingUploads[pendingAlbumIndex -
+                                            _pendingAlbumUploads.length];
+                                    return RepaintBoundary(
+                                      key: ValueKey(
+                                        'pending_upload_${pendingUpload.id}',
+                                      ),
+                                      child: _buildPendingUploadBubble(
+                                        pendingUpload,
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
                       ),
                       // Reply Preview
                       if (!_isEditingMessage && _replyToEvent != null)
@@ -8002,25 +8209,23 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> {
                       if (_isChatSearchMode)
                         _buildChatSearchNavigation()
                       else if (_isMessageSelectionMode)
-                        const SafeArea(
-                          top: false,
-                          child: SizedBox(height: 8),
-                        )
+                        const SafeArea(top: false, child: SizedBox(height: 8))
                       else if (_room == null)
                         Padding(
                           padding: const EdgeInsets.fromLTRB(28, 8, 28, 14),
                           child: SizedBox(
                             width: math.min(
-                              360,
+                              240,
                               MediaQuery.sizeOf(context).width - 56,
                             ),
                             height: 48,
                             child: ElevatedButton(
                               onPressed: _joinPreviewChannel,
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: kLimeGreen,
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 20),
+                                backgroundColor: kWhite,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 20,
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(28),
                                 ),
@@ -8115,18 +8320,13 @@ class _PrivateReplyComposerPreview extends StatelessWidget {
         final sourceEvent = snapshot.data;
         final preview = sourceEvent == null
             ? draft.preview
-            : _privateReplyPreviewText(
-                sourceEvent,
-                fallback: draft.preview,
-              );
+            : _privateReplyPreviewText(sourceEvent, fallback: draft.preview);
 
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: const BoxDecoration(
             color: kDarkerGrey,
-            border: Border(
-              top: BorderSide(color: kMediumGrey, width: 1),
-            ),
+            border: Border(top: BorderSide(color: kMediumGrey, width: 1)),
           ),
           child: Row(
             children: [
@@ -8166,10 +8366,7 @@ class _PrivateReplyComposerPreview extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       preview,
-                      style: GoogleFonts.inter(
-                        color: kLightGrey,
-                        fontSize: 13,
-                      ),
+                      style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -8246,8 +8443,8 @@ class _PrivateReplyMediaPreview extends StatelessWidget {
       final thumbFuture = source == null || cachedBytes != null
           ? null
           : isImage
-              ? loadImageBytes(source, getThumbnail: true)
-              : loadVideoThumbnail(source);
+          ? loadImageBytes(source, getThumbnail: true)
+          : loadVideoThumbnail(source);
 
       return Container(
         width: 38,
@@ -8269,10 +8466,8 @@ class _PrivateReplyMediaPreview extends StatelessWidget {
                   Image.memory(
                     bytes,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => _PrivateReplyTypeIcon(
-                      msgtype: msgtype,
-                      isMe: isMe,
-                    ),
+                    errorBuilder: (_, __, ___) =>
+                        _PrivateReplyTypeIcon(msgtype: msgtype, isMe: isMe),
                   ),
                   if (msgtype == MessageTypes.Video)
                     Container(
@@ -8312,10 +8507,7 @@ class _PrivateReplyTypeIcon extends StatelessWidget {
   final String msgtype;
   final bool isMe;
 
-  const _PrivateReplyTypeIcon({
-    required this.msgtype,
-    required this.isMe,
-  });
+  const _PrivateReplyTypeIcon({required this.msgtype, required this.isMe});
 
   @override
   Widget build(BuildContext context) {
@@ -8327,11 +8519,7 @@ class _PrivateReplyTypeIcon extends StatelessWidget {
       _ => Icons.chat_bubble_rounded,
     };
 
-    return Icon(
-      icon,
-      color: isMe ? kLimeGreen : kLightGrey,
-      size: 20,
-    );
+    return Icon(icon, color: isMe ? kLimeGreen : kLightGrey, size: 20);
   }
 }
 
@@ -8393,16 +8581,10 @@ class _MentionAutocompleteState {
     required this.query,
   });
 
-  static const hidden = _MentionAutocompleteState._(
-    visible: false,
-    query: '',
-  );
+  static const hidden = _MentionAutocompleteState._(visible: false, query: '');
 
   factory _MentionAutocompleteState.visible(String query) {
-    return _MentionAutocompleteState._(
-      visible: true,
-      query: query,
-    );
+    return _MentionAutocompleteState._(visible: true, query: query);
   }
 }
 
@@ -8410,10 +8592,7 @@ class _PollAnswer {
   final String id;
   final String text;
 
-  const _PollAnswer({
-    required this.id,
-    required this.text,
-  });
+  const _PollAnswer({required this.id, required this.text});
 }
 
 class _PollOptionTile extends StatelessWidget {
@@ -8482,8 +8661,9 @@ class _PollOptionTile extends StatelessWidget {
                       style: GoogleFonts.inter(
                         color: kWhite,
                         fontSize: 13,
-                        fontWeight:
-                            selected ? FontWeight.w700 : FontWeight.w500,
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -8512,10 +8692,7 @@ class _PollComposeResult {
   final String question;
   final List<String> options;
 
-  const _PollComposeResult({
-    required this.question,
-    required this.options,
-  });
+  const _PollComposeResult({required this.question, required this.options});
 }
 
 class _PollComposerDialog extends StatefulWidget {
@@ -8582,7 +8759,8 @@ class _PollComposerDialogState extends State<_PollComposerDialog> {
             ..._optionControllers,
           ]),
           builder: (context, _) {
-            final submitEnabled = _questionController.text.trim().isNotEmpty &&
+            final submitEnabled =
+                _questionController.text.trim().isNotEmpty &&
                 _optionControllers
                         .where(
                           (controller) => controller.text.trim().isNotEmpty,
@@ -8633,13 +8811,12 @@ class _PollComposerDialogState extends State<_PollComposerDialog> {
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
-                    onPressed:
-                        _optionControllers.length >= 6 ? null : _addOption,
+                    onPressed: _optionControllers.length >= 6
+                        ? null
+                        : _addOption,
                     icon: const Icon(Icons.add, size: 18),
                     label: const Text('Add option'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: kLimeGreen,
-                    ),
+                    style: TextButton.styleFrom(foregroundColor: kLimeGreen),
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -8676,10 +8853,7 @@ class _PollTextField extends StatelessWidget {
   final TextEditingController controller;
   final String hint;
 
-  const _PollTextField({
-    required this.controller,
-    required this.hint,
-  });
+  const _PollTextField({required this.controller, required this.hint});
 
   @override
   Widget build(BuildContext context) {
@@ -8700,8 +8874,10 @@ class _PollTextField extends StatelessWidget {
           borderSide: const BorderSide(color: kWhite, width: 1),
         ),
         isDense: true,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 13,
+        ),
       ),
     );
   }
@@ -8710,6 +8886,7 @@ class _PollTextField extends StatelessWidget {
 class _PendingUpload {
   final String id;
   final Uint8List bytes;
+  String? sourcePath;
   Uint8List? thumbnailBytes;
   final String fileName;
   final String mimeType;
@@ -8732,10 +8909,12 @@ class _PendingUpload {
   int? durationMs;
   Event? replyToEvent;
   MessageReplyReference? replyReference;
+  String? batchId;
 
   _PendingUpload({
     required this.id,
     required this.bytes,
+    this.sourcePath,
     required this.fileName,
     required this.mimeType,
     required this.isVideo,
@@ -8749,6 +8928,7 @@ class _PendingUpload {
     this.durationMs,
     this.replyToEvent,
     this.replyReference,
+    this.batchId,
   });
 }
 
@@ -8771,11 +8951,7 @@ class _MessageListItem {
   final List<Event>? albumEvents;
   final DateTime? separatorDate;
 
-  const _MessageListItem._({
-    this.event,
-    this.albumEvents,
-    this.separatorDate,
-  });
+  const _MessageListItem._({this.event, this.albumEvents, this.separatorDate});
 
   factory _MessageListItem.message(Event event) {
     return _MessageListItem._(event: event);
@@ -8895,6 +9071,7 @@ class _DownloadSnackBarContent extends StatelessWidget {
   final List<TransferJob> initialJobs;
   final Stream<List<TransferJob>> stream;
   final String label;
+  final bool showSize;
   final bool showCancelAction;
   final VoidCallback onCancel;
 
@@ -8903,6 +9080,7 @@ class _DownloadSnackBarContent extends StatelessWidget {
     required this.initialJobs,
     required this.stream,
     required this.label,
+    required this.showSize,
     required this.showCancelAction,
     required this.onCancel,
   });
@@ -8915,13 +9093,14 @@ class _DownloadSnackBarContent extends StatelessWidget {
       builder: (context, snapshot) {
         final jobs = snapshot.data ?? const <TransferJob>[];
         final job = jobs.cast<TransferJob?>().firstWhere(
-              (item) => item?.id == jobId,
-              orElse: () => null,
-            );
+          (item) => item?.id == jobId,
+          orElse: () => null,
+        );
         final downloaded = job?.uploadedBytes ?? 0;
         final total = job?.totalBytes ?? 0;
-        final progress =
-            total > 0 ? (downloaded / total).clamp(0.0, 1.0).toDouble() : null;
+        final progress = total > 0
+            ? (downloaded / total).clamp(0.0, 1.0).toDouble()
+            : null;
         final sizeText = total > 0
             ? '${_pendingBytes(downloaded)} / ${_pendingBytes(total)}'
             : '${_pendingBytes(downloaded)} / --';
@@ -8962,15 +9141,17 @@ class _DownloadSnackBarContent extends StatelessWidget {
                             ),
                           ),
                         ),
-                        const SizedBox(width: 10),
-                        Text(
-                          sizeText,
-                          style: GoogleFonts.inter(
-                            color: kBlack.withValues(alpha: 0.76),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
+                        if (showSize) ...[
+                          const SizedBox(width: 10),
+                          Text(
+                            sizeText,
+                            style: GoogleFonts.inter(
+                              color: kBlack.withValues(alpha: 0.76),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                        ),
+                        ],
                         if (showCancelAction) ...[
                           const SizedBox(width: 18),
                           TextButton(
@@ -9017,8 +9198,9 @@ String _pendingDuration(int durationMs) {
 }
 
 String _pendingClock(DateTime time) {
-  final hour =
-      time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
+  final hour = time.hour == 0
+      ? 12
+      : (time.hour > 12 ? time.hour - 12 : time.hour);
   final minute = time.minute.toString().padLeft(2, '0');
   final period = time.hour >= 12 ? 'PM' : 'AM';
   return '$hour:$minute $period';
@@ -9259,11 +9441,7 @@ class _PendingCancelProgressButton extends StatelessWidget {
                 backgroundColor: progressBackgroundColor,
               ),
             ),
-            Icon(
-              Icons.close_rounded,
-              color: iconColor,
-              size: 26,
-            ),
+            Icon(Icons.close_rounded, color: iconColor, size: 26),
           ],
         ),
       ),
@@ -9287,11 +9465,7 @@ class _PendingRetryButton extends StatelessWidget {
           color: Colors.redAccent.withValues(alpha: 0.92),
           shape: BoxShape.circle,
         ),
-        child: const Icon(
-          Icons.refresh_rounded,
-          color: Colors.white,
-          size: 26,
-        ),
+        child: const Icon(Icons.refresh_rounded, color: Colors.white, size: 26),
       ),
     );
   }
@@ -9356,20 +9530,10 @@ class _PendingMediaUploadBubble extends StatelessWidget {
                 fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) => _buildPlaceholder(Icons.image),
               ),
-            Positioned(
-              top: 6,
-              left: 6,
-              child: _buildUploadInfo(),
-            ),
+            Positioned(top: 6, left: 6, child: _buildUploadInfo()),
             if (upload.failed)
-              Center(
-                child: _PendingRetryButton(onRetry: onRetry),
-              ),
-            Positioned(
-              bottom: 8,
-              right: 8,
-              child: _buildPendingTime(),
-            ),
+              Center(child: _PendingRetryButton(onRetry: onRetry)),
+            Positioned(bottom: 8, right: 8, child: _buildPendingTime()),
           ],
         ),
       ),
@@ -9426,11 +9590,7 @@ class _PendingMediaUploadBubble extends StatelessWidget {
           colors: [Color(0xFF1C2B1C), Color(0xFF111111)],
         ),
       ),
-      child: Icon(
-        icon,
-        color: Colors.white24,
-        size: 64,
-      ),
+      child: Icon(icon, color: Colors.white24, size: 64),
     );
   }
 
@@ -9440,26 +9600,30 @@ class _PendingMediaUploadBubble extends StatelessWidget {
         : null;
     final lines = <Widget>[];
     if (upload.isVideo && upload.durationMs != null && upload.durationMs! > 0) {
-      lines.add(Text(
-        _formatDuration(upload.durationMs!),
+      lines.add(
+        Text(
+          _formatDuration(upload.durationMs!),
+          style: GoogleFonts.inter(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            height: 1.1,
+          ),
+        ),
+      );
+      lines.add(const SizedBox(height: 1));
+    }
+    lines.add(
+      Text(
+        '${_formatBytes(upload.uploadedBytes)} / ${_formatBytes(upload.totalBytes)}',
         style: GoogleFonts.inter(
           color: Colors.white,
           fontSize: 11,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w500,
           height: 1.1,
         ),
-      ));
-      lines.add(const SizedBox(height: 1));
-    }
-    lines.add(Text(
-      '${_formatBytes(upload.uploadedBytes)} / ${_formatBytes(upload.totalBytes)}',
-      style: GoogleFonts.inter(
-        color: Colors.white,
-        fontSize: 11,
-        fontWeight: FontWeight.w500,
-        height: 1.1,
       ),
-    ));
+    );
 
     return Container(
       padding: const EdgeInsets.fromLTRB(4, 3, 6, 3),
@@ -9564,8 +9728,9 @@ class _PendingMediaUploadBubble extends StatelessWidget {
   }) {
     const minReadableHeight = 96.0;
 
-    final ratio =
-        aspectRatio.isFinite && aspectRatio > 0 ? aspectRatio : 16 / 9;
+    final ratio = aspectRatio.isFinite && aspectRatio > 0
+        ? aspectRatio
+        : 16 / 9;
 
     double width;
     double height;

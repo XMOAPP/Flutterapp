@@ -16,6 +16,14 @@ void main() {
       expect(route.isCall, isFalse);
     });
 
+    test('hides a full Matrix sender ID from notification labels', () {
+      const route = PushNotificationRoute({
+        'sender': '@hunter:xmo.example.com',
+      });
+
+      expect(route.sender, 'Hunter');
+    });
+
     test('recognizes direct-call payloads', () {
       const route = PushNotificationRoute({
         'event_type': 'm.call.invite',

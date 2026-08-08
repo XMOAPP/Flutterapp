@@ -9,6 +9,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../config/app_config.dart';
 import '../firebase_options.dart';
+import '../utils/matrix_identity.dart';
 import 'app_settings_service.dart';
 import 'matrix_service.dart';
 import 'voip_service.dart';
@@ -24,27 +25,34 @@ class PushNotificationRoute {
   String? get roomId => _firstValue(const ['room_id', 'roomId', 'room']);
   String? get eventId => _firstValue(const ['event_id', 'eventId', 'event']);
   String? get callId => _firstValue(const [
-        'call_id',
-        'callId',
-        'm.call.id',
-        'm.call_id',
-        'group_call_id',
-        'groupCallId',
-      ]);
+    'call_id',
+    'callId',
+    'm.call.id',
+    'm.call_id',
+    'group_call_id',
+    'groupCallId',
+  ]);
   String? get callType => _firstValue(const [
-        'call_type',
-        'callType',
-        'm.type',
-        'm.call.type',
-        'xmo_call_type',
-        'xmo_call_kind',
-      ]);
+    'call_type',
+    'callType',
+    'm.type',
+    'm.call.type',
+    'xmo_call_type',
+    'xmo_call_kind',
+  ]);
   bool get isGroupCall =>
       _truthy(data['group_call']) ||
       _firstValue(const ['group_call_id', 'groupCallId']) != null ||
       callType == 'group';
-  String? get sender =>
-      _firstValue(const ['sender_display_name', 'sender', 'room_name']);
+  String? get sender {
+    final value = _firstValue(const [
+      'sender_display_name',
+      'sender',
+      'room_name',
+    ]);
+    if (value == null || !MatrixIdentity.isFullUserId(value)) return value;
+    return MatrixIdentity.displayName(userId: value);
+  }
 
   bool get isCall {
     if (data['xmo_push_type']?.toLowerCase() == 'call') return true;
@@ -82,7 +90,8 @@ class PushNotificationRoute {
 
 @pragma('vm:entry-point')
 Future<void> xmoFirebaseMessagingBackgroundHandler(
-    RemoteMessage message) async {
+  RemoteMessage message,
+) async {
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
@@ -190,18 +199,22 @@ class PushNotificationService {
       }
     } catch (e) {
       debugPrint(
-          '[PushNotificationService] Native call action init failed: $e');
+        '[PushNotificationService] Native call action init failed: $e',
+      );
     }
 
-    _nativeCallActionsSub =
-        _nativeCallEvents.receiveBroadcastStream().listen((event) {
-      if (event is Map) {
-        unawaited(_handleNativeCallAction(event));
-      }
-    }, onError: (Object e) {
-      debugPrint(
-          '[PushNotificationService] Native call action stream failed: $e');
-    });
+    _nativeCallActionsSub = _nativeCallEvents.receiveBroadcastStream().listen(
+      (event) {
+        if (event is Map) {
+          unawaited(_handleNativeCallAction(event));
+        }
+      },
+      onError: (Object e) {
+        debugPrint(
+          '[PushNotificationService] Native call action stream failed: $e',
+        );
+      },
+    );
   }
 
   Future<bool> canUseFullScreenCallAlerts() async {
@@ -259,28 +272,36 @@ class PushNotificationService {
       );
     }
 
-    _nativeNotificationActionsSub =
-        _nativeNotificationEvents.receiveBroadcastStream().listen((event) {
-      if (event is Map) {
-        unawaited(_routePayload(_normalizePayload(event)));
-      }
-    }, onError: (Object e) {
-      debugPrint(
-        '[PushNotificationService] Native notification navigation stream failed: $e',
-      );
-    });
+    _nativeNotificationActionsSub = _nativeNotificationEvents
+        .receiveBroadcastStream()
+        .listen(
+          (event) {
+            if (event is Map) {
+              unawaited(_routePayload(_normalizePayload(event)));
+            }
+          },
+          onError: (Object e) {
+            debugPrint(
+              '[PushNotificationService] Native notification navigation stream failed: $e',
+            );
+          },
+        );
   }
 
   Future<void> _handleInitialNotificationLaunch() async {
     final remote = await _messaging.getInitialMessage();
     if (remote != null) {
-      unawaited(_routePayload(PushNotificationRoute(remote.data.map(
-        (key, value) => MapEntry(key, value.toString()),
-      ))));
+      unawaited(
+        _routePayload(
+          PushNotificationRoute(
+            remote.data.map((key, value) => MapEntry(key, value.toString())),
+          ),
+        ),
+      );
     }
 
-    final launchDetails =
-        await _localNotifications.getNotificationAppLaunchDetails();
+    final launchDetails = await _localNotifications
+        .getNotificationAppLaunchDetails();
     final response = launchDetails?.notificationResponse;
     if (launchDetails?.didNotificationLaunchApp == true &&
         response?.payload != null) {
@@ -289,9 +310,11 @@ class PushNotificationService {
   }
 
   PushNotificationRoute _normalizePayload(Map<dynamic, dynamic> payload) {
-    return PushNotificationRoute(payload.map(
-      (key, value) => MapEntry(key.toString(), value?.toString() ?? ''),
-    ));
+    return PushNotificationRoute(
+      payload.map(
+        (key, value) => MapEntry(key.toString(), value?.toString() ?? ''),
+      ),
+    );
   }
 
   Future<void> _routePayload(
@@ -307,7 +330,8 @@ class PushNotificationService {
     final roomId = route.roomId;
     if (roomId == null || roomId.isEmpty) {
       debugPrint(
-          '[PushNotificationService] Notification has no room id: ${route.data}');
+        '[PushNotificationService] Notification has no room id: ${route.data}',
+      );
       return;
     }
     final handler = _onOpenChat;
@@ -402,11 +426,7 @@ class PushNotificationService {
 
   Future<void> _requestPermission() async {
     try {
-      await _messaging.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-      );
+      await _messaging.requestPermission(alert: true, badge: true, sound: true);
     } catch (e) {
       debugPrint('[PushNotificationService] Permission request failed: $e');
     }
@@ -431,8 +451,10 @@ class PushNotificationService {
         onDidReceiveNotificationResponse: _handleNotificationResponse,
       );
 
-      final android = _localNotifications.resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>();
+      final android = _localNotifications
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
       await android?.createNotificationChannel(_messagesChannel);
       await android?.createNotificationChannel(_callsChannel);
       await android?.requestNotificationsPermission();
@@ -448,9 +470,7 @@ class PushNotificationService {
   Future<String?> _getFcmToken() async {
     try {
       final token = await _messaging.getToken();
-      debugPrint(
-        '[PushNotificationService] FCM token: ${_redactToken(token)}',
-      );
+      debugPrint('[PushNotificationService] FCM token: ${_redactToken(token)}');
       return token;
     } catch (e) {
       debugPrint('[PushNotificationService] Failed to read FCM token: $e');
@@ -481,8 +501,9 @@ class PushNotificationService {
         android: AndroidNotificationDetails(
           isCall ? _callsChannel.id : _messagesChannel.id,
           isCall ? _callsChannel.name : _messagesChannel.name,
-          channelDescription:
-              isCall ? _callsChannel.description : _messagesChannel.description,
+          channelDescription: isCall
+              ? _callsChannel.description
+              : _messagesChannel.description,
           importance: isCall ? Importance.high : Importance.defaultImportance,
           priority: isCall ? Priority.high : Priority.defaultPriority,
           category: isCall
@@ -519,9 +540,13 @@ class PushNotificationService {
     debugPrint(
       '[PushNotificationService] Notification opened: ${message.data}',
     );
-    unawaited(_routePayload(PushNotificationRoute(message.data.map(
-      (key, value) => MapEntry(key, value.toString()),
-    ))));
+    unawaited(
+      _routePayload(
+        PushNotificationRoute(
+          message.data.map((key, value) => MapEntry(key, value.toString())),
+        ),
+      ),
+    );
   }
 
   void _handleNotificationResponse(NotificationResponse response) {
@@ -583,7 +608,8 @@ class PushNotificationService {
     ]);
     final hasCallPayload =
         message.data.containsKey('offer') || message.data.containsKey('answer');
-    final isGroupCall = _truthy(message.data['group_call']?.toString()) ||
+    final isGroupCall =
+        _truthy(message.data['group_call']?.toString()) ||
         message.data.containsKey('group_call_id') ||
         message.data.containsKey('groupCallId');
     return hasCallId &&
@@ -598,16 +624,33 @@ class PushNotificationService {
 
   String _notificationTitle(RemoteMessage message, bool isCall) {
     final title = message.notification?.title?.trim();
-    if (title != null && title.isNotEmpty) return title;
+    if (title != null && title.isNotEmpty) {
+      return _friendlyNotificationTitle(title, message.data);
+    }
     final dataTitle = message.data['title']?.toString().trim();
-    if (dataTitle != null && dataTitle.isNotEmpty) return dataTitle;
-    final sender = message.data['sender_display_name'] ??
+    if (dataTitle != null && dataTitle.isNotEmpty) {
+      return _friendlyNotificationTitle(dataTitle, message.data);
+    }
+    final sender =
+        message.data['sender_display_name'] ??
         message.data['sender'] ??
         message.data['room_name'];
     if (sender != null && sender.toString().trim().isNotEmpty) {
-      return sender.toString();
+      return _friendlyNotificationTitle(sender.toString(), message.data);
     }
     return isCall ? 'Incoming call' : 'New message';
+  }
+
+  String _friendlyNotificationTitle(String value, Map<String, dynamic> data) {
+    final candidate = value.trim();
+    if (MatrixIdentity.isFullUserId(candidate)) {
+      return MatrixIdentity.displayName(userId: candidate);
+    }
+    final senderId = data['sender']?.toString().trim();
+    if (senderId != null && MatrixIdentity.isFullUserId(senderId)) {
+      return MatrixIdentity.displayName(userId: senderId, candidate: candidate);
+    }
+    return candidate;
   }
 
   String _notificationBody(RemoteMessage message, bool isCall) {
@@ -620,7 +663,8 @@ class PushNotificationService {
       if (previewKind.toLowerCase() == 'encrypted') {
         return 'New message';
       }
-      final genericRoomUpdate = previewKind.toLowerCase() == 'room' &&
+      final genericRoomUpdate =
+          previewKind.toLowerCase() == 'room' &&
           previewLabel.toLowerCase() == 'room updated';
       if (!genericRoomUpdate) {
         return '${_previewPrefix(previewKind)}$previewLabel';
@@ -642,11 +686,12 @@ class PushNotificationService {
     if (msgType.contains('image')) return '🖼️ Photo';
     if (msgType.contains('video')) return '▶ Video';
     if (msgType.contains('audio')) {
-      final fileName = (message.data['filename'] ??
-              message.data['content'] ??
-              message.data['body'])
-          ?.toString()
-          .trim();
+      final fileName =
+          (message.data['filename'] ??
+                  message.data['content'] ??
+                  message.data['body'])
+              ?.toString()
+              .trim();
       if (fileName != null && fileName.toLowerCase().startsWith('voice_')) {
         return '🎙 Voice message';
       }
@@ -656,11 +701,12 @@ class PushNotificationService {
       return '🎧 $label';
     }
     if (msgType.contains('file')) {
-      final fileName = (message.data['filename'] ??
-              message.data['content'] ??
-              message.data['body'])
-          ?.toString()
-          .trim();
+      final fileName =
+          (message.data['filename'] ??
+                  message.data['content'] ??
+                  message.data['body'])
+              ?.toString()
+              .trim();
       final label = fileName != null && _isDisplayablePushText(fileName)
           ? fileName
           : 'File';
@@ -672,7 +718,8 @@ class PushNotificationService {
     if (dataBody != null && _isDisplayablePushText(dataBody)) {
       return dataBody;
     }
-    final content = message.data['content'] ??
+    final content =
+        message.data['content'] ??
         message.data['body'] ??
         message.data['event_type'];
     final contentText = content?.toString().trim();
@@ -733,21 +780,21 @@ class PushNotificationService {
     final isCall = _looksLikeCall(message);
     final seed = isCall
         ? message.data['call_id']?.toString() ??
-            message.data['callId']?.toString() ??
-            message.data['group_call_id']?.toString() ??
-            message.data['groupCallId']?.toString() ??
-            message.data['event_id']?.toString() ??
-            message.data['eventId']?.toString() ??
-            message.messageId ??
-            message.sentTime?.millisecondsSinceEpoch.toString() ??
-            DateTime.now().millisecondsSinceEpoch.toString()
+              message.data['callId']?.toString() ??
+              message.data['group_call_id']?.toString() ??
+              message.data['groupCallId']?.toString() ??
+              message.data['event_id']?.toString() ??
+              message.data['eventId']?.toString() ??
+              message.messageId ??
+              message.sentTime?.millisecondsSinceEpoch.toString() ??
+              DateTime.now().millisecondsSinceEpoch.toString()
         : message.messageId ??
-            message.data['event_id']?.toString() ??
-            message.data['eventId']?.toString() ??
-            message.data['room_id']?.toString() ??
-            message.data['roomId']?.toString() ??
-            message.sentTime?.millisecondsSinceEpoch.toString() ??
-            DateTime.now().millisecondsSinceEpoch.toString();
+              message.data['event_id']?.toString() ??
+              message.data['eventId']?.toString() ??
+              message.data['room_id']?.toString() ??
+              message.data['roomId']?.toString() ??
+              message.sentTime?.millisecondsSinceEpoch.toString() ??
+              DateTime.now().millisecondsSinceEpoch.toString();
     return seed.hashCode & 0x7fffffff;
   }
 

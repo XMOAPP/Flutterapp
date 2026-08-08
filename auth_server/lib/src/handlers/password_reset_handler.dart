@@ -199,6 +199,16 @@ Future<void> _completePasswordReset(HttpRequest request) async {
     return;
   }
 
+  try {
+    await _authentikSyncPassword(
+      username: username,
+      email: email,
+      password: newPassword,
+    );
+  } catch (error, st) {
+    _logger.error('authentik_password_sync_failed', error, st);
+  }
+
   _passwordResetStore.remove(key);
   await _json(request, HttpStatus.ok, {'success': true});
 }

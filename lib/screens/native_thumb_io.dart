@@ -35,3 +35,20 @@ Future<Uint8List?> generateNativeThumbnail(Uint8List videoBytes) async {
     }
   }
 }
+
+Future<Uint8List?> generateNativeThumbnailFromPath(String videoPath) async {
+  final file = File(videoPath);
+  if (!await file.exists()) return null;
+  try {
+    return await VideoThumbnail.thumbnailData(
+      video: videoPath,
+      imageFormat: ImageFormat.JPEG,
+      maxWidth: 720,
+      timeMs: 1000,
+      quality: 75,
+    );
+  } catch (e) {
+    debugPrint('[NativeThumb] Failed to generate thumbnail from path: $e');
+    return null;
+  }
+}

@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/group_service.dart';
+import '../../utils/matrix_identity.dart';
 import '../../services/matrix_service.dart';
 import '../../widgets/story/story_avatar.dart';
 
@@ -69,10 +70,13 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
     final results = await provider.searchUsers(query);
 
     // Filter out users already in the group
-    final currentMembers =
-        widget.room.getParticipants().map((u) => u.id).toSet();
-    final filtered =
-        results.where((p) => !currentMembers.contains(p.userId)).toList();
+    final currentMembers = widget.room
+        .getParticipants()
+        .map((u) => u.id)
+        .toSet();
+    final filtered = results
+        .where((p) => !currentMembers.contains(p.userId))
+        .toList();
 
     if (filtered.isNotEmpty) {
       if (mounted) {
@@ -94,8 +98,9 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
     }
 
     try {
-      final profile =
-          await provider.service.client.getProfileFromUserId(matrixId);
+      final profile = await provider.service.client.getProfileFromUserId(
+        matrixId,
+      );
       if (mounted && !currentMembers.contains(profile.userId)) {
         setState(() {
           _results = [profile];
@@ -151,19 +156,23 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-                'Added $successCount member${successCount > 1 ? 's' : ''}'),
+              'Added $successCount member${successCount > 1 ? 's' : ''}',
+            ),
             backgroundColor: kLimeGreen,
           ),
         );
         Navigator.pop(
-            context, true); // Return true to indicate members were added
+          context,
+          true,
+        ); // Return true to indicate members were added
       }
 
       if (failCount > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-                'Failed to add $failCount member${failCount > 1 ? 's' : ''}'),
+              'Failed to add $failCount member${failCount > 1 ? 's' : ''}',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -243,8 +252,10 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
                 ),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
               ),
               onChanged: _onSearchChanged,
               autofocus: true,
@@ -255,46 +266,47 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
           Expanded(
             child: _searching
                 ? const Center(
-                    child: CircularProgressIndicator(color: kLimeGreen))
+                    child: CircularProgressIndicator(color: kLimeGreen),
+                  )
                 : _error != null
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Text(
-                            _error!,
-                            style: GoogleFonts.inter(
-                              color: kLightGrey,
-                              fontSize: 14,
-                            ),
-                            textAlign: TextAlign.center,
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        _error!,
+                        style: GoogleFonts.inter(
+                          color: kLightGrey,
+                          fontSize: 14,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  )
+                : _results.isEmpty && _searchCtrl.text.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.person_search,
+                          color: kMediumGrey,
+                          size: 64,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Search for users to add',
+                          style: GoogleFonts.inter(
+                            color: kLightGrey,
+                            fontSize: 14,
                           ),
                         ),
-                      )
-                    : _results.isEmpty && _searchCtrl.text.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.person_search,
-                                  color: kMediumGrey,
-                                  size: 64,
-                                ),
-                                const SizedBox(height: 16),
-                                Text(
-                                  'Search for users to add',
-                                  style: GoogleFonts.inter(
-                                    color: kLightGrey,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          )
-                        : ListView.builder(
-                            itemCount: _results.length,
-                            itemBuilder: (_, i) => _buildUserTile(_results[i]),
-                          ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: _results.length,
+                    itemBuilder: (_, i) => _buildUserTile(_results[i]),
+                  ),
           ),
         ],
       ),
@@ -303,8 +315,10 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
 
   Widget _buildUserTile(Profile profile) {
     final isSelected = _selectedUsers.contains(profile.userId);
-    final displayName = profile.displayName ??
-        profile.userId.split(':').first.replaceFirst('@', '');
+    final displayName = MatrixIdentity.displayName(
+      userId: profile.userId,
+      candidate: profile.displayName,
+    );
 
     return ListTile(
       dense: true,

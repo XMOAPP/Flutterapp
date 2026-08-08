@@ -8,6 +8,7 @@ import '../../providers/matrix_provider.dart';
 import '../../services/matrix_attachment_downloader.dart';
 import '../../services/matrix_service.dart';
 import '../../theme.dart';
+import '../../utils/matrix_identity.dart';
 import '../../utils/message_presentation.dart';
 import '../../widgets/incoming_call_fullscreen_scope.dart';
 import '../../widgets/matrix_chat/fullscreen_image_viewer.dart';
@@ -18,7 +19,8 @@ import '../matrix_chat/chat_space_background.dart';
 import '../matrix_chat/forward_message_sheet.dart';
 import '../matrix_chat/media_handler.dart';
 import '../matrix_chat_screen.dart';
-import '../native_share_stub.dart' if (dart.library.io) '../native_share.dart'
+import '../native_share_stub.dart'
+    if (dart.library.io) '../native_share.dart'
     as native_share;
 
 class SavedChatMessagesScreen extends StatefulWidget {
@@ -76,8 +78,7 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
         }
         final forwarded = event.content['xmo.forwarded'];
         return forwarded is Map && forwarded['room_id'] == widget.sourceRoom.id;
-      }).toList()
-        ..sort((a, b) => a.originServerTs.compareTo(b.originServerTs));
+      }).toList()..sort((a, b) => a.originServerTs.compareTo(b.originServerTs));
 
       if (mounted) {
         setState(() {
@@ -103,9 +104,10 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
     if (query.isEmpty) return _events;
     return _events.where((event) {
       return matrixVisibleBody(event).toLowerCase().contains(query) ||
-          (event.senderFromMemoryOrFallback.displayName ?? event.senderId)
-              .toLowerCase()
-              .contains(query);
+          MatrixIdentity.displayName(
+            userId: event.senderId,
+            candidate: event.senderFromMemoryOrFallback.displayName,
+          ).toLowerCase().contains(query);
     }).toList();
   }
 
@@ -113,7 +115,8 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
   Widget build(BuildContext context) {
     final events = _filteredEvents;
     final sourceName = MatrixService.cleanName(
-        MatrixService().getResolvedDisplayName(widget.sourceRoom));
+      MatrixService().getResolvedDisplayName(widget.sourceRoom),
+    );
     final count = _events.length;
 
     return IncomingCallFullscreenScope(
@@ -146,14 +149,14 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
                       userName: sourceName,
                       avatarUrl: widget.sourceRoom.avatar?.toString(),
                       size: 42,
-                      fallbackIcon: !MatrixService()
-                                  .isDirectRoom(widget.sourceRoom) &&
+                      fallbackIcon:
+                          !MatrixService().isDirectRoom(widget.sourceRoom) &&
                               widget.sourceRoom.isChannel
                           ? Icons.campaign
                           : !MatrixService().isDirectRoom(widget.sourceRoom) &&
-                                  widget.sourceRoom.isGroup
-                              ? Icons.group
-                              : null,
+                                widget.sourceRoom.isGroup
+                          ? Icons.group
+                          : null,
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -184,8 +187,10 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
                 ),
           actions: [
             IconButton(
-              icon:
-                  Icon(_searching ? Icons.close : Icons.search, color: kWhite),
+              icon: Icon(
+                _searching ? Icons.close : Icons.search,
+                color: kWhite,
+              ),
               onPressed: () {
                 setState(() {
                   _searching = !_searching;
@@ -209,44 +214,41 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
                           child: CircularProgressIndicator(color: kLimeGreen),
                         )
                       : events.isEmpty
-                          ? Center(
-                              child: Text(
-                                _query.isEmpty
-                                    ? 'No saved messages from this chat'
-                                    : 'No saved messages found',
-                                style: GoogleFonts.inter(
-                                  color: kLightGrey,
-                                  fontSize: 14,
-                                ),
-                              ),
-                            )
-                          : ListView.builder(
-                              padding:
-                                  const EdgeInsets.fromLTRB(12, 12, 12, 16),
-                              itemCount: events.length,
-                              itemBuilder: (context, index) {
-                                final event = events[index];
-                                return GestureDetector(
-                                  behavior: HitTestBehavior.translucent,
-                                  onLongPress: () =>
-                                      _showSavedMessageOptions(event),
-                                  child: MessageBubble(
-                                    event: event,
-                                    myUserId:
-                                        context.read<MatrixProvider>().userId ??
-                                            '',
-                                    loadImageBytes:
-                                        _mediaHandler.loadImageBytes,
-                                    playVideo: _openVideo,
-                                    downloadAndOpenFile: _openFile,
-                                    shareAttachment: _shareAttachment,
-                                    openAttachmentExternally: _openFile,
-                                    downloadAttachment: _downloadAttachment,
-                                    openFullscreenImage: _openFullscreenImage,
-                                  ),
-                                );
-                              },
+                      ? Center(
+                          child: Text(
+                            _query.isEmpty
+                                ? 'No saved messages from this chat'
+                                : 'No saved messages found',
+                            style: GoogleFonts.inter(
+                              color: kLightGrey,
+                              fontSize: 14,
                             ),
+                          ),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                          itemCount: events.length,
+                          itemBuilder: (context, index) {
+                            final event = events[index];
+                            return GestureDetector(
+                              behavior: HitTestBehavior.translucent,
+                              onLongPress: () =>
+                                  _showSavedMessageOptions(event),
+                              child: MessageBubble(
+                                event: event,
+                                myUserId:
+                                    context.read<MatrixProvider>().userId ?? '',
+                                loadImageBytes: _mediaHandler.loadImageBytes,
+                                playVideo: _openVideo,
+                                downloadAndOpenFile: _openFile,
+                                shareAttachment: _shareAttachment,
+                                openAttachmentExternally: _openFile,
+                                downloadAttachment: _downloadAttachment,
+                                openFullscreenImage: _openFullscreenImage,
+                              ),
+                            );
+                          },
+                        ),
                 ),
                 SafeArea(
                   top: false,
@@ -308,11 +310,7 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
   Future<void> _openFile(Event event) async {
     final file = await _downloadAttachment(event);
     if (!mounted) return;
-    await native_share.openFile(
-      file.bytes,
-      file.name,
-      mimeType: file.mimeType,
-    );
+    await native_share.openFile(file.bytes, file.name, mimeType: file.mimeType);
   }
 
   Future<void> _shareAttachment(Event event) async {
@@ -351,10 +349,7 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
               if (copyText != null)
                 ListTile(
                   leading: const Icon(Icons.copy, color: kLimeGreen),
-                  title: Text(
-                    'Copy',
-                    style: GoogleFonts.inter(color: kWhite),
-                  ),
+                  title: Text('Copy', style: GoogleFonts.inter(color: kWhite)),
                   onTap: () {
                     Navigator.pop(ctx);
                     _copyMessage(copyText);
@@ -365,10 +360,7 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
                   scaleX: -1,
                   child: const Icon(Icons.reply, color: kLimeGreen),
                 ),
-                title: Text(
-                  'Forward',
-                  style: GoogleFonts.inter(color: kWhite),
-                ),
+                title: Text('Forward', style: GoogleFonts.inter(color: kWhite)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _forwardMessage(event);
@@ -396,10 +388,7 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Copied'),
-        backgroundColor: kLimeGreen,
-      ),
+      const SnackBar(content: Text('Copied'), backgroundColor: kLimeGreen),
     );
   }
 

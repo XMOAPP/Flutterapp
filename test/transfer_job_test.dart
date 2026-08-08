@@ -8,8 +8,10 @@ void main() {
     int uploadedBytes = 0,
     int totalBytes = 100,
     int attempts = 0,
+    TransferStage stage = TransferStage.preparing,
     DateTime? retryAt,
     MessageReplyReference? replyReference,
+    String? batchId,
   }) {
     final now = DateTime.utc(2026, 6, 21);
     return TransferJob(
@@ -25,10 +27,12 @@ void main() {
       uploadedBytes: uploadedBytes,
       attempts: attempts,
       status: status,
+      stage: stage,
       createdAt: now,
       updatedAt: now,
       nextRetryAt: retryAt,
       replyReference: replyReference,
+      batchId: batchId,
     );
   }
 
@@ -41,6 +45,7 @@ void main() {
       status: TransferStatus.failed,
       uploadedBytes: 25,
       attempts: 2,
+      stage: TransferStage.encrypting,
       retryAt: DateTime.utc(2026, 6, 21, 0, 0, 4),
       replyReference: replyReference,
     );
@@ -48,19 +53,40 @@ void main() {
 
     expect(restored.ownerUserId, source.ownerUserId);
     expect(restored.status, TransferStatus.failed);
+    expect(restored.stage, TransferStage.encrypting);
     expect(restored.progress, 0.25);
     expect(restored.shouldAutoRetry, isTrue);
     expect(restored.replyReference?.eventId, replyReference.eventId);
     expect(restored.replyReference?.roomId, replyReference.roomId);
   });
 
-  test('cancelled and failed jobs are retryable, active jobs are cancellable',
-      () {
-    expect(job(status: TransferStatus.cancelled).canRetry, isTrue);
-    expect(job(status: TransferStatus.failed).canRetry, isTrue);
-    expect(job(status: TransferStatus.running).canCancel, isTrue);
-    expect(job(status: TransferStatus.completed).canCancel, isFalse);
+  test('legacy jobs default to preparing stage', () {
+    final json = job().toJson()..remove('stage');
+    expect(TransferJob.fromJson(json).stage, TransferStage.preparing);
   });
+
+  test('batch identity survives persistence and state updates', () {
+    final source = job(batchId: 'batch-42');
+    final restored = TransferJob.fromJson(source.toJson());
+    final running = restored.copyWith(status: TransferStatus.running);
+
+    expect(restored.batchId, 'batch-42');
+    expect(running.batchId, 'batch-42');
+    expect(
+      TransferJob.fromJson({...source.toJson()}..remove('batchId')).batchId,
+      isNull,
+    );
+  });
+
+  test(
+    'cancelled and failed jobs are retryable, active jobs are cancellable',
+    () {
+      expect(job(status: TransferStatus.cancelled).canRetry, isTrue);
+      expect(job(status: TransferStatus.failed).canRetry, isTrue);
+      expect(job(status: TransferStatus.running).canCancel, isTrue);
+      expect(job(status: TransferStatus.completed).canCancel, isFalse);
+    },
+  );
 
   test('unknown total size reports indeterminate progress', () {
     expect(job(totalBytes: 0).progress, isNull);

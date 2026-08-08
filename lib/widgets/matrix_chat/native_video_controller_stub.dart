@@ -16,3 +16,9 @@ Future<VideoPlayerController> createNativeNetworkVideoController({
 }) async {
   throw UnsupportedError('Native video playback is not used on web.');
 }
+
+Future<VideoPlayerController> createNativeContentUriVideoController({
+  required Uri uri,
+}) async {
+  throw UnsupportedError('Content URI video playback is Android-only.');
+}

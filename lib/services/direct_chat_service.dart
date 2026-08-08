@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 import '../models/direct_chat_models.dart';
+import '../utils/matrix_identity.dart';
 import 'matrix_service.dart';
 
 /// Service for managing direct chat (DM) features
@@ -21,9 +22,9 @@ class DirectChatService {
     if (room == null) throw Exception('Room not found: $roomId');
 
     final user = room.getParticipants().firstWhere(
-          (u) => u.id == userId,
-          orElse: () => throw Exception('User not found'),
-        );
+      (u) => u.id == userId,
+      orElse: () => throw Exception('User not found'),
+    );
 
     // Get shared media count
     final timeline = await room.getTimeline();
@@ -37,12 +38,22 @@ class DirectChatService {
     }).length;
 
     // Get first message date
-    final firstMessage =
-        timeline.events.isNotEmpty ? timeline.events.last.originServerTs : null;
+    final firstMessage = timeline.events.isNotEmpty
+        ? timeline.events.last.originServerTs
+        : null;
+
+    final rawDisplayName = user.displayName?.trim();
+    final resolvedRoomName = _matrixService.getResolvedDisplayName(room).trim();
+    final displayName =
+        MatrixIdentity.isFriendlyDisplayName(rawDisplayName, user.id)
+        ? rawDisplayName!
+        : MatrixIdentity.isFriendlyDisplayName(resolvedRoomName, user.id)
+        ? resolvedRoomName
+        : MatrixIdentity.displayName(userId: user.id);
 
     return DirectChatProfile(
       userId: user.id,
-      displayName: user.displayName ?? user.id,
+      displayName: displayName,
       avatarUrl: user.avatarUrl?.toString(),
       isOnline: false, // Will be fetched separately
       lastSeen: null, // Will be fetched separately
@@ -67,8 +78,9 @@ class DirectChatService {
     try {
       final presence = await _client.getPresence(userId);
       return presence.lastActiveAgo != null
-          ? DateTime.now()
-              .subtract(Duration(milliseconds: presence.lastActiveAgo!))
+          ? DateTime.now().subtract(
+              Duration(milliseconds: presence.lastActiveAgo!),
+            )
           : null;
     } catch (e) {
       debugPrint('[DirectChat] Error getting last seen: $e');
@@ -99,8 +111,9 @@ class DirectChatService {
           msgType == MessageTypes.File;
     }).toList();
 
-    var mediaItems =
-        mediaEvents.map((e) => SharedMediaItem.fromEvent(e)).toList();
+    var mediaItems = mediaEvents
+        .map((e) => SharedMediaItem.fromEvent(e))
+        .toList();
 
     // Filter by type if specified
     if (filterType != null) {
@@ -145,7 +158,9 @@ class DirectChatService {
 
   /// Updates chat settings
   Future<void> updateChatSettings(
-      String roomId, DirectChatSettings settings) async {
+    String roomId,
+    DirectChatSettings settings,
+  ) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
 
@@ -157,18 +172,13 @@ class DirectChatService {
     }
 
     // Update other settings in room state
-    await room.client.setRoomStateWithKey(
-      roomId,
-      'xmo.chat.settings',
-      '',
-      {
-        'notifications_enabled': settings.notificationsEnabled,
-        'read_receipts_enabled': settings.readReceiptsEnabled,
-        'typing_indicators_enabled': settings.typingIndicatorsEnabled,
-        'custom_wallpaper': settings.customWallpaper,
-        'disappearing_messages_enabled': settings.disappearingMessagesEnabled,
-      },
-    );
+    await room.client.setRoomStateWithKey(roomId, 'xmo.chat.settings', '', {
+      'notifications_enabled': settings.notificationsEnabled,
+      'read_receipts_enabled': settings.readReceiptsEnabled,
+      'typing_indicators_enabled': settings.typingIndicatorsEnabled,
+      'custom_wallpaper': settings.customWallpaper,
+      'disappearing_messages_enabled': settings.disappearingMessagesEnabled,
+    });
   }
 
   /// Mutes/unmutes chat
@@ -268,11 +278,16 @@ class DirectChatService {
 
     return typingUsers
         .where((user) => user.id != myUserId)
-        .map((user) => TypingIndicator(
+        .map(
+          (user) => TypingIndicator(
+            userId: user.id,
+            displayName: MatrixIdentity.displayName(
               userId: user.id,
-              displayName: user.displayName ?? user.id,
-              startedAt: DateTime.now(), // Matrix doesn't provide exact time
-            ))
+              candidate: user.displayName,
+            ),
+            startedAt: DateTime.now(), // Matrix doesn't provide exact time
+          ),
+        )
         .toList();
   }
 
@@ -314,8 +329,9 @@ class DirectChatService {
         .toList();
 
     final buffer = StringBuffer();
-    buffer
-        .writeln('Chat Export: ${_matrixService.getResolvedDisplayName(room)}');
+    buffer.writeln(
+      'Chat Export: ${_matrixService.getResolvedDisplayName(room)}',
+    );
     buffer.writeln('Exported: ${DateTime.now()}');
     buffer.writeln('=' * 50);
     buffer.writeln();
@@ -340,10 +356,12 @@ class DirectChatService {
     final lowerQuery = query.toLowerCase();
 
     return timeline.events
-        .where((e) =>
-            !e.redacted &&
-            e.type == EventTypes.Message &&
-            e.body.toLowerCase().contains(lowerQuery))
+        .where(
+          (e) =>
+              !e.redacted &&
+              e.type == EventTypes.Message &&
+              e.body.toLowerCase().contains(lowerQuery),
+        )
         .toList();
   }
 
@@ -360,11 +378,7 @@ class DirectChatService {
   }
 
   /// Checks if message has been read
-  bool isMessageRead(
-    Event event,
-    Room room, {
-    List<Event>? timelineEvents,
-  }) {
+  bool isMessageRead(Event event, Room room, {List<Event>? timelineEvents}) {
     final otherUserId = room.directChatMatrixID;
 
     if (otherUserId == null) return false;

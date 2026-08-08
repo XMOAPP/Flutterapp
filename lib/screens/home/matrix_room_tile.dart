@@ -48,10 +48,8 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
 
       return FutureBuilder<Event?>(
         future: _fallbackPreviewFuture,
-        builder: (context, snapshot) => _buildTile(
-          context,
-          previewEvent: snapshot.data,
-        ),
+        builder: (context, snapshot) =>
+            _buildTile(context, previewEvent: snapshot.data),
       );
     }
 
@@ -89,10 +87,10 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
       fallbackIcon: isSavedMessages
           ? Icons.bookmark
           : !isDirect && room.isChannel
-              ? Icons.campaign
-              : !isDirect && room.isGroup
-                  ? Icons.group
-                  : null,
+          ? Icons.campaign
+          : !isDirect && room.isGroup
+          ? Icons.group
+          : null,
     );
 
     return ListTile(
@@ -118,7 +116,8 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
         ],
       ),
       subtitle: preview,
-      trailing: widget.trailing ??
+      trailing:
+          widget.trailing ??
           (lastEventTime != null || (widget.showUnreadBadge && unreadCount > 0)
               ? _RoomMeta(
                   time: lastEventTime,
@@ -130,10 +129,8 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
         await Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => MatrixChatScreen(
-              room: room,
-              matrixProvider: matrixProvider,
-            ),
+            builder: (_) =>
+                MatrixChatScreen(room: room, matrixProvider: matrixProvider),
           ),
         );
         if (context.mounted) {
@@ -184,10 +181,10 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
         final fallbackIcon = isSavedMessages
             ? Icons.bookmark
             : !isDirect && room.isChannel
-                ? Icons.campaign
-                : !isDirect && room.isGroup
-                    ? Icons.group
-                    : null;
+            ? Icons.campaign
+            : !isDirect && room.isGroup
+            ? Icons.group
+            : null;
 
         return Center(
           child: GestureDetector(
@@ -269,11 +266,7 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
             fallbackIcon: preview.icon ?? Icons.image_rounded,
           )
         else
-          Icon(
-            preview.icon!,
-            color: preview.iconColor,
-            size: 17,
-          ),
+          Icon(preview.icon!, color: preview.iconColor, size: 17),
         const SizedBox(width: 5),
         Expanded(
           child: Text(
@@ -355,8 +348,8 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
           thumbnailRequest: _mediaThumbnailRequest(event, matrixService),
           encryptedThumbnailEvent:
               event.isThumbnailEncrypted || event.isAttachmentEncrypted
-                  ? event
-                  : null,
+              ? event
+              : null,
           icon: Icons.videocam_rounded,
           iconColor: kAudioBlue,
           isVideo: true,
@@ -406,9 +399,7 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
   }
 
   static String _previewBody(Event event, {required String fallback}) {
-    final body = _stripStoryReplyFallback(
-      matrixVisibleBody(event).trim(),
-    );
+    final body = _stripStoryReplyFallback(matrixVisibleBody(event).trim());
     final stripped = body.trim();
     return stripped.isEmpty ? fallback : stripped;
   }
@@ -454,8 +445,9 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
 
   static int? _eventDurationMs(Event event) {
     final info = event.content['info'];
-    final rawDuration =
-        info is Map ? info['duration'] : event.content['duration'];
+    final rawDuration = info is Map
+        ? info['duration']
+        : event.content['duration'];
     if (rawDuration is int) return rawDuration;
     if (rawDuration is num) return rawDuration.toInt();
     return int.tryParse(rawDuration?.toString() ?? '');
@@ -484,8 +476,8 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
       final hour = local.hour == 0
           ? 12
           : local.hour > 12
-              ? local.hour - 12
-              : local.hour;
+          ? local.hour - 12
+          : local.hour;
       final minute = local.minute.toString().padLeft(2, '0');
       final period = local.hour >= 12 ? 'PM' : 'AM';
       return '$hour:$minute $period';
@@ -642,9 +634,8 @@ class _PreviewThumbnail extends StatelessWidget {
               mediaRequest.uri.toString(),
               headers: mediaRequest.headers,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => _ThumbnailFallback(
-                icon: fallbackIcon,
-              ),
+              errorBuilder: (_, __, ___) =>
+                  _ThumbnailFallback(icon: fallbackIcon),
             ),
             if (isVideo)
               Container(
@@ -671,11 +662,7 @@ class _ThumbnailFallback extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       color: const Color(0xFF2C2C2E),
-      child: Icon(
-        icon,
-        color: kLightGrey,
-        size: 14,
-      ),
+      child: Icon(icon, color: kLightGrey, size: 14),
     );
   }
 }
@@ -684,16 +671,14 @@ class _RoomMeta extends StatelessWidget {
   final String? time;
   final int unreadCount;
 
-  const _RoomMeta({
-    required this.time,
-    required this.unreadCount,
-  });
+  const _RoomMeta({required this.time, required this.unreadCount});
 
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.sizeOf(context).width;
-    final metaWidth =
-        screenWidth < 340 ? 64.0 : (screenWidth < 380 ? 72.0 : 86.0);
+    final metaWidth = screenWidth < 340
+        ? 64.0
+        : (screenWidth < 380 ? 72.0 : 86.0);
 
     return SizedBox(
       width: metaWidth,

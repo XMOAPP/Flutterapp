@@ -21,10 +21,9 @@ class StoriesView extends StatelessWidget {
       builder: (context, storyProvider, matrixProvider, _) {
         final myUserId = matrixProvider.userId ?? '';
         final hasMyStories = storyProvider.hasMyStories;
-        final myLatestStory = storyProvider.myStories
-            .where((story) => !story.isExpired)
-            .toList()
-          ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+        final myLatestStory =
+            storyProvider.myStories.where((story) => !story.isExpired).toList()
+              ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
         final contactStories = storyProvider.contactStories;
 
         return CustomScrollView(
@@ -72,7 +71,10 @@ class StoriesView extends StatelessWidget {
                                     onAddStory: () =>
                                         _openStoryCreator(context),
                                     onTap: () => _openMyStory(
-                                        context, storyProvider, contactStories),
+                                      context,
+                                      storyProvider,
+                                      contactStories,
+                                    ),
                                   )
                                 : AddStoryButton(
                                     userName:
@@ -94,16 +96,19 @@ class StoriesView extends StatelessWidget {
                           child: StoryRing(
                             userName: userStories.userName,
                             avatarUrl: userStories.userAvatarUrl,
-                            hasUnviewedStories:
-                                storyProvider.hasUnviewedStories(
-                              userStories.userId,
-                              myUserId,
-                            ),
+                            hasUnviewedStories: storyProvider
+                                .hasUnviewedStories(
+                                  userStories.userId,
+                                  myUserId,
+                                ),
                             previewStory: userStories.latestStory,
                             storyCount: activeStories.length,
                             viewedCount: viewedCount,
                             onTap: () => _openStoryViewer(
-                                context, index - 1, contactStories),
+                              context,
+                              index - 1,
+                              contactStories,
+                            ),
                           ),
                         );
                       },
@@ -133,8 +138,9 @@ class StoriesView extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 sliver: SliverLayoutBuilder(
                   builder: (context, constraints) {
-                    final crossAxisCount =
-                        (constraints.crossAxisExtent / 120).floor().clamp(3, 4);
+                    final crossAxisCount = (constraints.crossAxisExtent / 120)
+                        .floor()
+                        .clamp(3, 4);
                     return SliverGrid(
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,
@@ -156,7 +162,10 @@ class StoriesView extends StatelessWidget {
                               ),
                               isMyStory: true,
                               onTap: () => _openMyStory(
-                                  context, storyProvider, contactStories),
+                                context,
+                                storyProvider,
+                                contactStories,
+                              ),
                             );
                           }
 
@@ -171,7 +180,10 @@ class StoriesView extends StatelessWidget {
                             userStories: userStories,
                             isMyStory: false,
                             onTap: () => _openStoryViewer(
-                                context, contactIndex, contactStories),
+                              context,
+                              contactIndex,
+                              contactStories,
+                            ),
                           );
                         },
                         childCount:
@@ -225,7 +237,9 @@ class StoriesView extends StatelessWidget {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: kLimeGreen,
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 24, vertical: 12),
+                            horizontal: 24,
+                            vertical: 12,
+                          ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(20),
                           ),
@@ -310,10 +324,7 @@ class StoriesView extends StatelessWidget {
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
                         shadows: [
-                          const Shadow(
-                            color: Colors.black54,
-                            blurRadius: 4,
-                          ),
+                          const Shadow(color: Colors.black54, blurRadius: 4),
                         ],
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -329,8 +340,10 @@ class StoriesView extends StatelessWidget {
                 bottom: 12,
                 left: 12,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.6),
                     borderRadius: BorderRadius.circular(12),
@@ -398,7 +411,9 @@ class StoriesView extends StatelessWidget {
                   color: kDarkerGrey,
                   child: const Center(
                     child: CircularProgressIndicator(
-                        color: kLimeGreen, strokeWidth: 2),
+                      color: kLimeGreen,
+                      strokeWidth: 2,
+                    ),
                   ),
                 );
               },
@@ -464,9 +479,7 @@ class StoriesView extends StatelessWidget {
   void _openStoryCreator(BuildContext context) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => const StoryCreatorScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const StoryCreatorScreen()),
     );
   }
 

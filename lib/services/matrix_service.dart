@@ -10,14 +10,19 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart' as sqflite;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../config/app_config.dart';
 import '../models/invite_link_models.dart';
+import '../utils/matrix_identity.dart';
 import '../utils/message_presentation.dart';
 import 'azure_blob_chunk_storage_service.dart';
 import 'channel_analytics_service.dart';
+import 'encrypted_hive_box_store.dart';
 import 'matrix_encrypted_media_helper.dart';
 import 'matrix_media_helper.dart';
 import 'message_draft_service.dart';
+import 'native_video_probe_stub.dart'
+    if (dart.library.io) 'native_video_probe_io.dart';
 import 'repositories/matrix_repository_contracts.dart';
 import 'repositories/matrix_sdk_repositories.dart';
 import 'room_controls_service.dart';
@@ -75,6 +80,8 @@ class MatrixService implements MatrixRepositoryApi {
   static const String homeserverUrl = AppConfig.homeserverUrl;
   static const String matrixServerName = AppConfig.matrixServerName;
   static const String _authBoxName = 'xmo_auth';
+  static const String _authMigrationBoxName = 'xmo_auth_migration_v1';
+  static const String _authEncryptionKeyName = 'xmo_hive_auth_key_v1';
   static const String _channelBoxName = 'xmo_channels';
   static const String _groupBoxName = 'xmo_groups';
   static const String _savedMessagesRoomIdKey = 'saved_messages_room_id';
@@ -90,6 +97,8 @@ class MatrixService implements MatrixRepositoryApi {
   late Box _groupBox;
   final MatrixEncryptedMediaHelper _encryptedMediaHelper =
       const MatrixEncryptedMediaHelper();
+  final io.HttpClient _mediaUploadHttpClient = io.HttpClient()
+    ..idleTimeout = const Duration(seconds: 30);
   late final XmoChunkedMediaUploadService _chunkedMediaUploadService =
       XmoChunkedMediaUploadService(
         qualityVariantProvider: createVideoCompressionQualityVariantProvider(),
@@ -99,6 +108,9 @@ class MatrixService implements MatrixRepositoryApi {
   final Set<String> _channelIdCache = {};
   final Set<String> _groupIdCache = {};
   final Set<String> _publishedRoomIds = {};
+  int? _cachedMaxUploadSize;
+  DateTime? _mediaConfigCachedAt;
+  Future<int?>? _mediaConfigRequest;
   String? _savedMessagesRoomId;
   bool _hasPublishedExisting = false;
   String? _profileDisplayName;
@@ -131,9 +143,14 @@ class MatrixService implements MatrixRepositoryApi {
       _client.userID?.split(':').first.replaceFirst('@', '');
   bool get hasCachedPasswordForCurrentUser =>
       _storedPasswordForCurrentUser() != null;
-  String? get displayName => _profileDisplayName?.trim().isNotEmpty == true
-      ? _profileDisplayName
-      : _client.userID?.split(':').first.replaceFirst('@', '');
+  String? get displayName {
+    final userId = _client.userID;
+    if (userId == null) return null;
+    return MatrixIdentity.displayName(
+      userId: userId,
+      candidate: _profileDisplayName,
+    );
+  }
 
   static bool isGroupCallPushMarkerContent(Map? content) {
     if (content == null) return false;
@@ -364,6 +381,15 @@ class MatrixService implements MatrixRepositoryApi {
             (usersDefault is num && usersDefault.toInt() == 0));
   }
 
+  Future<Box> _openEncryptedAuthBox() async {
+    return const EncryptedHiveBoxStore(
+      boxName: _authBoxName,
+      stagingBoxName: _authMigrationBoxName,
+      keyName: _authEncryptionKeyName,
+      secureValues: FlutterSecureValueStore(FlutterSecureStorage()),
+    ).open();
+  }
+
   // ─── Init ────────────────────────────────────────────────────────────────────
 
   Future<void> init() async {
@@ -375,8 +401,8 @@ class MatrixService implements MatrixRepositoryApi {
 
     await Hive.initFlutter();
 
-    // Open credential storage box
-    _authBox = await Hive.openBox(_authBoxName);
+    // Encrypt session storage with a key protected by the platform key store.
+    _authBox = await _openEncryptedAuthBox();
     await _removeReusablePasswordsFromAuthBox();
     _savedMessagesRoomId = _authBox.get(_savedMessagesRoomIdKey) as String?;
 
@@ -491,6 +517,18 @@ class MatrixService implements MatrixRepositoryApi {
     );
   }
 
+  Future<void> loginWithSsoToken(String token) async {
+    if (token.trim().isEmpty) {
+      throw ArgumentError.value(token, 'token', 'SSO login token is required');
+    }
+    await _client.checkHomeserver(Uri.parse(homeserverUrl));
+    await _client.login(
+      LoginType.mLoginToken,
+      token: token,
+      initialDeviceDisplayName: 'XMO Android',
+    );
+  }
+
   Future<bool> isUsernameAvailable(String username) async {
     await _client.checkHomeserver(Uri.parse(homeserverUrl));
     return await _client.checkUsernameAvailability(username) == true;
@@ -537,6 +575,7 @@ class MatrixService implements MatrixRepositoryApi {
 
   Future<void> logout() async {
     final accountUserId = userId;
+    _invalidateMediaConfig();
     await _client.logout();
     await _clearLocalDrafts(accountUserId);
   }
@@ -1006,7 +1045,11 @@ class MatrixService implements MatrixRepositoryApi {
         ),
       ]),
     );
-    await Room(id: roomId, client: _client).addToDirectChat(userId);
+    try {
+      await Room(id: roomId, client: _client).addToDirectChat(userId);
+    } catch (e) {
+      debugPrint('[Matrix] Direct-chat mapping will be repaired later: $e');
+    }
     return roomId;
   }
 
@@ -1534,14 +1577,16 @@ class MatrixService implements MatrixRepositoryApi {
   }
 
   String getResolvedDisplayName(Room room) {
-    if (room.name.isNotEmpty) return room.name;
-
     final peerUserId = getDirectPeerUserId(room);
     if (peerUserId != null) {
-      return room
-          .unsafeGetUserFromMemoryOrFallback(peerUserId)
-          .calcDisplayname();
+      final member = room.unsafeGetUserFromMemoryOrFallback(peerUserId);
+      return MatrixIdentity.displayName(
+        userId: peerUserId,
+        candidate: room.name.isNotEmpty ? room.name : member.displayName,
+      );
     }
+
+    if (room.name.isNotEmpty) return room.name;
 
     return room.getLocalizedDisplayname();
   }
@@ -2318,6 +2363,7 @@ class MatrixService implements MatrixRepositoryApi {
     required Uint8List videoBytes,
     required String videoFileName,
     required String videoMimeType,
+    String? sourcePath,
     Uint8List? thumbBytes,
     int? videoWidth,
     int? videoHeight,
@@ -2326,6 +2372,7 @@ class MatrixService implements MatrixRepositoryApi {
     int? thumbnailHeight,
     String caption = '',
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
+    void Function(TransferStage stage)? onStageChanged,
     bool Function()? isCancelled,
     Map<String, dynamic>? xmoStream,
     Event? inReplyTo,
@@ -2336,20 +2383,32 @@ class MatrixService implements MatrixRepositoryApi {
     var effectiveVideoBytes = videoBytes;
     var effectiveVideoFileName = videoFileName;
     var effectiveVideoMimeType = videoMimeType;
+    var effectiveSourcePath = sourcePath;
     try {
       _throwIfCancelled(isCancelled);
-      final normalized = await _chunkedMediaUploadService.normalizeVideoSource(
-        videoBytes: videoBytes,
-        videoFileName: videoFileName,
-        videoMimeType: videoMimeType,
-        durationMs: durationMs,
-        isCancelled: isCancelled,
+      final canUseOriginal = await _canUseOriginalVideo(
+        sourcePath: sourcePath,
+        fileName: videoFileName,
+        mimeType: videoMimeType,
       );
+      XmoVideoQualityVariant? normalized;
+      if (!canUseOriginal) {
+        onStageChanged?.call(TransferStage.compressing);
+        normalized = await _chunkedMediaUploadService.normalizeVideoSource(
+          videoBytes: videoBytes,
+          videoFileName: videoFileName,
+          videoMimeType: videoMimeType,
+          durationMs: durationMs,
+          sourcePath: sourcePath,
+          isCancelled: isCancelled,
+        );
+      }
       _throwIfCancelled(isCancelled);
       if (normalized != null) {
         effectiveVideoBytes = normalized.bytes;
         effectiveVideoFileName = normalized.fileName;
         effectiveVideoMimeType = normalized.mimeType;
+        effectiveSourcePath = null;
         debugPrint(
           '[sendVideo] Normalized video source '
           '(${videoBytes.length} -> ${effectiveVideoBytes.length} bytes).',
@@ -2365,12 +2424,16 @@ class MatrixService implements MatrixRepositoryApi {
     debugPrint(
       '[sendVideo] Uploading video (${effectiveVideoBytes.length} bytes)...',
     );
+    if (room.encrypted && _client.fileEncryptionEnabled) {
+      onStageChanged?.call(TransferStage.encrypting);
+    }
     final preparedVideo = await _prepareMediaUpload(
       room,
       bytes: effectiveVideoBytes,
       fileName: effectiveVideoFileName,
       mimeType: effectiveVideoMimeType,
     );
+    onStageChanged?.call(TransferStage.connecting);
     final videoMxc = await _uploadContentWithProgress(
       preparedVideo.bytes,
       filename: effectiveVideoFileName,
@@ -2433,6 +2496,7 @@ class MatrixService implements MatrixRepositoryApi {
 
     final cleanCaption = caption.trim();
     _throwIfCancelled(isCancelled);
+    onStageChanged?.call(TransferStage.finalizing);
     final shouldAttachXmoStream = preparedVideo.encryptedFile != null;
     final effectiveXmoStream = shouldAttachXmoStream
         ? xmoStream ??
@@ -2442,6 +2506,7 @@ class MatrixService implements MatrixRepositoryApi {
                 videoFileName: effectiveVideoFileName,
                 videoMimeType: effectiveVideoMimeType,
                 durationMs: durationMs,
+                sourcePath: effectiveSourcePath,
                 isCancelled: isCancelled,
               )
         : null;
@@ -2477,6 +2542,7 @@ class MatrixService implements MatrixRepositoryApi {
     required String videoFileName,
     required String videoMimeType,
     required int? durationMs,
+    String? sourcePath,
     required bool Function()? isCancelled,
   }) async {
     if (!_chunkedMediaUploadService.shouldUploadAsStream(
@@ -2495,6 +2561,7 @@ class MatrixService implements MatrixRepositoryApi {
         videoFileName: videoFileName,
         videoMimeType: videoMimeType,
         durationMs: durationMs,
+        sourcePath: sourcePath,
         isCancelled: isCancelled,
         uploadChunk:
             ({
@@ -2618,8 +2685,7 @@ class MatrixService implements MatrixRepositoryApi {
       );
     }
 
-    final mediaConfig = await _client.getConfig();
-    final maxMediaSize = mediaConfig.mUploadSize;
+    final maxMediaSize = await _maxUploadSize();
     if (maxMediaSize != null && maxMediaSize < content.lengthInBytes) {
       throw FileTooBigMatrixException(content.lengthInBytes, maxMediaSize);
     }
@@ -2638,43 +2704,42 @@ class MatrixService implements MatrixRepositoryApi {
       ),
     );
 
-    final client = io.HttpClient();
-    try {
-      _throwIfCancelled(isCancelled);
-      final request = await client.postUrl(uploadUri);
-      request.contentLength = content.lengthInBytes;
-      request.headers.set(io.HttpHeaders.authorizationHeader, 'Bearer $token');
-      if (contentType != null && contentType.isNotEmpty) {
-        request.headers.set(io.HttpHeaders.contentTypeHeader, contentType);
-      }
-
-      const chunkSize = 16 * 1024;
-      var uploaded = 0;
-      onProgress?.call(0, content.lengthInBytes);
-
-      for (var offset = 0; offset < content.length; offset += chunkSize) {
-        _throwIfCancelled(isCancelled);
-        final end = (offset + chunkSize).clamp(0, content.length);
-        request.add(content.sublist(offset, end));
-        await request.flush();
-        uploaded = end;
-        onProgress?.call(uploaded, content.lengthInBytes);
-      }
-      _throwIfCancelled(isCancelled);
-
-      final response = await request.close();
-      _throwIfCancelled(isCancelled);
-      final responseBytes = await consolidateHttpClientResponseBytes(response);
-      if (response.statusCode != io.HttpStatus.ok) {
-        throw Exception(
-          'Upload failed (${response.statusCode}): ${utf8.decode(responseBytes)}',
-        );
-      }
-      final responseJson = jsonDecode(utf8.decode(responseBytes));
-      return Uri.parse(responseJson['content_uri'] as String);
-    } finally {
-      client.close(force: true);
+    _throwIfCancelled(isCancelled);
+    final request = await _mediaUploadHttpClient.postUrl(uploadUri);
+    request.contentLength = content.lengthInBytes;
+    request.headers.set(io.HttpHeaders.authorizationHeader, 'Bearer $token');
+    if (contentType != null && contentType.isNotEmpty) {
+      request.headers.set(io.HttpHeaders.contentTypeHeader, contentType);
     }
+
+    onProgress?.call(0, content.lengthInBytes);
+    try {
+      await request.addStream(
+        _byteUploadStream(
+          content,
+          onProgress: onProgress,
+          isCancelled: isCancelled,
+        ),
+      );
+      _throwIfCancelled(isCancelled);
+    } catch (error, stackTrace) {
+      request.abort(error, stackTrace);
+      rethrow;
+    }
+
+    final response = await request.close();
+    _throwIfCancelled(isCancelled);
+    final responseBytes = await consolidateHttpClientResponseBytes(response);
+    if (response.statusCode != io.HttpStatus.ok) {
+      if (response.statusCode == io.HttpStatus.requestEntityTooLarge) {
+        _invalidateMediaConfig();
+      }
+      throw Exception(
+        'Upload failed (${response.statusCode}): ${utf8.decode(responseBytes)}',
+      );
+    }
+    final responseJson = jsonDecode(utf8.decode(responseBytes));
+    return Uri.parse(responseJson['content_uri'] as String);
   }
 
   Future<Uri> uploadBytesWithProgress(
@@ -2709,8 +2774,7 @@ class MatrixService implements MatrixRepositoryApi {
     }
 
     final fileLength = await file.length();
-    final mediaConfig = await _client.getConfig();
-    final maxMediaSize = mediaConfig.mUploadSize;
+    final maxMediaSize = await _maxUploadSize();
     if (maxMediaSize != null && maxMediaSize < fileLength) {
       throw FileTooBigMatrixException(fileLength, maxMediaSize);
     }
@@ -2729,40 +2793,122 @@ class MatrixService implements MatrixRepositoryApi {
       ),
     );
 
-    final client = io.HttpClient();
-    try {
-      _throwIfCancelled(isCancelled);
-      final request = await client.postUrl(uploadUri);
-      request.contentLength = fileLength;
-      request.headers.set(io.HttpHeaders.authorizationHeader, 'Bearer $token');
-      if (contentType != null && contentType.isNotEmpty) {
-        request.headers.set(io.HttpHeaders.contentTypeHeader, contentType);
-      }
-
-      var uploaded = 0;
-      onProgress?.call(0, fileLength);
-      await for (final chunk in file.openRead()) {
-        _throwIfCancelled(isCancelled);
-        request.add(chunk);
-        await request.flush();
-        uploaded += chunk.length;
-        onProgress?.call(uploaded, fileLength);
-      }
-      _throwIfCancelled(isCancelled);
-
-      final response = await request.close();
-      _throwIfCancelled(isCancelled);
-      final responseBytes = await consolidateHttpClientResponseBytes(response);
-      if (response.statusCode != io.HttpStatus.ok) {
-        throw Exception(
-          'Upload failed (${response.statusCode}): ${utf8.decode(responseBytes)}',
-        );
-      }
-      final responseJson = jsonDecode(utf8.decode(responseBytes));
-      return Uri.parse(responseJson['content_uri'] as String);
-    } finally {
-      client.close(force: true);
+    _throwIfCancelled(isCancelled);
+    final request = await _mediaUploadHttpClient.postUrl(uploadUri);
+    request.contentLength = fileLength;
+    request.headers.set(io.HttpHeaders.authorizationHeader, 'Bearer $token');
+    if (contentType != null && contentType.isNotEmpty) {
+      request.headers.set(io.HttpHeaders.contentTypeHeader, contentType);
     }
+
+    onProgress?.call(0, fileLength);
+    try {
+      await request.addStream(
+        _fileUploadStream(
+          file,
+          fileLength: fileLength,
+          onProgress: onProgress,
+          isCancelled: isCancelled,
+        ),
+      );
+      _throwIfCancelled(isCancelled);
+    } catch (error, stackTrace) {
+      request.abort(error, stackTrace);
+      rethrow;
+    }
+
+    final response = await request.close();
+    _throwIfCancelled(isCancelled);
+    final responseBytes = await consolidateHttpClientResponseBytes(response);
+    if (response.statusCode != io.HttpStatus.ok) {
+      if (response.statusCode == io.HttpStatus.requestEntityTooLarge) {
+        _invalidateMediaConfig();
+      }
+      throw Exception(
+        'Upload failed (${response.statusCode}): ${utf8.decode(responseBytes)}',
+      );
+    }
+    final responseJson = jsonDecode(utf8.decode(responseBytes));
+    return Uri.parse(responseJson['content_uri'] as String);
+  }
+
+  Future<bool> _canUseOriginalVideo({
+    required String? sourcePath,
+    required String fileName,
+    required String mimeType,
+  }) async {
+    if (sourcePath == null || sourcePath.isEmpty) return false;
+    if (mimeType.toLowerCase() != 'video/mp4' ||
+        !fileName.toLowerCase().endsWith('.mp4')) {
+      return false;
+    }
+    final probe = await probeNativeVideo(sourcePath);
+    final compatible = probe?.isMatrixCompatibleMp4 == true;
+    if (compatible) {
+      debugPrint('[sendVideo] Compatible MP4 source; normalization skipped.');
+    }
+    return compatible;
+  }
+
+  Stream<List<int>> _byteUploadStream(
+    Uint8List content, {
+    required void Function(int uploadedBytes, int totalBytes)? onProgress,
+    required bool Function()? isCancelled,
+  }) async* {
+    const chunkSize = 256 * 1024;
+    final totalBytes = content.lengthInBytes;
+    for (var offset = 0; offset < totalBytes; offset += chunkSize) {
+      _throwIfCancelled(isCancelled);
+      final nextOffset = offset + chunkSize;
+      final end = nextOffset < totalBytes ? nextOffset : totalBytes;
+      yield Uint8List.sublistView(content, offset, end);
+      onProgress?.call(end, totalBytes);
+    }
+  }
+
+  Stream<List<int>> _fileUploadStream(
+    io.File file, {
+    required int fileLength,
+    required void Function(int uploadedBytes, int totalBytes)? onProgress,
+    required bool Function()? isCancelled,
+  }) async* {
+    var uploadedBytes = 0;
+    await for (final chunk in file.openRead()) {
+      _throwIfCancelled(isCancelled);
+      yield chunk;
+      uploadedBytes += chunk.length;
+      final reportedBytes = uploadedBytes < fileLength
+          ? uploadedBytes
+          : fileLength;
+      onProgress?.call(reportedBytes, fileLength);
+    }
+  }
+
+  Future<int?> _maxUploadSize() {
+    final cachedAt = _mediaConfigCachedAt;
+    if (cachedAt != null &&
+        DateTime.now().difference(cachedAt) < const Duration(minutes: 10)) {
+      return Future<int?>.value(_cachedMaxUploadSize);
+    }
+    final inFlight = _mediaConfigRequest;
+    if (inFlight != null) return inFlight;
+
+    final request = _client.getConfig().then((config) {
+      _cachedMaxUploadSize = config.mUploadSize;
+      _mediaConfigCachedAt = DateTime.now();
+      return _cachedMaxUploadSize;
+    });
+    _mediaConfigRequest = request;
+    return request.whenComplete(() {
+      if (identical(_mediaConfigRequest, request)) {
+        _mediaConfigRequest = null;
+      }
+    });
+  }
+
+  void _invalidateMediaConfig() {
+    _cachedMaxUploadSize = null;
+    _mediaConfigCachedAt = null;
   }
 
   void _throwIfCancelled(bool Function()? isCancelled) {

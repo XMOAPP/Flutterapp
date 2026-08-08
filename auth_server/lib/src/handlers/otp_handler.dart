@@ -73,8 +73,50 @@ Future<void> _verifyOtp(HttpRequest request) async {
   }
 
   _otpStore.remove(email);
-  await _json(request, HttpStatus.ok, {'success': true});
+  final enrollmentProof = _secureLoginEnrollmentProofs.issue(email);
+  await _json(request, HttpStatus.ok, {
+    'success': true,
+    'secureLoginEnrollmentProof': enrollmentProof,
+    'secureLoginEnrollmentProofExpiresInSeconds':
+        _secureLoginEnrollmentProofTtl.inSeconds,
+  });
 }
+
+SecureLoginEnrollmentProofClaim? _claimEnrollmentProof({
+  required String proof,
+  required String email,
+}) =>
+    _secureLoginEnrollmentProofs.claim(proof: proof, email: email);
+
+void _restoreEnrollmentProof(
+  String proof,
+  SecureLoginEnrollmentProofClaim record,
+) {
+  _secureLoginEnrollmentProofs.restore(proof, record);
+}
+
+void _completeEnrollmentProof({
+  required String proof,
+  required SecureLoginEnrollmentProofClaim record,
+  required String username,
+}) {
+  _secureLoginEnrollmentProofs.complete(
+    proof: proof,
+    claim: record,
+    username: username,
+  );
+}
+
+bool _wasEnrollmentProofCompleted({
+  required String proof,
+  required String email,
+  required String username,
+}) =>
+    _secureLoginEnrollmentProofs.wasCompleted(
+      proof: proof,
+      email: email,
+      username: username,
+    );
 
 String _normalizeEmail(Object? value) =>
     value?.toString().trim().toLowerCase() ?? '';

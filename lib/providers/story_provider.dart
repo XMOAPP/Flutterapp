@@ -3,10 +3,12 @@ import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 import '../models/story_models.dart';
 import '../services/story_service.dart';
+import '../services/story_upload_queue_service.dart';
 
 /// Provider for managing Stories state
 class StoryProvider extends ChangeNotifier {
   final StoryService _storyService;
+  final StoryUploadQueueService _uploadQueue = StoryUploadQueueService.instance;
 
   StoryProvider(this._storyService) {
     _init();
@@ -32,6 +34,14 @@ class StoryProvider extends ChangeNotifier {
 
   /// Initialize provider
   void _init() {
+    unawaited(_uploadQueue
+        .attach(
+      _storyService,
+      onStoryCreated: _handleQueuedStoryCreated,
+    )
+        .catchError((Object error) {
+      debugPrint('[StoryProvider] Failed to initialize upload queue: $error');
+    }));
     _eventSub = _storyService.onEvent.listen(_handleEventUpdate);
     _accountDataSub = _storyService.onAccountData.listen((event) {
       if (event.type == StoryService.storyAccountDataType) {
@@ -262,6 +272,23 @@ class StoryProvider extends ChangeNotifier {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /// Create a new story
+  Future<StoryUploadJob> queueStory(CreateStoryRequest request) {
+    return _uploadQueue.enqueue(request);
+  }
+
+  void _handleQueuedStoryCreated(Story story) {
+    final existingIndex = _myStories.indexWhere((item) => item.id == story.id);
+    if (existingIndex == -1) {
+      _myStories.add(story);
+    } else {
+      _myStories[existingIndex] = story;
+    }
+    _loading = false;
+    _error = null;
+    notifyListeners();
+  }
+
+  /// Create a new story and wait for publishing to finish.
   Future<Story?> createStory(
     CreateStoryRequest request, {
     ValueChanged<StoryCreationProgress>? onProgress,

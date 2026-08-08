@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:mime/mime.dart';
 import 'package:path_provider/path_provider.dart';
@@ -18,8 +17,27 @@ Future<String> downloadFile(
     throw Exception('File is empty');
   }
 
-  final baseDir =
-      Platform.isAndroid ? await getExternalStorageDirectory() : null;
+  final resolvedMimeType =
+      mimeType ?? lookupMimeType(fileName, headerBytes: bytes);
+  final safeName = _safeFileName(fileName);
+  if (Platform.isAndroid &&
+      (resolvedMimeType?.startsWith('image/') == true ||
+          resolvedMimeType?.startsWith('video/') == true)) {
+    const channel = MethodChannel('com.xmo.xmo/media_store');
+    final uri = await channel.invokeMethod<String>('saveMediaBytesToGallery', {
+      'bytes': bytes,
+      'fileName': safeName,
+      'mimeType': resolvedMimeType,
+    });
+    if (uri == null || uri.isEmpty) {
+      throw Exception('Gallery did not return the saved media location');
+    }
+    return uri;
+  }
+
+  final baseDir = Platform.isAndroid
+      ? await getExternalStorageDirectory()
+      : null;
   final rootDirectory = Directory(
     '${(baseDir ?? await getApplicationDocumentsDirectory()).path}/XMO Downloads',
   );
@@ -31,7 +49,6 @@ Future<String> downloadFile(
     await directory.create(recursive: true);
   }
 
-  final safeName = _safeFileName(fileName);
   var file = File('${directory.path}/$safeName');
   if (await file.exists()) {
     final dot = safeName.lastIndexOf('.');
@@ -43,37 +60,12 @@ Future<String> downloadFile(
   }
 
   await file.writeAsBytes(bytes, flush: true);
-  try {
-    await _saveToAndroidGalleryIfMedia(
-      filePath: file.path,
-      fileName: safeName,
-      mimeType: mimeType ?? lookupMimeType(safeName, headerBytes: bytes),
-    );
-  } catch (e) {
-    debugPrint('[Download] Saved to app folder, but gallery copy failed: $e');
-  }
   return file.path;
 }
 
 /// Kept for API parity with the web helper. Native video playback is handled by
 /// the Flutter fullscreen video player.
 Future<void> playVideo(Uint8List bytes, String mimeType) async {}
-
-Future<void> _saveToAndroidGalleryIfMedia({
-  required String filePath,
-  required String fileName,
-  required String? mimeType,
-}) async {
-  if (!Platform.isAndroid || mimeType == null) return;
-  if (!mimeType.startsWith('image/') && !mimeType.startsWith('video/')) return;
-
-  const channel = MethodChannel('com.xmo.xmo/media_store');
-  await channel.invokeMethod<void>('saveMediaToGallery', {
-    'filePath': filePath,
-    'fileName': fileName,
-    'mimeType': mimeType,
-  });
-}
 
 String _safeFileName(String value) {
   final trimmed = value.trim().isEmpty ? 'xmo_file' : value.trim();

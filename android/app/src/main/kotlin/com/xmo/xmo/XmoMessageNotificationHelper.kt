@@ -30,11 +30,12 @@ object XmoMessageNotificationHelper {
     ) {
         createMessageChannel(context)
 
-        val displayTitle = title?.takeIf { it.isNotBlank() }
+        val rawTitle = title?.takeIf { it.isNotBlank() }
             ?: data["room_name"]?.takeIf { it.isNotBlank() }
             ?: data["sender_display_name"]?.takeIf { it.isNotBlank() }
             ?: data["sender"]?.takeIf { it.isNotBlank() }
             ?: "New message"
+        val displayTitle = friendlyTitle(rawTitle)
         val displayBody = bodyFromPayload(data, body)
         val largeIcon = avatarBitmap(data) ?: fallbackAvatarBitmap(displayTitle)
 
@@ -230,6 +231,13 @@ object XmoMessageNotificationHelper {
         val y = size / 2f - (textPaint.descent() + textPaint.ascent()) / 2f
         canvas.drawText(letter, size / 2f, y, textPaint)
         return bitmap
+    }
+
+    private fun friendlyTitle(value: String): String {
+        val trimmed = value.trim()
+        if (!Regex("^@[^:\\s]+:[^\\s]+$").matches(trimmed)) return trimmed
+        val localpart = trimmed.removePrefix("@").substringBefore(':')
+        return localpart.replaceFirstChar { character -> character.uppercase() }
     }
 
     private fun circularBitmap(source: Bitmap): Bitmap {

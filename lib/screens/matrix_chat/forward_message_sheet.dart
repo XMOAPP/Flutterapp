@@ -11,17 +11,20 @@ Future<List<Room>?> showForwardMessageSheet({
   required BuildContext context,
   required List<Room> rooms,
   required Room currentRoom,
+  String title = 'Forward to',
+  String actionLabel = 'Forward',
+  String emptyLabel = 'No chats available',
 }) {
   final matrixService = MatrixService();
-  final eligibleRooms = rooms.where((room) {
-    return room.membership == Membership.join &&
-        room.canSendEvent(EventTypes.Message);
-  }).toList()
-    ..sort((a, b) {
-      final aTime = a.lastEvent?.originServerTs.millisecondsSinceEpoch ?? 0;
-      final bTime = b.lastEvent?.originServerTs.millisecondsSinceEpoch ?? 0;
-      return bTime.compareTo(aTime);
-    });
+  final eligibleRooms =
+      rooms.where((room) {
+        return room.membership == Membership.join &&
+            room.canSendEvent(EventTypes.Message);
+      }).toList()..sort((a, b) {
+        final aTime = a.lastEvent?.originServerTs.millisecondsSinceEpoch ?? 0;
+        final bTime = b.lastEvent?.originServerTs.millisecondsSinceEpoch ?? 0;
+        return bTime.compareTo(aTime);
+      });
 
   return showModalBottomSheet<List<Room>>(
     context: context,
@@ -34,6 +37,9 @@ Future<List<Room>?> showForwardMessageSheet({
       rooms: eligibleRooms,
       currentRoom: currentRoom,
       matrixService: matrixService,
+      title: title,
+      actionLabel: actionLabel,
+      emptyLabel: emptyLabel,
     ),
   );
 }
@@ -42,11 +48,17 @@ class _ForwardMessageSheet extends StatefulWidget {
   final List<Room> rooms;
   final Room currentRoom;
   final MatrixService matrixService;
+  final String title;
+  final String actionLabel;
+  final String emptyLabel;
 
   const _ForwardMessageSheet({
     required this.rooms,
     required this.currentRoom,
     required this.matrixService,
+    required this.title,
+    required this.actionLabel,
+    required this.emptyLabel,
   });
 
   @override
@@ -66,7 +78,7 @@ class _ForwardMessageSheetState extends State<_ForwardMessageSheet> {
 
     return SafeArea(
       child: SizedBox(
-        height: MediaQuery.of(context).size.height * 0.78,
+        height: MediaQuery.sizeOf(context).height * 0.78,
         child: Column(
           children: [
             const SizedBox(height: 10),
@@ -84,7 +96,7 @@ class _ForwardMessageSheetState extends State<_ForwardMessageSheet> {
                 children: [
                   Expanded(
                     child: Text(
-                      'Forward to',
+                      widget.title,
                       style: GoogleFonts.inter(
                         color: kWhite,
                         fontSize: 20,
@@ -108,8 +120,11 @@ class _ForwardMessageSheetState extends State<_ForwardMessageSheet> {
                 decoration: InputDecoration(
                   hintText: 'Search chats',
                   hintStyle: GoogleFonts.inter(color: kLightGrey),
-                  prefixIcon:
-                      const Icon(Icons.search, color: kLightGrey, size: 21),
+                  prefixIcon: const Icon(
+                    Icons.search,
+                    color: kLightGrey,
+                    size: 21,
+                  ),
                   filled: true,
                   fillColor: kDarkerGrey,
                   border: OutlineInputBorder(
@@ -125,7 +140,7 @@ class _ForwardMessageSheetState extends State<_ForwardMessageSheet> {
               child: filteredRooms.isEmpty
                   ? Center(
                       child: Text(
-                        'No chats available',
+                        widget.emptyLabel,
                         style: GoogleFonts.inter(
                           color: kLightGrey,
                           fontSize: 14,
@@ -175,7 +190,8 @@ class _ForwardMessageSheetState extends State<_ForwardMessageSheet> {
                       : () {
                           final selectedRooms = widget.rooms
                               .where(
-                                  (room) => _selectedRoomIds.contains(room.id))
+                                (room) => _selectedRoomIds.contains(room.id),
+                              )
                               .toList();
                           Navigator.pop(context, selectedRooms);
                         },
@@ -186,7 +202,7 @@ class _ForwardMessageSheetState extends State<_ForwardMessageSheet> {
                   label: Text(
                     _selectedRoomIds.isEmpty
                         ? 'Select chat'
-                        : 'Forward (${_selectedRoomIds.length})',
+                        : '${widget.actionLabel} (${_selectedRoomIds.length})',
                     style: GoogleFonts.inter(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
@@ -226,10 +242,10 @@ class _ForwardRoomTile extends StatelessWidget {
     final subtitle = isCurrentRoom
         ? 'Current chat'
         : isDirect
-            ? 'Direct chat'
-            : room.isChannel
-                ? 'Channel'
-                : 'Group';
+        ? 'Direct chat'
+        : room.isChannel
+        ? 'Channel'
+        : 'Group';
 
     return ListTile(
       onTap: onTap,
@@ -240,8 +256,8 @@ class _ForwardRoomTile extends StatelessWidget {
         fallbackIcon: !isDirect && room.isChannel
             ? Icons.campaign
             : !isDirect && room.isGroup
-                ? Icons.group
-                : null,
+            ? Icons.group
+            : null,
       ),
       title: Text(
         name,

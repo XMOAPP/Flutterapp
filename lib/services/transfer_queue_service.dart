@@ -13,6 +13,15 @@ enum TransferKind { photo, video, audio, voice, file }
 
 enum TransferStatus { queued, running, paused, completed, failed, cancelled }
 
+enum TransferStage {
+  preparing,
+  compressing,
+  encrypting,
+  connecting,
+  uploading,
+  finalizing,
+}
+
 class TransferJob {
   final String id;
   final TransferDirection direction;
@@ -28,11 +37,13 @@ class TransferJob {
   final int attempts;
   final int maxAttempts;
   final TransferStatus status;
+  final TransferStage stage;
   final DateTime createdAt;
   final DateTime updatedAt;
   final String? error;
   final DateTime? nextRetryAt;
   final MessageReplyReference? replyReference;
+  final String? batchId;
 
   const TransferJob({
     required this.id,
@@ -45,6 +56,7 @@ class TransferJob {
     required this.localPath,
     required this.totalBytes,
     required this.status,
+    this.stage = TransferStage.preparing,
     required this.createdAt,
     required this.updatedAt,
     this.thumbnailPath,
@@ -54,6 +66,7 @@ class TransferJob {
     this.error,
     this.nextRetryAt,
     this.replyReference,
+    this.batchId,
   });
 
   double? get progress {
@@ -88,6 +101,7 @@ class TransferJob {
     int? attempts,
     int? maxAttempts,
     TransferStatus? status,
+    TransferStage? stage,
     DateTime? createdAt,
     DateTime? updatedAt,
     String? error,
@@ -95,6 +109,7 @@ class TransferJob {
     bool clearError = false,
     bool clearNextRetryAt = false,
     MessageReplyReference? replyReference,
+    String? batchId,
   }) {
     return TransferJob(
       id: id,
@@ -111,11 +126,13 @@ class TransferJob {
       attempts: attempts ?? this.attempts,
       maxAttempts: maxAttempts ?? this.maxAttempts,
       status: status ?? this.status,
+      stage: stage ?? this.stage,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
       error: clearError ? null : error ?? this.error,
       nextRetryAt: clearNextRetryAt ? null : nextRetryAt ?? this.nextRetryAt,
       replyReference: replyReference ?? this.replyReference,
+      batchId: batchId ?? this.batchId,
     );
   }
 
@@ -135,19 +152,23 @@ class TransferJob {
       'attempts': attempts,
       'maxAttempts': maxAttempts,
       'status': status.name,
+      'stage': stage.name,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
       'error': error,
       'nextRetryAt': nextRetryAt?.toIso8601String(),
       'replyReference': replyReference?.toJson(),
+      'batchId': batchId,
     };
   }
 
   factory TransferJob.fromJson(Map<dynamic, dynamic> json) {
     T enumByName<T extends Enum>(List<T> values, Object? name, T fallback) {
       if (name is! String) return fallback;
-      return values.firstWhere((value) => value.name == name,
-          orElse: () => fallback);
+      return values.firstWhere(
+        (value) => value.name == name,
+        orElse: () => fallback,
+      );
     }
 
     return TransferJob(
@@ -173,9 +194,16 @@ class TransferJob {
         json['status'],
         TransferStatus.queued,
       ),
-      createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ??
+      stage: enumByName(
+        TransferStage.values,
+        json['stage'],
+        TransferStage.preparing,
+      ),
+      createdAt:
+          DateTime.tryParse(json['createdAt'] as String? ?? '') ??
           DateTime.now(),
-      updatedAt: DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
+      updatedAt:
+          DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
           DateTime.now(),
       error: json['error'] as String?,
       nextRetryAt: DateTime.tryParse(json['nextRetryAt'] as String? ?? ''),
@@ -184,6 +212,7 @@ class TransferJob {
               json['replyReference'] as Map<dynamic, dynamic>,
             )
           : null,
+      batchId: json['batchId'] as String?,
     );
   }
 }
@@ -227,8 +256,10 @@ class TransferQueueService {
 
   List<TransferJob> jobsForRoom(String roomId) {
     return _jobs.values
-        .where((job) =>
-            job.roomId == roomId && job.ownerUserId == _activeOwnerUserId)
+        .where(
+          (job) =>
+              job.roomId == roomId && job.ownerUserId == _activeOwnerUserId,
+        )
         .toList(growable: false);
   }
 
@@ -237,19 +268,32 @@ class TransferQueueService {
   Future<TransferJob> createUploadJob({
     required String roomId,
     required Uint8List bytes,
+    String? sourcePath,
     Uint8List? thumbnailBytes,
     required String fileName,
     required String mimeType,
     required TransferKind kind,
     String? id,
     MessageReplyReference? replyReference,
+    String? batchId,
   }) async {
     await init();
     final now = DateTime.now();
     final jobId = id ?? '${kind.name}_${now.microsecondsSinceEpoch}';
     final baseDir = await _queueDir();
-    final payloadPath = '${baseDir.path}${io.Platform.pathSeparator}$jobId.bin';
-    await io.File(payloadPath).writeAsBytes(bytes, flush: true);
+    final payloadPath =
+        '${baseDir.path}${io.Platform.pathSeparator}$jobId${_safeExtension(fileName)}';
+    final sourceFile = sourcePath == null ? null : io.File(sourcePath);
+    var copiedSource = false;
+    if (sourceFile != null && await sourceFile.exists()) {
+      await sourceFile.copy(payloadPath);
+      copiedSource = true;
+    } else {
+      await io.File(payloadPath).writeAsBytes(bytes, flush: true);
+    }
+    final totalBytes = copiedSource
+        ? await io.File(payloadPath).length()
+        : bytes.length;
 
     String? thumbPath;
     if (thumbnailBytes != null && thumbnailBytes.isNotEmpty) {
@@ -267,11 +311,12 @@ class TransferQueueService {
       mimeType: mimeType,
       localPath: payloadPath,
       thumbnailPath: thumbPath,
-      totalBytes: bytes.length,
+      totalBytes: totalBytes,
       status: TransferStatus.queued,
       createdAt: now,
       updatedAt: now,
       replyReference: replyReference,
+      batchId: batchId,
     );
     await _save(job);
     return job;
@@ -327,6 +372,7 @@ class TransferQueueService {
     await _save(
       job.copyWith(
         status: TransferStatus.running,
+        stage: TransferStage.preparing,
         attempts: job.attempts + 1,
         uploadedBytes: job.uploadedBytes,
         clearError: true,
@@ -351,9 +397,11 @@ class TransferQueueService {
         effectiveTotalBytes > 0 && uploadedBytes >= effectiveTotalBytes;
     final progressedEnough =
         (uploadedBytes - previousPersistedBytes).abs() >= 256 * 1024;
-    final waitedLongEnough = lastPersistedAt == null ||
+    final waitedLongEnough =
+        lastPersistedAt == null ||
         now.difference(lastPersistedAt) >= const Duration(seconds: 1);
-    final shouldPersist = job.status != TransferStatus.running ||
+    final shouldPersist =
+        job.status != TransferStatus.running ||
         isComplete ||
         progressedEnough ||
         waitedLongEnough;
@@ -366,9 +414,16 @@ class TransferQueueService {
         uploadedBytes: uploadedBytes,
         totalBytes: effectiveTotalBytes,
         status: TransferStatus.running,
+        stage: TransferStage.uploading,
       ),
       persistImmediately: shouldPersist,
     );
+  }
+
+  Future<void> updateStage(String id, TransferStage stage) async {
+    final job = _jobs[id];
+    if (job == null || job.stage == stage) return;
+    await _save(job.copyWith(stage: stage));
   }
 
   Future<void> markCompleted(String id) async {
@@ -377,11 +432,13 @@ class TransferQueueService {
     _runningIds.remove(id);
     _lastPersistedProgressBytes.remove(id);
     _lastPersistedProgressAt.remove(id);
-    await _save(job.copyWith(
-      status: TransferStatus.completed,
-      uploadedBytes: job.totalBytes,
-      clearError: true,
-    ));
+    await _save(
+      job.copyWith(
+        status: TransferStatus.completed,
+        uploadedBytes: job.totalBytes,
+        clearError: true,
+      ),
+    );
     await _deletePayloadFiles(job);
   }
 
@@ -395,11 +452,13 @@ class TransferQueueService {
     final retryAt = nextAttempt < job.maxAttempts
         ? DateTime.now().add(_retryDelay(nextAttempt - 1))
         : null;
-    await _save(job.copyWith(
-      status: TransferStatus.failed,
-      error: _shortError(error),
-      nextRetryAt: retryAt,
-    ));
+    await _save(
+      job.copyWith(
+        status: TransferStatus.failed,
+        error: _shortError(error),
+        nextRetryAt: retryAt,
+      ),
+    );
   }
 
   Future<void> cancel(String id) async {
@@ -409,10 +468,9 @@ class TransferQueueService {
     _lastPersistedProgressAt.remove(id);
     final job = _jobs[id];
     if (job == null) return;
-    await _save(job.copyWith(
-      status: TransferStatus.cancelled,
-      clearNextRetryAt: true,
-    ));
+    await _save(
+      job.copyWith(status: TransferStatus.cancelled, clearNextRetryAt: true),
+    );
   }
 
   bool isCancelled(String id) => _cancelledIds.contains(id);
@@ -422,12 +480,15 @@ class TransferQueueService {
     if (job == null || !job.canRetry) return;
     _cancelledIds.remove(id);
     _runningIds.remove(id);
-    await _save(job.copyWith(
-      status: TransferStatus.queued,
-      uploadedBytes: 0,
-      clearError: true,
-      clearNextRetryAt: true,
-    ));
+    await _save(
+      job.copyWith(
+        status: TransferStatus.queued,
+        stage: TransferStage.preparing,
+        uploadedBytes: 0,
+        clearError: true,
+        clearNextRetryAt: true,
+      ),
+    );
   }
 
   Future<void> remove(String id) async {
@@ -440,10 +501,25 @@ class TransferQueueService {
     _emit();
   }
 
-  Future<void> _save(
-    TransferJob job, {
-    bool persistImmediately = true,
-  }) async {
+  Future<bool> removeFinishedBatch(String? batchId) async {
+    if (batchId == null || batchId.isEmpty) return false;
+    final batchJobs = _jobs.values
+        .where((job) => job.batchId == batchId)
+        .toList(growable: false);
+    if (batchJobs.isEmpty) return false;
+    final isFinished = batchJobs.every(
+      (job) =>
+          job.status == TransferStatus.completed ||
+          job.status == TransferStatus.cancelled,
+    );
+    if (!isFinished) return false;
+    for (final job in batchJobs) {
+      await remove(job.id);
+    }
+    return true;
+  }
+
+  Future<void> _save(TransferJob job, {bool persistImmediately = true}) async {
     _jobs[job.id] = job;
     if (persistImmediately) {
       await _box?.put(_storageKey(job.id, job.ownerUserId), job.toJson());
@@ -464,7 +540,10 @@ class TransferQueueService {
           if (job.ownerUserId != _activeOwnerUserId) continue;
           if (job.status == TransferStatus.running ||
               job.status == TransferStatus.paused) {
-            _jobs[job.id] = job.copyWith(status: TransferStatus.queued);
+            _jobs[job.id] = job.copyWith(
+              status: TransferStatus.queued,
+              stage: TransferStage.preparing,
+            );
           } else {
             _jobs[job.id] = job;
           }
@@ -491,6 +570,15 @@ class TransferQueueService {
 
   String _storageKey(String id, String? ownerUserId) =>
       '${ownerUserId ?? 'legacy'}::$id';
+
+  String _safeExtension(String fileName) {
+    final dotIndex = fileName.lastIndexOf('.');
+    if (dotIndex <= 0 || dotIndex == fileName.length - 1) return '.bin';
+    final extension = fileName.substring(dotIndex).toLowerCase();
+    return RegExp(r'^\.[a-z0-9]{1,10}$').hasMatch(extension)
+        ? extension
+        : '.bin';
+  }
 
   Future<io.Directory> _queueDir() async {
     final root = await getTemporaryDirectory();

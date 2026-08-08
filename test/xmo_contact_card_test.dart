@@ -35,6 +35,35 @@ void main() {
     expect(utf8.decode(contact.toVCardBytes()), isNot(contains('Injected\n')));
   });
 
+  test('round trips XMO username, user ID, and avatar metadata', () {
+    final contact = XmoContactCard.createXmoUser(
+      displayName: 'Ada Lovelace',
+      userId: '@ada:example.org',
+      avatarUrl: 'mxc://example.org/avatar',
+    );
+
+    expect(contact.subtitle, '@ada');
+    expect(contact.isXmoUser, isTrue);
+    expect(contact.toJson()['avatar_url'], 'mxc://example.org/avatar');
+
+    final restored = XmoContactCard.fromEventContent({
+      xmoContactContentKey: contact.toJson(),
+    });
+    expect(restored?.userId, '@ada:example.org');
+    expect(restored?.username, '@ada');
+    expect(restored?.avatarUrl, 'mxc://example.org/avatar');
+  });
+
+  test('renders legacy Matrix ID display names as a friendly label', () {
+    final contact = XmoContactCard.createXmoUser(
+      displayName: '@hunter:example.org',
+      userId: '@hunter:example.org',
+    );
+
+    expect(contact.displayLabel, 'Hunter');
+    expect(contact.subtitle, '@hunter');
+  });
+
   test('rejects malformed or unsupported event metadata', () {
     expect(
       XmoContactCard.fromEventContent({

@@ -26,6 +26,7 @@ import '../services/privacy_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/story_service.dart';
 import '../theme.dart';
+import '../utils/matrix_identity.dart';
 import '../widgets/matrix_chat/fullscreen_video_player.dart';
 import '../widgets/story/story_avatar.dart';
 import 'app_lock_settings_screen.dart';
@@ -33,7 +34,8 @@ import 'auth_choice_screen.dart';
 import 'device_sessions_screen.dart';
 import 'matrix_chat/media_handler.dart';
 import 'matrix_chat/widgets/tappable_file_chip.dart';
-import 'native_share_stub.dart' if (dart.library.io) 'native_share.dart'
+import 'native_share_stub.dart'
+    if (dart.library.io) 'native_share.dart'
     as native_share;
 import 'profile_settings_screen.dart';
 
@@ -98,8 +100,8 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       ),
     );
     if (shouldOpen != true) return;
-    final opened =
-        await PushNotificationService().openFullScreenCallAlertSettings();
+    final opened = await PushNotificationService()
+        .openFullScreenCallAlertSettings();
     if (!opened && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Could not open call alert settings')),
@@ -148,7 +150,8 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
 
   Future<void> _openLegalUrl(String url) async {
     final uri = Uri.parse(url);
-    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication) ||
+    final opened =
+        await launchUrl(uri, mode: LaunchMode.externalApplication) ||
         await launchUrl(uri, mode: LaunchMode.platformDefault);
     if (!opened && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -283,23 +286,17 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                   icon: Icons.description,
                   title: 'Terms of Service',
                   subtitle: 'Read the XMO terms and conditions',
-                  onTap: () => _openLegalUrl(
-                    'https://xmo.dpdns.org/terms-of-service',
-                  ),
+                  onTap: () =>
+                      _openLegalUrl('https://xmo.dpdns.org/terms-of-service'),
                 ),
                 _navTile(
                   icon: Icons.privacy_tip,
                   title: 'Privacy Policy',
                   subtitle: 'Read how XMO handles privacy and data',
-                  onTap: () => _openLegalUrl(
-                    'https://xmo.dpdns.org/privacy-policy',
-                  ),
+                  onTap: () =>
+                      _openLegalUrl('https://xmo.dpdns.org/privacy-policy'),
                 ),
-                _infoTile(
-                  icon: Icons.info,
-                  title: 'Version',
-                  value: '1.0.0',
-                ),
+                _infoTile(icon: Icons.info, title: 'Version', value: '1.0.0'),
               ],
             ),
     );
@@ -347,11 +344,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     required String title,
     required String value,
   }) {
-    return _settingsTile(
-      icon: icon,
-      title: title,
-      subtitle: value,
-    );
+    return _settingsTile(icon: icon, title: title, subtitle: value);
   }
 
   // ignore: unused_element
@@ -492,7 +485,8 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
 
   Future<void> _openExternalDeletionPage() async {
     final uri = Uri.parse(AppConfig.accountDeletionWebUrl);
-    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication) ||
+    final opened =
+        await launchUrl(uri, mode: LaunchMode.externalApplication) ||
         await launchUrl(uri, mode: LaunchMode.platformDefault);
     if (!opened && mounted) {
       _showError('Could not open the account deletion page.');
@@ -753,8 +747,10 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(24),
-          borderSide:
-              BorderSide(color: kWhite.withValues(alpha: 0.45), width: 1),
+          borderSide: BorderSide(
+            color: kWhite.withValues(alpha: 0.45),
+            width: 1,
+          ),
         ),
       ),
     );
@@ -839,9 +835,11 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     if (!mounted) return;
     setState(() => _working = false);
     await _loadStatus();
-    _showSnack(result.success
-        ? 'Recovery unlocked and keys loaded'
-        : result.error ?? 'Recovery unlock failed');
+    _showSnack(
+      result.success
+          ? 'Recovery unlocked and keys loaded'
+          : result.error ?? 'Recovery unlock failed',
+    );
   }
 
   Future<String?> _promptInput({
@@ -895,10 +893,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                 ),
                 child: SelectableText(
                   recoveryKey,
-                  style: GoogleFonts.robotoMono(
-                    color: kWhite,
-                    fontSize: 13,
-                  ),
+                  style: GoogleFonts.robotoMono(color: kWhite, fontSize: 13),
                 ),
               ),
             ],
@@ -909,17 +904,11 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                 Clipboard.setData(ClipboardData(text: recoveryKey));
                 _showSnack('Recovery key copied');
               },
-              child: Text(
-                'Copy',
-                style: GoogleFonts.inter(color: kWhite),
-              ),
+              child: Text('Copy', style: GoogleFonts.inter(color: kWhite)),
             ),
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text(
-                'Done',
-                style: GoogleFonts.inter(color: kWhite),
-              ),
+              child: Text('Done', style: GoogleFonts.inter(color: kWhite)),
             ),
           ],
         );
@@ -929,27 +918,25 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
 
   void _showSnack(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   Widget build(BuildContext context) {
     final status = _status;
-    final mediaQuery = MediaQuery.of(context);
+    final mediaQuery = MediaQuery.paddingOf(context);
     return Scaffold(
       backgroundColor: kBlack,
       body: _loading
-          ? const Center(
-              child: CircularProgressIndicator(color: kLimeGreen),
-            )
+          ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
           : ListView(
               padding: EdgeInsets.fromLTRB(
                 22,
-                mediaQuery.padding.top + 18,
+                mediaQuery.top + 18,
                 22,
-                22 + mediaQuery.padding.bottom,
+                22 + mediaQuery.bottom,
               ),
               children: _securityContent(status),
             ),
@@ -962,10 +949,12 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     final crossSigningCached = status?.crossSigningCached == true;
     final keyBackupEnabled = status?.keyBackupEnabled == true;
     final keyBackupCached = status?.keyBackupCached == true;
-    final needsRecoveryUnlock = encryptionAvailable &&
+    final needsRecoveryUnlock =
+        encryptionAvailable &&
         ((crossSigningEnabled && !crossSigningCached) ||
             (keyBackupEnabled && !keyBackupCached));
-    final needsRecoverySetup = encryptionAvailable &&
+    final needsRecoverySetup =
+        encryptionAvailable &&
         !needsRecoveryUnlock &&
         (!crossSigningEnabled || !keyBackupEnabled);
 
@@ -1007,7 +996,8 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                    builder: (_) => const AppLockSettingsScreen()),
+                  builder: (_) => const AppLockSettingsScreen(),
+                ),
               );
             },
           ),
@@ -1027,12 +1017,15 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
           _securityNavTile(
             icon: Icons.verified_user,
             title: 'Two-step verification',
-            subtitle: 'Requires account-server login support',
+            subtitle: AppConfig.isSsoLoginConfigured
+                ? 'Managed by secure sign-in'
+                : 'Requires account-server login support',
             onTap: () {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                    builder: (_) => const TwoFactorStatusScreen()),
+                  builder: (_) => const TwoFactorStatusScreen(),
+                ),
               );
             },
           ),
@@ -1053,10 +1046,11 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
             label: 'Cross-signing',
             value: status?.crossSigningEnabled == true
                 ? status?.crossSigningCached == true
-                    ? 'Ready'
-                    : 'Needs recovery unlock'
+                      ? 'Ready'
+                      : 'Needs recovery unlock'
                 : 'Not set up',
-            ok: status?.crossSigningEnabled == true &&
+            ok:
+                status?.crossSigningEnabled == true &&
                 status?.crossSigningCached == true,
           ),
           _panelDivider(),
@@ -1065,10 +1059,11 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
             label: 'Key backup',
             value: status?.keyBackupEnabled == true
                 ? status?.keyBackupCached == true
-                    ? 'Ready'
-                    : 'Needs recovery unlock'
+                      ? 'Ready'
+                      : 'Needs recovery unlock'
                 : 'Not set up',
-            ok: status?.keyBackupEnabled == true &&
+            ok:
+                status?.keyBackupEnabled == true &&
                 status?.keyBackupCached == true,
           ),
         ],
@@ -1100,11 +1095,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   Widget _roundBackButton() {
     return IconButton(
       onPressed: () => Navigator.pop(context),
-      icon: const Icon(
-        Icons.arrow_back,
-        color: kWhite,
-        size: 24,
-      ),
+      icon: const Icon(Icons.arrow_back, color: kWhite, size: 24),
     );
   }
 
@@ -1119,11 +1110,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   }
 
   Widget _panelDivider() {
-    return const Divider(
-      color: Color(0xFF242B33),
-      height: 1,
-      indent: 72,
-    );
+    return const Divider(color: Color(0xFF242B33), height: 1, indent: 72);
   }
 
   Widget _statusRow({
@@ -1138,10 +1125,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
       child: Row(
         children: [
-          _securityIcon(
-            icon: icon,
-            limeIcon: ok,
-          ),
+          _securityIcon(icon: icon, limeIcon: ok),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
@@ -1247,9 +1231,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
         style: OutlinedButton.styleFrom(
           foregroundColor: kLimeGreen,
           disabledForegroundColor: kLightGrey,
-          side: BorderSide(
-            color: onPressed == null ? kLightGrey : kLimeGreen,
-          ),
+          side: BorderSide(color: onPressed == null ? kLightGrey : kLimeGreen),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
@@ -1309,19 +1291,13 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   }) {
     return Row(
       children: [
-        if (icon != null) ...[
-          Icon(icon, size: 18),
-          const SizedBox(width: 10),
-        ],
+        if (icon != null) ...[Icon(icon, size: 18), const SizedBox(width: 10)],
         Expanded(
           child: Text(
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-            ),
+            style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700),
           ),
         ),
         if (trailing) const Icon(Icons.chevron_right, size: 20),
@@ -1402,17 +1378,11 @@ class _SecurityInputDialogState extends State<_SecurityInputDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: Text(
-            'Cancel',
-            style: GoogleFonts.inter(color: kLightGrey),
-          ),
+          child: Text('Cancel', style: GoogleFonts.inter(color: kLightGrey)),
         ),
         TextButton(
           onPressed: () => Navigator.pop(context, _controller.text),
-          child: Text(
-            'Continue',
-            style: GoogleFonts.inter(color: kWhite),
-          ),
+          child: Text('Continue', style: GoogleFonts.inter(color: kWhite)),
         ),
       ],
     );
@@ -1422,8 +1392,19 @@ class _SecurityInputDialogState extends State<_SecurityInputDialog> {
 class TwoFactorStatusScreen extends StatelessWidget {
   const TwoFactorStatusScreen({super.key});
 
+  Future<void> _openMfaSetup() async {
+    final uri = Uri.parse(AppConfig.mfaSetupUrl);
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<void> _openSecureAccount() async {
+    final uri = Uri.parse(AppConfig.secureAccountUrl);
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final secureSignInConfigured = AppConfig.isSsoLoginConfigured;
     return Scaffold(
       backgroundColor: kBlack,
       appBar: AppBar(
@@ -1436,42 +1417,320 @@ class TwoFactorStatusScreen extends StatelessWidget {
           ),
         ),
       ),
-      body: Padding(
+      body: ListView(
         padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Icon(Icons.shield_outlined, color: kWhite, size: 42),
+        children: [
+          Container(
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(
+              color: secureSignInConfigured
+                  ? kLimeGreen.withOpacity(0.16)
+                  : const Color(0xFF252B33),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Icon(
+              secureSignInConfigured
+                  ? Icons.verified_user
+                  : Icons.shield_outlined,
+              color: secureSignInConfigured ? kLimeGreen : kWhite,
+              size: 34,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            secureSignInConfigured
+                ? 'Set up two-step verification'
+                : 'Two-step verification is coming soon',
+            style: GoogleFonts.inter(
+              color: kWhite,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            secureSignInConfigured
+                ? 'Add an authenticator app to protect secure sign-in. '
+                      'XMO opens the setup page directly, then you scan the QR '
+                      'code and enter the 6-digit code there.'
+                : 'XMO needs server-side secure sign-in before account 2FA can '
+                      'protect every login. App Lock can still protect this '
+                      'phone.',
+            style: GoogleFonts.inter(
+              color: kLightGrey,
+              fontSize: 13,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 22),
+          if (secureSignInConfigured) ...[
+            _twoFactorStateCard(),
             const SizedBox(height: 18),
-            Text(
-              'Account 2FA is not enabled',
-              style: GoogleFonts.inter(
-                color: kWhite,
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-              ),
+            _setupInstructionCard(),
+            const SizedBox(height: 18),
+            _securityStep(
+              icon: Icons.check_circle,
+              title: 'Secure sign-in',
+              subtitle: 'Available through XMO secure account',
+              complete: true,
+            ),
+            _securityStep(
+              icon: Icons.phonelink_lock,
+              title: 'Authenticator app',
+              subtitle: 'Scan a QR code once to generate 6-digit login codes',
+              complete: false,
+            ),
+            _securityStep(
+              icon: Icons.password,
+              title: 'Password migration',
+              subtitle:
+                  'Normal password login remains available until every user is migrated',
+              complete: false,
+            ),
+            const SizedBox(height: 22),
+            _primarySecurityButton(
+              label: 'Set up authenticator',
+              icon: Icons.qr_code_2,
+              onPressed: _openMfaSetup,
             ),
             const SizedBox(height: 10),
-            Text(
-              'XMO currently relies on its account server for sign-in. '
-              'Secure two-factor authentication must be enforced by that '
-              'server so it applies to every compatible client.',
+            _secondarySecurityButton(
+              label: 'Manage secure account',
+              icon: Icons.open_in_new,
+              onPressed: _openSecureAccount,
+            ),
+          ] else ...[
+            _securityStep(
+              icon: Icons.mail_outline,
+              title: 'Email code',
+              subtitle:
+                  'Verifies your email address during registration and recovery',
+              complete: true,
+            ),
+            _securityStep(
+              icon: Icons.lock_outline,
+              title: 'Account 2FA',
+              subtitle: 'Requires secure sign-in support on the account server',
+              complete: false,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _twoFactorStateCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF11171D),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline, color: kLimeGreen, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Authenticator codes protect secure sign-in. Full account enforcement starts after normal password login is disabled on the server.',
               style: GoogleFonts.inter(
-                color: kLightGrey,
-                fontSize: 13,
-                height: 1.45,
+                color: kWhite,
+                fontSize: 12,
+                height: 1.35,
               ),
             ),
-            const SizedBox(height: 16),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _setupInstructionCard() {
+    const steps = [
+      'Log in to your XMO secure account.',
+      'XMO opens the authenticator setup page.',
+      'Scan the QR code with an authenticator app.',
+      'Enter the 6-digit code to finish setup.',
+    ];
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF11171D),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF202933)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'What happens next',
+            style: GoogleFonts.inter(
+              color: kWhite,
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 12),
+          for (var i = 0; i < steps.length; i++) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 22,
+                  height: 22,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: kLimeGreen.withOpacity(0.16),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Text(
+                    '${i + 1}',
+                    style: GoogleFonts.inter(
+                      color: kLimeGreen,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    steps[i],
+                    style: GoogleFonts.inter(
+                      color: kLightGrey,
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (i != steps.length - 1) const SizedBox(height: 10),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _securityStep({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required bool complete,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: complete
+                  ? kLimeGreen.withOpacity(0.16)
+                  : const Color(0xFF252B33),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              complete ? Icons.check : icon,
+              color: complete ? kLimeGreen : kLightGrey,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.inter(
+                    color: kWhite,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  style: GoogleFonts.inter(
+                    color: kLightGrey,
+                    fontSize: 12,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _primarySecurityButton({
+    required String label,
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      height: 46,
+      child: ElevatedButton(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: kWhite,
+          foregroundColor: kBlack,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 18),
+            const SizedBox(width: 10),
             Text(
-              'The email code used during registration verifies the email '
-              'address; it is not a second factor for every login. App Lock '
-              'can protect XMO on this phone while account 2FA is being '
-              'deployed.',
+              label,
               style: GoogleFonts.inter(
-                color: kLightGrey,
                 fontSize: 13,
-                height: 1.45,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _secondarySecurityButton({
+    required String label,
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      height: 46,
+      child: OutlinedButton(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: kWhite,
+          side: const BorderSide(color: Color(0xFF58606B)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 18),
+            const SizedBox(width: 10),
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],
@@ -1504,11 +1763,14 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
     final users = <PrivacyContact>[];
 
     for (final userId in client.ignoredUsers) {
-      String displayName = userId;
+      String displayName = MatrixIdentity.displayName(userId: userId);
       String? avatarUrl;
       try {
         final profile = await client.getProfileFromUserId(userId);
-        displayName = profile.displayName ?? userId;
+        displayName = MatrixIdentity.displayName(
+          userId: userId,
+          candidate: profile.displayName,
+        );
         avatarUrl = profile.avatarUrl?.toString();
       } catch (_) {}
 
@@ -1522,9 +1784,8 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
     }
 
     users.sort(
-      (a, b) => a.displayName.toLowerCase().compareTo(
-            b.displayName.toLowerCase(),
-          ),
+      (a, b) =>
+          a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
     );
 
     if (!mounted) return;
@@ -1564,28 +1825,28 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
           : _blockedUsers.isEmpty
-              ? _emptyState(Icons.block, 'No blocked users')
-              : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 18),
-                  itemCount: _blockedUsers.length,
-                  itemBuilder: (context, index) {
-                    final user = _blockedUsers[index];
-                    return _contactTile(
-                      user: user,
-                      showUserId: false,
-                      trailing: TextButton(
-                        onPressed: () => _unblock(user.userId),
-                        child: Text(
-                          'Unblock',
-                          style: GoogleFonts.inter(
-                            color: kLimeGreen,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+          ? _emptyState(Icons.block, 'No blocked users')
+          : ListView.builder(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 18),
+              itemCount: _blockedUsers.length,
+              itemBuilder: (context, index) {
+                final user = _blockedUsers[index];
+                return _contactTile(
+                  user: user,
+                  showUserId: false,
+                  trailing: TextButton(
+                    onPressed: () => _unblock(user.userId),
+                    child: Text(
+                      'Unblock',
+                      style: GoogleFonts.inter(
+                        color: kLimeGreen,
+                        fontWeight: FontWeight.w600,
                       ),
-                    );
-                  },
-                ),
+                    ),
+                  ),
+                );
+              },
+            ),
     );
   }
 }
@@ -1635,9 +1896,9 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
     try {
       await _privacyService.saveSettings(settings);
       if (mounted) {
-        await StoryService(matrixService).applyPrivacySettingsToMyStories(
-          settings,
-        );
+        await StoryService(
+          matrixService,
+        ).applyPrivacySettingsToMyStories(settings);
         await storyProvider.refreshStories();
       }
     } finally {
@@ -1653,7 +1914,8 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
     required XmoPrivacySettings Function(
       XmoPrivacyAudience audience,
       List<String> selectedUserIds,
-    ) buildSettings,
+    )
+    buildSettings,
   }) async {
     var draftAudience = audience;
     final draftSelected = selectedUserIds.toSet();
@@ -1775,11 +2037,7 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
   }
 
   Widget _privacyDivider() {
-    return const Divider(
-      color: Color(0xFF242B33),
-      height: 1,
-      indent: 72,
-    );
+    return const Divider(color: Color(0xFF242B33), height: 1, indent: 72);
   }
 
   Widget _privacyIconBox(IconData icon) {
@@ -1882,7 +2140,8 @@ class _PrivacyAudiencePickerScreen extends StatefulWidget {
   final XmoPrivacySettings Function(
     XmoPrivacyAudience audience,
     List<String> selectedUserIds,
-  ) buildSettings;
+  )
+  buildSettings;
 
   const _PrivacyAudiencePickerScreen({
     required this.title,
@@ -2059,7 +2318,7 @@ Widget _contactTile({
       ),
       subtitle: showUserId
           ? Text(
-              user.userId,
+              MatrixIdentity.usernameLabel(user.userId),
               style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -2080,10 +2339,7 @@ Widget _emptyState(IconData icon, String text) {
         children: [
           Icon(icon, color: kLightGrey, size: 42),
           const SizedBox(height: 12),
-          Text(
-            text,
-            style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
-          ),
+          Text(text, style: GoogleFonts.inter(color: kLightGrey, fontSize: 13)),
         ],
       ),
     ),
@@ -2093,16 +2349,16 @@ Widget _emptyState(IconData icon, String text) {
 class DataStorageScreen extends StatefulWidget {
   final Future<void> Function() clearMediaCache;
 
-  const DataStorageScreen({
-    super.key,
-    required this.clearMediaCache,
-  });
+  const DataStorageScreen({super.key, required this.clearMediaCache});
 
   @override
   State<DataStorageScreen> createState() => _DataStorageScreenState();
 }
 
 class _DataStorageScreenState extends State<DataStorageScreen> {
+  static const MethodChannel _mediaStoreChannel = MethodChannel(
+    'com.xmo.xmo/media_store',
+  );
   bool _loading = true;
   bool _clearingCache = false;
   _StorageReport _report = _StorageReport.empty();
@@ -2114,8 +2370,9 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
   }
 
   Future<String> _downloadsPath() async {
-    final baseDir =
-        Platform.isAndroid ? await getExternalStorageDirectory() : null;
+    final baseDir = Platform.isAndroid
+        ? await getExternalStorageDirectory()
+        : null;
     final directory = Directory(
       '${(baseDir ?? await getApplicationDocumentsDirectory()).path}/XMO Downloads',
     );
@@ -2130,7 +2387,13 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
       _StorageCategoryType.photos: 0,
       _StorageCategoryType.files: 0,
     };
-    final downloadFiles = <_DownloadedStorageFile>[];
+    final downloadFiles = await _loadGalleryMedia();
+    for (final file in downloadFiles) {
+      categorySizes[file.type] = (categorySizes[file.type] ?? 0) + file.bytes;
+    }
+    final galleryKeys = downloadFiles
+        .map((file) => _downloadMatchKey(file.type, file.name, file.bytes))
+        .toSet();
 
     final downloadsDirectory = Directory(await _downloadsPath());
     if (await downloadsDirectory.exists()) {
@@ -2138,6 +2401,21 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
         if (entity is! File) continue;
         final size = await entity.length();
         final category = _categoryForFile(entity.path);
+        final key = _downloadMatchKey(
+          category,
+          _fileNameFromPath(entity.path),
+          size,
+        );
+        if ((category == _StorageCategoryType.photos ||
+                category == _StorageCategoryType.videos) &&
+            galleryKeys.contains(key)) {
+          try {
+            await entity.delete();
+            continue;
+          } catch (_) {
+            // Keep and report the app copy if legacy duplicate cleanup fails.
+          }
+        }
         categorySizes[category] = (categorySizes[category] ?? 0) + size;
         downloadFiles.add(
           _DownloadedStorageFile(
@@ -2214,11 +2492,7 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
     final stats = <_RoomStorageStat>[];
     final downloadedByKey = <String, List<_DownloadedStorageFile>>{};
     for (final file in downloadFiles) {
-      final key = _downloadMatchKey(
-        file.type,
-        file.name,
-        file.bytes,
-      );
+      final key = _downloadMatchKey(file.type, file.name, file.bytes);
       downloadedByKey.putIfAbsent(key, () => []).add(file);
     }
 
@@ -2257,17 +2531,19 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
         debugPrint('[Storage] Failed to read timeline for ${room.id}: $e');
       }
 
-      final bytes =
-          categoryBytes.values.fold<int>(0, (sum, size) => sum + size);
+      final bytes = categoryBytes.values.fold<int>(
+        0,
+        (sum, size) => sum + size,
+      );
       if (bytes <= 0) continue;
       final isSavedMessages = provider.service.isSavedMessagesRoom(room);
       final kind = isSavedMessages
           ? _RoomStorageKind.saved
           : room.isDirectChat
-              ? _RoomStorageKind.chats
-              : room.isChannel
-                  ? _RoomStorageKind.channels
-                  : _RoomStorageKind.groups;
+          ? _RoomStorageKind.chats
+          : room.isChannel
+          ? _RoomStorageKind.channels
+          : _RoomStorageKind.groups;
       stats.add(
         _RoomStorageStat(
           room: room,
@@ -2343,6 +2619,43 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
         return _StorageCategoryType.files;
       default:
         return null;
+    }
+  }
+
+  Future<List<_DownloadedStorageFile>> _loadGalleryMedia() async {
+    if (!Platform.isAndroid) return [];
+    try {
+      final rawItems = await _mediaStoreChannel.invokeMethod<List<dynamic>>(
+        'listXmoGalleryMedia',
+      );
+      return (rawItems ?? const <dynamic>[])
+          .whereType<Map>()
+          .map((raw) {
+            final item = raw.map(
+              (key, value) => MapEntry(key.toString(), value),
+            );
+            final uri = item['uri']?.toString() ?? '';
+            final name = item['name']?.toString() ?? '';
+            final mimeType = item['mimeType']?.toString() ?? '';
+            final bytes = (item['bytes'] as num?)?.toInt() ?? 0;
+            final isContentUri = item['contentUri'] == true;
+            if (uri.isEmpty || name.isEmpty || bytes <= 0) return null;
+            final type = mimeType.startsWith('video/')
+                ? _StorageCategoryType.videos
+                : _StorageCategoryType.photos;
+            return _DownloadedStorageFile(
+              name: name,
+              path: uri,
+              type: type,
+              bytes: bytes,
+              isContentUri: isContentUri,
+            );
+          })
+          .whereType<_DownloadedStorageFile>()
+          .toList();
+    } catch (error) {
+      debugPrint('[Storage] Could not read Gallery downloads: $error');
+      return [];
     }
   }
 
@@ -2430,6 +2743,9 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
     setState(() => _clearingCache = true);
     try {
       await Future<void>.delayed(const Duration(milliseconds: 120));
+      if (Platform.isAndroid) {
+        await _mediaStoreChannel.invokeMethod<int>('deleteXmoGalleryMedia');
+      }
       final directory = Directory(await _downloadsPath());
       if (await directory.exists()) {
         await for (final entity in directory.list(recursive: true)) {
@@ -2544,7 +2860,7 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
         Text(
           _report.cacheBytes > 0
               ? '${_formatBytes(_report.cacheBytes)} cached media previews'
-              : 'Downloaded media in XMO Downloads',
+              : 'Downloaded media and files',
           style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
         ),
       ],
@@ -2620,7 +2936,7 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
                 ],
               )
             : Text(
-                'Clear Cache  ${_formatBytes(_report.totalBytes)}',
+                'Clear Downloads & Cache  ${_formatBytes(_report.totalBytes)}',
                 style: GoogleFonts.inter(fontWeight: FontWeight.w700),
               ),
       ),
@@ -2735,10 +3051,8 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
         mainAxisSpacing: 4,
       ),
       itemCount: files.length,
-      itemBuilder: (_, index) => _buildDownloadedMediaTile(
-        files[index],
-        category,
-      ),
+      itemBuilder: (_, index) =>
+          _buildDownloadedMediaTile(files[index], category),
     );
   }
 
@@ -2756,7 +3070,12 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
           children: [
             DecoratedBox(
               decoration: const BoxDecoration(color: kDarkerGrey),
-              child: isVideo
+              child: file.isContentUri
+                  ? _DownloadedGalleryThumbnail(
+                      file: file,
+                      fallbackIcon: isVideo ? Icons.videocam : Icons.image,
+                    )
+                  : isVideo
                   ? _DownloadedVideoThumbnail(file: file)
                   : Image.file(
                       File(file.path),
@@ -2804,11 +3123,7 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
                     color: Colors.black54,
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: const Icon(
-                    Icons.play_arrow,
-                    color: kWhite,
-                    size: 16,
-                  ),
+                  child: const Icon(Icons.play_arrow, color: kWhite, size: 16),
                 ),
               ),
           ],
@@ -2825,10 +3140,7 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
       fileName: file.name,
     );
     if (file.type == _StorageCategoryType.audio) {
-      return _DownloadedAudioTile(
-        file: file,
-        formatBytes: _formatBytes,
-      );
+      return _DownloadedAudioTile(file: file, formatBytes: _formatBytes);
     }
 
     return ListTile(
@@ -2874,7 +3186,7 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
 
   Future<void> _openDownloadedMedia(_DownloadedStorageFile file) async {
     try {
-      final bytes = await File(file.path).readAsBytes();
+      final bytes = await _readDownloadedBytes(file);
       if (!mounted) return;
 
       if (file.type == _StorageCategoryType.photos) {
@@ -2884,7 +3196,7 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
             builder: (_) => _DownloadedImageViewer(
               imageBytes: bytes,
               title: file.name,
-              mimeType: lookupMimeType(file.path, headerBytes: bytes),
+              mimeType: lookupMimeType(file.name, headerBytes: bytes),
             ),
           ),
         );
@@ -2892,12 +3204,33 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
       }
 
       if (file.type == _StorageCategoryType.videos) {
+        if (file.isContentUri && Platform.isAndroid) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => FullscreenVideoPlayer.contentUri(
+                videoContentUri: Uri.parse(file.path),
+                mimeType: lookupMimeType(file.name),
+                title: file.name,
+                downloadFuture: () async {
+                  final bytes = await _readDownloadedBytes(file);
+                  return MatrixFile(
+                    bytes: bytes,
+                    name: file.name,
+                    mimeType: lookupMimeType(file.name, headerBytes: bytes),
+                  );
+                },
+              ),
+            ),
+          );
+          return;
+        }
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (_) => FullscreenVideoPlayer(
               videoBytes: bytes,
-              mimeType: lookupMimeType(file.path, headerBytes: bytes),
+              mimeType: lookupMimeType(file.name, headerBytes: bytes),
               title: file.name,
             ),
           ),
@@ -2916,8 +3249,8 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
 
   Future<void> _openDownloadedFile(_DownloadedStorageFile file) async {
     try {
-      final bytes = await File(file.path).readAsBytes();
-      final mimeType = lookupMimeType(file.path, headerBytes: bytes);
+      final bytes = await _readDownloadedBytes(file);
+      final mimeType = lookupMimeType(file.name, headerBytes: bytes);
 
       if (!mounted) return;
 
@@ -2949,11 +3282,7 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
         return;
       }
 
-      await native_share.openFile(
-        bytes,
-        file.name,
-        mimeType: mimeType,
-      );
+      await native_share.openFile(bytes, file.name, mimeType: mimeType);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2963,6 +3292,18 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
         ),
       );
     }
+  }
+
+  Future<Uint8List> _readDownloadedBytes(_DownloadedStorageFile file) async {
+    if (!file.isContentUri) return File(file.path).readAsBytes();
+    final bytes = await _mediaStoreChannel.invokeMethod<Uint8List>(
+      'readGalleryMedia',
+      {'uri': file.path},
+    );
+    if (bytes == null || bytes.isEmpty) {
+      throw Exception('Gallery media is unavailable');
+    }
+    return bytes;
   }
 
   _StorageCategory _categoryForType(_StorageCategoryType type) {
@@ -2976,10 +3317,7 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
       labelColor: kLimeGreen,
       unselectedLabelColor: kLightGrey,
       labelPadding: EdgeInsets.zero,
-      labelStyle: GoogleFonts.inter(
-        fontSize: 11,
-        fontWeight: FontWeight.w700,
-      ),
+      labelStyle: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700),
       unselectedLabelStyle: GoogleFonts.inter(
         fontSize: 11,
         fontWeight: FontWeight.w600,
@@ -3134,10 +3472,9 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
     _RoomStorageStat stat,
     _StorageCategoryType category,
   ) {
-    final files = stat.downloadedFiles
-        .where((file) => file.type == category)
-        .toList()
-      ..sort((a, b) => b.bytes.compareTo(a.bytes));
+    final files =
+        stat.downloadedFiles.where((file) => file.type == category).toList()
+          ..sort((a, b) => b.bytes.compareTo(a.bytes));
 
     if (files.isEmpty) {
       return Center(
@@ -3158,10 +3495,8 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
           mainAxisSpacing: 4,
         ),
         itemCount: files.length,
-        itemBuilder: (_, index) => _buildDownloadedMediaTile(
-          files[index],
-          category,
-        ),
+        itemBuilder: (_, index) =>
+            _buildDownloadedMediaTile(files[index], category),
       );
     }
 
@@ -3222,13 +3557,77 @@ class _DownloadedStorageFile {
   final String path;
   final _StorageCategoryType type;
   final int bytes;
+  final bool isContentUri;
 
   const _DownloadedStorageFile({
     required this.name,
     required this.path,
     required this.type,
     required this.bytes,
+    this.isContentUri = false,
   });
+}
+
+class _DownloadedGalleryThumbnail extends StatefulWidget {
+  final _DownloadedStorageFile file;
+  final IconData fallbackIcon;
+
+  const _DownloadedGalleryThumbnail({
+    required this.file,
+    required this.fallbackIcon,
+  });
+
+  @override
+  State<_DownloadedGalleryThumbnail> createState() =>
+      _DownloadedGalleryThumbnailState();
+}
+
+class _DownloadedGalleryThumbnailState
+    extends State<_DownloadedGalleryThumbnail> {
+  static const MethodChannel _channel = MethodChannel(
+    'com.xmo.xmo/media_store',
+  );
+  late Future<Uint8List?> _thumbnailFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _thumbnailFuture = _loadThumbnail();
+  }
+
+  @override
+  void didUpdateWidget(covariant _DownloadedGalleryThumbnail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.file.path != widget.file.path) {
+      _thumbnailFuture = _loadThumbnail();
+    }
+  }
+
+  Future<Uint8List?> _loadThumbnail() async {
+    try {
+      return await _channel.invokeMethod<Uint8List>('loadGalleryThumbnail', {
+        'uri': widget.file.path,
+      });
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Uint8List?>(
+      future: _thumbnailFuture,
+      builder: (context, snapshot) {
+        final bytes = snapshot.data;
+        if (bytes != null && bytes.isNotEmpty) {
+          return Image.memory(bytes, fit: BoxFit.cover);
+        }
+        return Center(
+          child: Icon(widget.fallbackIcon, color: kLimeGreen, size: 30),
+        );
+      },
+    );
+  }
 }
 
 class _DownloadedVideoThumbnail extends StatefulWidget {
@@ -3289,10 +3688,7 @@ class _DownloadedAudioTile extends StatefulWidget {
   final _DownloadedStorageFile file;
   final String Function(int bytes) formatBytes;
 
-  const _DownloadedAudioTile({
-    required this.file,
-    required this.formatBytes,
-  });
+  const _DownloadedAudioTile({required this.file, required this.formatBytes});
 
   @override
   State<_DownloadedAudioTile> createState() => _DownloadedAudioTileState();
@@ -3462,11 +3858,7 @@ class _DownloadedImageViewer extends StatelessWidget {
 
   Future<void> _share(BuildContext context) async {
     try {
-      await native_share.shareFile(
-        imageBytes,
-        title,
-        mimeType: mimeType,
-      );
+      await native_share.shareFile(imageBytes, title, mimeType: mimeType);
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

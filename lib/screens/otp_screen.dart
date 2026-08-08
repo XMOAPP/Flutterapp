@@ -40,8 +40,10 @@ class _OtpScreenState extends State<OtpScreen>
   static const int _otpLength = 6;
   static const int _countdownSecs = 60;
 
-  final List<TextEditingController> _ctrs =
-      List.generate(_otpLength, (_) => TextEditingController());
+  final List<TextEditingController> _ctrs = List.generate(
+    _otpLength,
+    (_) => TextEditingController(),
+  );
   final List<FocusNode> _foci = List.generate(_otpLength, (_) => FocusNode());
 
   int _remaining = _countdownSecs;
@@ -56,7 +58,9 @@ class _OtpScreenState extends State<OtpScreen>
   void initState() {
     super.initState();
     _shakeCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 500));
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
     _shakeAnim = TweenSequence([
       TweenSequenceItem(tween: Tween(begin: 0.0, end: -8.0), weight: 1),
       TweenSequenceItem(tween: Tween(begin: -8.0, end: 8.0), weight: 2),
@@ -99,27 +103,29 @@ class _OtpScreenState extends State<OtpScreen>
     setState(() => _error = null);
 
     OtpService().sendEmailOtp(
-        email: widget.email,
-        onCodeSent: () {
-          _startTimer();
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'OTP resent to ${widget.email}',
-                style: GoogleFonts.inter(color: kBlack),
-              ),
-              backgroundColor: kWhite,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
+      email: widget.email,
+      onCodeSent: () {
+        _startTimer();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'OTP resent to ${widget.email}',
+              style: GoogleFonts.inter(color: kBlack),
             ),
-          );
-        },
-        onError: (err) {
-          if (!mounted) return;
-          setState(() => _error = err);
-        });
+            backgroundColor: kWhite,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        );
+      },
+      onError: (err) {
+        if (!mounted) return;
+        setState(() => _error = err);
+      },
+    );
   }
 
   void _onDigitChanged(int index, String value) {
@@ -128,8 +134,9 @@ class _OtpScreenState extends State<OtpScreen>
       for (int i = 0; i < _otpLength && i < digits.length; i++) {
         _ctrs[i].text = digits[i];
       }
-      final nextEmpty =
-          digits.length < _otpLength ? digits.length : _otpLength - 1;
+      final nextEmpty = digits.length < _otpLength
+          ? digits.length
+          : _otpLength - 1;
       _foci[nextEmpty].requestFocus();
       _tryAutoSubmit();
       return;
@@ -166,15 +173,15 @@ class _OtpScreenState extends State<OtpScreen>
       _error = null;
     });
 
-    final isValid = await OtpService().verifyOtp(
+    final verification = await OtpService().verifyOtp(
       email: widget.email,
       code: code,
     );
 
-    if (!isValid) {
+    if (!verification.verified) {
       if (!mounted) return;
       setState(() {
-        _error = 'Incorrect OTP. Please try again.';
+        _error = verification.error ?? 'Incorrect OTP. Please try again.';
         _isVerifying = false;
       });
       _shakeCtrl.forward(from: 0);
@@ -203,6 +210,26 @@ class _OtpScreenState extends State<OtpScreen>
           username: widget.username!,
           email: widget.email,
         );
+        if ((provider.service.accessToken ?? '').isEmpty) {
+          await provider.login(widget.username!, widget.password!);
+        }
+        final proof = verification.secureLoginEnrollmentProof;
+        if (proof != null && proof.isNotEmpty) {
+          await _finishSecureLoginProvisioning(
+            username: widget.username!,
+            password: widget.password!,
+            accessToken: provider.service.accessToken ?? '',
+            enrollmentProof: proof,
+          );
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Account created. Secure sign-in setup is temporarily unavailable.',
+              ),
+            ),
+          );
+        }
         if (!mounted) return;
       }
       Navigator.of(context).pushAndRemoveUntil(
@@ -221,6 +248,47 @@ class _OtpScreenState extends State<OtpScreen>
         return;
       }
       setState(() => _error = provider.error ?? 'Authentication failed.');
+    }
+  }
+
+  Future<void> _finishSecureLoginProvisioning({
+    required String username,
+    required String password,
+    required String accessToken,
+    required String enrollmentProof,
+  }) async {
+    while (mounted) {
+      final result = await OtpService().provisionSecureLogin(
+        username: username,
+        email: widget.email,
+        password: password,
+        accessToken: accessToken,
+        secureLoginEnrollmentProof: enrollmentProof,
+      );
+      if (result.success || !mounted) return;
+
+      final retry = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Secure sign-in setup incomplete'),
+          content: Text(
+            result.error ??
+                'Your XMO account was created, but secure sign-in could not be prepared.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Continue for now'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+      if (retry != true) return;
     }
   }
 
@@ -289,22 +357,24 @@ class _OtpScreenState extends State<OtpScreen>
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.error_outline,
-                          color: Colors.redAccent, size: 14),
+                      const Icon(
+                        Icons.error_outline,
+                        color: Colors.redAccent,
+                        size: 14,
+                      ),
                       const SizedBox(width: 6),
                       Text(
                         _error!,
                         style: GoogleFonts.inter(
-                            color: Colors.redAccent, fontSize: 12.5),
+                          color: Colors.redAccent,
+                          fontSize: 12.5,
+                        ),
                       ),
                     ],
                   ),
                 ),
               const SizedBox(height: 28),
-              OtpTimer(
-                remaining: _remaining,
-                onResend: _resend,
-              ),
+              OtpTimer(remaining: _remaining, onResend: _resend),
               const SizedBox(height: 36),
               OtpVerifyButton(
                 isVerifying: _isVerifying,

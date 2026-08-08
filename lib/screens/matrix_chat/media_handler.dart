@@ -14,6 +14,7 @@ import 'package:mime/mime.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/matrix_attachment_downloader.dart';
 import '../../services/matrix_service.dart';
+import '../../services/transfer_queue_service.dart';
 import '../web_video_view_stub.dart'
     if (dart.library.js_interop) '../web_video_view.dart' as web_video;
 import '../native_thumb_stub.dart'
@@ -687,12 +688,14 @@ class MediaHandler {
     required Uint8List bytes,
     required String fileName,
     required String mimeType,
+    String? sourcePath,
     String caption = '',
     Uint8List? precomputedThumbnailBytes,
     int? precomputedVideoWidth,
     int? precomputedVideoHeight,
     int? precomputedDurationMs,
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
+    void Function(TransferStage stage)? onStageChanged,
     bool Function()? isCancelled,
     bool rethrowErrors = false,
     Event? inReplyTo,
@@ -706,14 +709,18 @@ class MediaHandler {
               precomputedVideoHeight != null ||
               precomputedDurationMs != null
           ? null
-          : await _readVideoMetadata(bytes);
+          : sourcePath != null
+              ? await readNativeVideoMetadataFromPath(sourcePath)
+              : await _readVideoMetadata(bytes);
       Uint8List? thumbBytes = precomputedThumbnailBytes;
       ({int width, int height})? thumbDimensions;
       if (thumbBytes == null || thumbBytes.isEmpty) {
         try {
           debugPrint(
               '[Send] Generating camera video thumbnail before upload...');
-          thumbBytes = await _generateVideoThumbnail(bytes, mimeType);
+          thumbBytes = sourcePath != null
+              ? await generateNativeThumbnailFromPath(sourcePath)
+              : await _generateVideoThumbnail(bytes, mimeType);
           if (thumbBytes != null && thumbBytes.isNotEmpty) {
             thumbDimensions = await _decodeImageDimensions(thumbBytes);
           }
@@ -729,6 +736,7 @@ class MediaHandler {
         videoBytes: bytes,
         videoFileName: fileName,
         videoMimeType: mimeType,
+        sourcePath: sourcePath,
         thumbBytes: thumbBytes,
         videoWidth: precomputedVideoWidth ?? videoMetadata?.width,
         videoHeight: precomputedVideoHeight ?? videoMetadata?.height,
@@ -737,6 +745,7 @@ class MediaHandler {
         thumbnailHeight: thumbDimensions?.height,
         caption: caption,
         onUploadProgress: onUploadProgress,
+        onStageChanged: onStageChanged,
         isCancelled: isCancelled,
         inReplyTo: inReplyTo,
       );
@@ -761,6 +770,10 @@ class MediaHandler {
     String mimeType,
   ) {
     return _generateVideoThumbnail(bytes, mimeType);
+  }
+
+  Future<Uint8List?> createVideoPreviewThumbnailFromPath(String path) {
+    return generateNativeThumbnailFromPath(path);
   }
 
   Future<Uint8List?> createImagePreviewThumbnail(Uint8List bytes) async {
@@ -810,6 +823,17 @@ class MediaHandler {
   Future<({int? width, int? height, int? durationMs})?>
       readVideoPreviewMetadata(Uint8List bytes) async {
     final metadata = await _readVideoMetadata(bytes);
+    if (metadata == null) return null;
+    return (
+      width: metadata.width,
+      height: metadata.height,
+      durationMs: metadata.durationMs,
+    );
+  }
+
+  Future<({int? width, int? height, int? durationMs})?>
+      readVideoPreviewMetadataFromPath(String path) async {
+    final metadata = await readNativeVideoMetadataFromPath(path);
     if (metadata == null) return null;
     return (
       width: metadata.width,

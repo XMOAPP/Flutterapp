@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 import '../models/channel_models.dart';
+import '../utils/matrix_identity.dart';
 import 'matrix_service.dart';
 import 'room_controls_service.dart';
 import 'channel_analytics_service.dart';
@@ -48,7 +49,9 @@ class ChannelService {
 
   /// Updates channel settings
   Future<void> updateChannelSettings(
-      String roomId, ChannelSettings settings) async {
+    String roomId,
+    ChannelSettings settings,
+  ) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Channel not found: $roomId');
 
@@ -71,22 +74,16 @@ class ChannelService {
 
     // Channel public/private security type is permanent after creation.
     final immutableJoinMode = RoomControlsService.immutableJoinModeFor(room);
-    await RoomControlsService.setChannelJoinMode(
-      room,
-      immutableJoinMode,
-    );
+    await RoomControlsService.setChannelJoinMode(room, immutableJoinMode);
     await RoomControlsService.setChannelDirectoryVisibility(
       room,
       immutableJoinMode,
     );
 
     // Update sign messages setting
-    await room.client.setRoomStateWithKey(
-      roomId,
-      'xmo.channel.settings',
-      '',
-      {'sign_messages': settings.signMessages},
-    );
+    await room.client.setRoomStateWithKey(roomId, 'xmo.channel.settings', '', {
+      'sign_messages': settings.signMessages,
+    });
 
     // Update linked discussion group
     if (settings.linkedDiscussionGroupId != null) {
@@ -134,8 +131,11 @@ class ChannelService {
   }
 
   /// Bans a subscriber
-  Future<void> banSubscriber(String roomId, String userId,
-      {String? reason}) async {
+  Future<void> banSubscriber(
+    String roomId,
+    String userId, {
+    String? reason,
+  }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Channel not found: $roomId');
 
@@ -166,16 +166,20 @@ class ChannelService {
           final userId = state.stateKey!;
           final displayName = state.content['displayname'];
           final avatarUrl = state.content['avatar_url'];
-          bannedUsers.add(ChannelSubscriber(
-            userId: userId,
-            displayName: displayName is String ? displayName : userId,
-            avatarUrl: avatarUrl is String ? avatarUrl : null,
-            joinedAt:
-                state is Event ? state.originServerTs : DateTime.now(),
-            isBanned: true,
-            isAdmin: false,
-            powerLevel: -1,
-          ));
+          bannedUsers.add(
+            ChannelSubscriber(
+              userId: userId,
+              displayName: MatrixIdentity.displayName(
+                userId: userId,
+                candidate: displayName is String ? displayName : null,
+              ),
+              avatarUrl: avatarUrl is String ? avatarUrl : null,
+              joinedAt: state is Event ? state.originServerTs : DateTime.now(),
+              isBanned: true,
+              isAdmin: false,
+              powerLevel: -1,
+            ),
+          );
         }
       }
     }
@@ -240,18 +244,21 @@ class ChannelService {
 
     // Get timeline to count posts
     final timeline = await room.getTimeline();
-    final posts =
-        timeline.events.where((e) => e.type == EventTypes.Message).toList();
+    final posts = timeline.events
+        .where((e) => e.type == EventTypes.Message)
+        .toList();
 
     final now = DateTime.now();
     final last24h = now.subtract(const Duration(hours: 24));
     final last7days = now.subtract(const Duration(days: 7));
 
-    final postsLast24h =
-        posts.where((e) => e.originServerTs.isAfter(last24h)).length;
+    final postsLast24h = posts
+        .where((e) => e.originServerTs.isAfter(last24h))
+        .length;
 
-    final postsLast7days =
-        posts.where((e) => e.originServerTs.isAfter(last7days)).length;
+    final postsLast7days = posts
+        .where((e) => e.originServerTs.isAfter(last7days))
+        .length;
 
     var averageViews = 0;
     try {
@@ -278,7 +285,9 @@ class ChannelService {
 
   /// Gets post statistics
   Future<PostStatistics?> getPostStatistics(
-      String roomId, String eventId) async {
+    String roomId,
+    String eventId,
+  ) async {
     final room = _client.getRoomById(roomId);
     if (room == null) return null;
 
@@ -290,8 +299,7 @@ class ChannelService {
       analytics = (await _analyticsService.getStatistics(
         roomId,
         eventIds: [eventId],
-      ))
-          .analyticsFor(eventId);
+      )).analyticsFor(eventId);
     } catch (error) {
       debugPrint('[ChannelService] Post analytics unavailable: $error');
     }
@@ -332,8 +340,11 @@ class ChannelService {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /// Posts a message to the channel (admin only)
-  Future<void> postMessage(String roomId, String text,
-      {bool signMessage = true}) async {
+  Future<void> postMessage(
+    String roomId,
+    String text, {
+    bool signMessage = true,
+  }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Channel not found: $roomId');
 

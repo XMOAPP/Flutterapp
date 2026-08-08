@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../config/app_config.dart';
 import '../providers/matrix_provider.dart';
 import '../services/otp_service.dart';
+import '../services/matrix_sso_service.dart';
 import '../theme.dart';
 import 'forgot_password_screen.dart';
 import 'home_screen.dart';
@@ -33,6 +34,7 @@ class _LoginScreenState extends State<LoginScreen>
   final _formKey = GlobalKey<FormState>();
 
   bool _isRegisterMode = false;
+  bool _ssoStarting = false;
   String? _usernameError;
   late AnimationController _fadeCtrl;
   late Animation<double> _fadeAnim;
@@ -75,15 +77,15 @@ class _LoginScreenState extends State<LoginScreen>
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (_) => const Center(
-          child: CircularProgressIndicator(color: kWhite),
-        ),
+        builder: (_) =>
+            const Center(child: CircularProgressIndicator(color: kWhite)),
       );
 
       bool usernameAvailable;
       try {
-        usernameAvailable =
-            await provider.service.isUsernameAvailable(username);
+        usernameAvailable = await provider.service.isUsernameAvailable(
+          username,
+        );
       } catch (e) {
         if (!mounted) return;
         if (_isUsernameTakenError(e)) {
@@ -92,10 +94,7 @@ class _LoginScreenState extends State<LoginScreen>
         }
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString()),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text(e.toString()), backgroundColor: Colors.red),
         );
         return;
       }
@@ -118,6 +117,9 @@ class _LoginScreenState extends State<LoginScreen>
             username: username,
             email: email,
           );
+          if ((provider.service.accessToken ?? '').isEmpty) {
+            await provider.login(username, password);
+          }
           if (!mounted) return;
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(builder: (_) => const HomeScreen()),
@@ -154,10 +156,7 @@ class _LoginScreenState extends State<LoginScreen>
           if (!mounted) return;
           Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(err),
-              backgroundColor: Colors.red,
-            ),
+            SnackBar(content: Text(err), backgroundColor: Colors.red),
           );
         },
       );
@@ -168,6 +167,29 @@ class _LoginScreenState extends State<LoginScreen>
           MaterialPageRoute(builder: (_) => const HomeScreen()),
         );
       }
+    }
+  }
+
+  Future<void> _signInWithSso() async {
+    if (_ssoStarting) return;
+    setState(() => _ssoStarting = true);
+    try {
+      final token = await MatrixSsoService.instance.startSignIn();
+      if (!mounted) return;
+      final ok = await context.read<MatrixProvider>().loginWithSsoToken(token);
+      if (ok && mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+        );
+      }
+    } on MatrixSsoException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.message), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _ssoStarting = false);
     }
   }
 
@@ -189,10 +211,12 @@ class _LoginScreenState extends State<LoginScreen>
 
   @override
   Widget build(BuildContext context) {
-    final mediaQuery = MediaQuery.of(context);
-    final isLandscape = mediaQuery.orientation == Orientation.landscape;
-    final horizontalPadding =
-        (mediaQuery.size.width * 0.08).clamp(20.0, 28.0).toDouble();
+    final orientation = MediaQuery.orientationOf(context);
+    final size = MediaQuery.sizeOf(context);
+    final viewInsets = MediaQuery.viewInsetsOf(context);
+    final padding = MediaQuery.paddingOf(context);
+    final isLandscape = orientation == Orientation.landscape;
+    final horizontalPadding = (size.width * 0.08).clamp(20.0, 28.0).toDouble();
 
     return Scaffold(
       backgroundColor: kBlack,
@@ -205,14 +229,13 @@ class _LoginScreenState extends State<LoginScreen>
               horizontalPadding,
               16,
               horizontalPadding,
-              16 + mediaQuery.viewInsets.bottom,
+              16 + viewInsets.bottom,
             ),
             child: Form(
               key: _formKey,
               child: ConstrainedBox(
                 constraints: BoxConstraints(
-                  minHeight:
-                      mediaQuery.size.height - mediaQuery.padding.vertical - 32,
+                  minHeight: size.height - padding.vertical - 32,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
@@ -253,6 +276,33 @@ class _LoginScreenState extends State<LoginScreen>
                       isRegisterMode: _isRegisterMode,
                       onPressed: _submit,
                     ),
+                    if (!_isRegisterMode && AppConfig.isSsoLoginConfigured) ...[
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 40,
+                        child: OutlinedButton(
+                          onPressed: _ssoStarting ? null : _signInWithSso,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: kWhite,
+                            side: const BorderSide(color: kWhite),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(30),
+                            ),
+                          ),
+                          child: _ssoStarting
+                              ? const SizedBox(
+                                  height: 18,
+                                  width: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.5,
+                                    color: kWhite,
+                                  ),
+                                )
+                              : const Text('Continue with secure sign-in'),
+                        ),
+                      ),
+                    ],
                     if (!_isRegisterMode) ...[
                       const SizedBox(height: 10),
                       TextButton(

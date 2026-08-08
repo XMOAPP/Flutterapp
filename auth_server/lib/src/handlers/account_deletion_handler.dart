@@ -189,6 +189,11 @@ Future<void> _purgeXmoAccountRecords(String userId) async {
     throw const _BadRequestException('Invalid XMO account ID');
   }
   final localpart = _userDirectoryLocalpartFromUserId(normalized);
+  try {
+    await _authentikDeactivateUser(localpart);
+  } catch (error, st) {
+    _logger.error('authentik_user_deactivation_failed', error, st);
+  }
 
   final directory = await _readUserDirectoryEntries();
   directory.remove(localpart);

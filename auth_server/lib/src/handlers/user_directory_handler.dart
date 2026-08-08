@@ -38,9 +38,11 @@ Future<void> _upsertUserDirectoryEntry(HttpRequest request) async {
   }
 
   final localpart = _userDirectoryLocalpartFromUserId(userId);
-  final displayName = _userDirectoryCleanText(body['displayName']) ??
-      _userDirectoryCleanText(body['display_name']) ??
-      userId;
+  final displayName = _userDirectoryFriendlyDisplayName(
+    userId,
+    _userDirectoryCleanText(body['displayName']) ??
+        _userDirectoryCleanText(body['display_name']),
+  );
   final avatarUrl = _userDirectoryCleanText(body['avatarUrl']) ??
       _userDirectoryCleanText(body['avatar_url']);
 
@@ -213,6 +215,18 @@ String? _userDirectoryCleanText(Object? value) {
   return text.length > 160 ? text.substring(0, 160) : text;
 }
 
+String _userDirectoryFriendlyDisplayName(String userId, String? candidate) {
+  final value = candidate?.trim();
+  final isFullUserId =
+      value != null && RegExp(r'^@[^:\s]+:[^\s]+$').hasMatch(value);
+  if (value != null && value.isNotEmpty && value != userId && !isFullUserId) {
+    return value;
+  }
+  final localpart = _userDirectoryLocalpartFromUserId(userId);
+  if (localpart.isEmpty) return 'Unknown';
+  return '${localpart[0].toUpperCase()}${localpart.substring(1)}';
+}
+
 class UserDirectoryConfig {
   const UserDirectoryConfig({
     required this.homeserverUrl,
@@ -270,7 +284,10 @@ class _UserDirectoryEntry {
     return _UserDirectoryEntry(
       userId: userId,
       localpart: localpart,
-      displayName: json['displayName']?.toString() ?? userId,
+      displayName: _userDirectoryFriendlyDisplayName(
+        userId,
+        json['displayName']?.toString(),
+      ),
       avatarUrl: json['avatarUrl']?.toString(),
       isPublic: json['public'] == true,
       updatedAt: DateTime.tryParse(json['updatedAt']?.toString() ?? '') ??

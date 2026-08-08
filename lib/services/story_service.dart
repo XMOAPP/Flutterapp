@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
 import 'package:matrix/matrix.dart';
 import '../models/story_models.dart';
+import '../utils/matrix_identity.dart';
 import 'matrix_service.dart';
 import 'privacy_service.dart';
 
@@ -73,9 +74,11 @@ class StoryService {
       if (raw is! List) return const [];
       final stories = raw
           .whereType<Map>()
-          .map((item) => _userStoriesFromJson(
-                item.map((key, value) => MapEntry(key.toString(), value)),
-              ))
+          .map(
+            (item) => _userStoriesFromJson(
+              item.map((key, value) => MapEntry(key.toString(), value)),
+            ),
+          )
           .where((item) => item.hasActiveStories)
           .toList();
       stories.sort((a, b) {
@@ -107,25 +110,28 @@ class StoryService {
   }
 
   Map<String, dynamic> _userStoriesToJson(UserStories stories) => {
-        'userId': stories.userId,
-        'userName': stories.userName,
-        'userAvatarUrl': stories.userAvatarUrl,
-        'snapshotUpdatedAt': stories.snapshotUpdatedAt?.millisecondsSinceEpoch,
-        // Story IDs and viewedBy are retained by Story.toJson().
-        'stories': stories.stories.map((story) => story.toJson()).toList(),
-      };
+    'userId': stories.userId,
+    'userName': stories.userName,
+    'userAvatarUrl': stories.userAvatarUrl,
+    'snapshotUpdatedAt': stories.snapshotUpdatedAt?.millisecondsSinceEpoch,
+    // Story IDs and viewedBy are retained by Story.toJson().
+    'stories': stories.stories.map((story) => story.toJson()).toList(),
+  };
 
   UserStories _userStoriesFromJson(Map<String, dynamic> json) {
     final userId = _safeString(json['userId'], Story.maxUserIdLength);
     final userName = _safeString(json['userName'], Story.maxUserNameLength);
     return UserStories(
       userId: userId ?? '',
-      userName: userName ?? userId ?? '',
-      userAvatarUrl:
-          _safeOptionalString(json['userAvatarUrl'], Story.maxUrlLength),
-      snapshotUpdatedAt: _dateTimeFromMilliseconds(
-        json['snapshotUpdatedAt'],
+      userName: MatrixIdentity.displayName(
+        userId: userId ?? '',
+        candidate: userName,
       ),
+      userAvatarUrl: _safeOptionalString(
+        json['userAvatarUrl'],
+        Story.maxUrlLength,
+      ),
+      snapshotUpdatedAt: _dateTimeFromMilliseconds(json['snapshotUpdatedAt']),
       stories: _parseStoryList(json['stories'], expectedOwnerId: userId),
     );
   }
@@ -133,6 +139,11 @@ class StoryService {
   // ═══════════════════════════════════════════════════════════════════════════
   // CREATE STORY
   // ═══════════════════════════════════════════════════════════════════════════
+
+  /// Validates a Story request before it is staged for background upload.
+  void validateCreateRequest(CreateStoryRequest request) {
+    _validateCreateRequest(request);
+  }
 
   /// Creates a new story
   Future<Story> createStory(
@@ -217,7 +228,10 @@ class StoryService {
     final story = Story(
       id: storyId,
       userId: myUserId,
-      userName: profile?.displayName ?? myUserId,
+      userName: MatrixIdentity.displayName(
+        userId: myUserId,
+        candidate: profile?.displayName,
+      ),
       userAvatarUrl: profile?.avatarUrl?.toString(),
       mediaUrl: mediaUrl,
       mediaMimeType: request.mediaMimeType,
@@ -257,13 +271,15 @@ class StoryService {
         final uri = onProgress == null && cancellationToken == null
             ? await _client.uploadContent(
                 bytes,
-                filename: filename ??
+                filename:
+                    filename ??
                     'story_${DateTime.now().millisecondsSinceEpoch}',
                 contentType: contentType,
               )
             : await _matrixService.uploadBytesWithProgress(
                 bytes,
-                filename: filename ??
+                filename:
+                    filename ??
                     'story_${DateTime.now().millisecondsSinceEpoch}',
                 contentType: contentType,
                 onProgress: onProgress,
@@ -361,11 +377,9 @@ class StoryService {
 
       // Save to account data (for our own reference)
       final storiesJson = activeStories.map((s) => s.toJson()).toList();
-      await _client.setAccountData(
-        myUserId,
-        storyAccountDataType,
-        {'stories': storiesJson},
-      );
+      await _client.setAccountData(myUserId, storyAccountDataType, {
+        'stories': storiesJson,
+      });
 
       // Broadcast to all allowed direct chat rooms so contacts can see our
       // stories. The story is already durable in account data at this point;
@@ -399,7 +413,8 @@ class StoryService {
       // Send event to each direct chat room
       for (final room in directRooms) {
         try {
-          final viewerId = _matrixService.getDirectPeerUserId(room) ??
+          final viewerId =
+              _matrixService.getDirectPeerUserId(room) ??
               room.directChatMatrixID;
           if (viewerId == null || viewerId == myUserId) continue;
 
@@ -418,7 +433,8 @@ class StoryService {
         } catch (e) {
           failedRoomIds.add(room.id);
           debugPrint(
-              '[StoryService] Failed to broadcast to room ${room.id}: $e');
+            '[StoryService] Failed to broadcast to room ${room.id}: $e',
+          );
         }
       }
     } catch (e) {
@@ -498,9 +514,7 @@ class StoryService {
       final box = await _storyCacheBox();
       final raw = box.get(key);
       if (raw is! Map) return;
-      final data = raw.map(
-        (key, value) => MapEntry(key.toString(), value),
-      );
+      final data = raw.map((key, value) => MapEntry(key.toString(), value));
       final nextAttemptAt = _intFromDynamic(data['next_attempt_at']);
       if (nextAttemptAt != null &&
           DateTime.now().millisecondsSinceEpoch < nextAttemptAt) {
@@ -511,7 +525,8 @@ class StoryService {
         data['stories'],
         expectedOwnerId: myUserId,
       );
-      final roomIds = (data['room_ids'] as List?)
+      final roomIds =
+          (data['room_ids'] as List?)
               ?.whereType<String>()
               .where((id) => id.isNotEmpty)
               .toSet() ??
@@ -572,8 +587,10 @@ class StoryService {
       final myUserId = _client.userID;
       if (myUserId == null) return [];
 
-      final accountData =
-          await _client.getAccountData(myUserId, storyAccountDataType);
+      final accountData = await _client.getAccountData(
+        myUserId,
+        storyAccountDataType,
+      );
 
       final stories = _parseStoryList(
         accountData['stories'],
@@ -607,9 +624,13 @@ class StoryService {
         final stories = await getMyStories();
         return UserStories(
           userId: userId,
-          userName: stories.isNotEmpty ? stories.first.userName : userId,
-          userAvatarUrl:
-              stories.isNotEmpty ? stories.first.userAvatarUrl : null,
+          userName: MatrixIdentity.displayName(
+            userId: userId,
+            candidate: stories.isNotEmpty ? stories.first.userName : null,
+          ),
+          userAvatarUrl: stories.isNotEmpty
+              ? stories.first.userAvatarUrl
+              : null,
           stories: stories,
         );
       }
@@ -722,11 +743,9 @@ class StoryService {
       );
     }).toList();
 
-    await _client.setAccountData(
-      myUserId,
-      storyAccountDataType,
-      {'stories': updatedStories.map((story) => story.toJson()).toList()},
-    );
+    await _client.setAccountData(myUserId, storyAccountDataType, {
+      'stories': updatedStories.map((story) => story.toJson()).toList(),
+    });
     await _publishStorySnapshot(updatedStories);
   }
 
@@ -744,12 +763,15 @@ class StoryService {
 
     // Store viewed stories in our own account data.
     try {
-      final viewedData =
-          await _client.getAccountData(myUserId, viewedStoriesAccountDataKey);
+      final viewedData = await _client.getAccountData(
+        myUserId,
+        viewedStoriesAccountDataKey,
+      );
 
       final viewedStories = Map<String, List<dynamic>>.from(viewedData);
-      final userViewedStories =
-          List<String>.from(viewedStories[storyOwnerId] ?? []);
+      final userViewedStories = List<String>.from(
+        viewedStories[storyOwnerId] ?? [],
+      );
 
       if (!userViewedStories.contains(storyId)) {
         userViewedStories.add(storyId);
@@ -772,8 +794,9 @@ class StoryService {
 
     try {
       final sentData = await _loadSentStoryViewReceipts(myUserId);
-      final sentForOwner =
-          List<String>.from(sentData[storyOwnerId] ?? const []);
+      final sentForOwner = List<String>.from(
+        sentData[storyOwnerId] ?? const [],
+      );
       if (sentForOwner.contains(storyId)) return;
 
       final directRoom = _client.rooms.firstWhere(
@@ -873,8 +896,9 @@ class StoryService {
 
             var viewerName = _storyViewerFallbackName(receipt.viewerId);
             try {
-              final profile =
-                  await _client.getProfileFromUserId(receipt.viewerId);
+              final profile = await _client.getProfileFromUserId(
+                receipt.viewerId,
+              );
               final displayName = profile.displayName?.trim();
               if (displayName != null && displayName.isNotEmpty) {
                 viewerName = displayName;
@@ -883,12 +907,14 @@ class StoryService {
               debugPrint('[StoryService] Failed to get viewer profile: $e');
             }
 
-            viewers.add(StoryView(
-              storyId: storyId,
-              viewerId: receipt.viewerId,
-              viewerName: viewerName,
-              viewedAt: receipt.viewedAt,
-            ));
+            viewers.add(
+              StoryView(
+                storyId: storyId,
+                viewerId: receipt.viewerId,
+                viewerName: viewerName,
+                viewedAt: receipt.viewedAt,
+              ),
+            );
           }
         } catch (e) {
           debugPrint('[StoryService] Failed to check room ${room.id}: $e');
@@ -921,10 +947,7 @@ class StoryService {
     return localpart.isEmpty ? userId : localpart;
   }
 
-  Future<void> _loadStoryViewHistory(
-    Timeline timeline,
-    DateTime cutoff,
-  ) async {
+  Future<void> _loadStoryViewHistory(Timeline timeline, DateTime cutoff) async {
     for (var page = 0; page < _storyViewHistoryMaxPages; page++) {
       if (timeline.events.isNotEmpty &&
           !timeline.events.last.originServerTs.isAfter(cutoff)) {
@@ -952,16 +975,15 @@ class StoryService {
       final existingStories = await getMyStories();
 
       // Remove the story
-      final updatedStories =
-          existingStories.where((s) => s.id != storyId).toList();
+      final updatedStories = existingStories
+          .where((s) => s.id != storyId)
+          .toList();
 
       // Save updated stories to account data
       final storiesJson = updatedStories.map((s) => s.toJson()).toList();
-      await _client.setAccountData(
-        myUserId,
-        storyAccountDataType,
-        {'stories': storiesJson},
-      );
+      await _client.setAccountData(myUserId, storyAccountDataType, {
+        'stories': storiesJson,
+      });
 
       // Broadcast updated list to contacts
       await _publishStorySnapshot(updatedStories);
@@ -989,17 +1011,16 @@ class StoryService {
       // Only update if there are expired stories
       if (activeStories.length < existingStories.length) {
         final storiesJson = activeStories.map((s) => s.toJson()).toList();
-        await _client.setAccountData(
-          myUserId,
-          storyAccountDataType,
-          {'stories': storiesJson},
-        );
+        await _client.setAccountData(myUserId, storyAccountDataType, {
+          'stories': storiesJson,
+        });
 
         // Broadcast updated list to contacts
         await _publishStorySnapshot(activeStories);
 
         debugPrint(
-            '[StoryService] Cleaned up ${existingStories.length - activeStories.length} expired stories');
+          '[StoryService] Cleaned up ${existingStories.length - activeStories.length} expired stories',
+        );
       }
     } catch (e) {
       debugPrint('[StoryService] Failed to cleanup expired stories: $e');
@@ -1022,12 +1043,15 @@ class StoryService {
     final profile = await _getProfileSafely(myUserId);
     if (profile == null) return stories;
 
-    final displayName = profile.displayName;
+    final displayName = MatrixIdentity.displayName(
+      userId: myUserId,
+      candidate: profile.displayName,
+    );
     final avatarUrl = profile.avatarUrl?.toString();
     return stories.map((story) {
       if (story.userId != myUserId) return story;
       return story.copyWith(
-        userName: displayName ?? story.userName,
+        userName: displayName,
         userAvatarUrl: avatarUrl ?? story.userAvatarUrl,
       );
     }).toList();
@@ -1084,13 +1108,20 @@ class StoryService {
         ).where((story) => !story.isExpired).toList(),
       );
 
-      String userName = stories.isNotEmpty ? stories.first.userName : userId;
-      String? avatarUrl =
-          stories.isNotEmpty ? stories.first.userAvatarUrl : null;
+      String userName = MatrixIdentity.displayName(
+        userId: userId,
+        candidate: stories.isNotEmpty ? stories.first.userName : null,
+      );
+      String? avatarUrl = stories.isNotEmpty
+          ? stories.first.userAvatarUrl
+          : null;
 
       final profile = await _getProfileSafely(userId);
       if (profile != null) {
-        userName = profile.displayName ?? userName;
+        userName = MatrixIdentity.displayName(
+          userId: userId,
+          candidate: profile.displayName ?? userName,
+        );
         avatarUrl = profile.avatarUrl?.toString() ?? avatarUrl;
       }
 
@@ -1151,14 +1182,13 @@ class StoryService {
           story.viewedBy.contains(myUserId)) {
         return story;
       }
-      return story.copyWith(
-        viewedBy: [...story.viewedBy, myUserId],
-      );
+      return story.copyWith(viewedBy: [...story.viewedBy, myUserId]);
     }).toList();
   }
 
   Future<List<Story>> _applyRemoteViewsToOwnedStories(
-      List<Story> stories) async {
+    List<Story> stories,
+  ) async {
     final myUserId = _client.userID;
     if (myUserId == null || stories.isEmpty) return stories;
 
@@ -1193,7 +1223,8 @@ class StoryService {
         }
       } catch (e) {
         debugPrint(
-            '[StoryService] Failed to apply remote views in ${room.id}: $e');
+          '[StoryService] Failed to apply remote views in ${room.id}: $e',
+        );
       }
     }
 
@@ -1204,16 +1235,11 @@ class StoryService {
       if (viewers == null || viewers.isEmpty) {
         return story;
       }
-      return story.copyWith(
-        viewedBy: {...story.viewedBy, ...viewers}.toList(),
-      );
+      return story.copyWith(viewedBy: {...story.viewedBy, ...viewers}.toList());
     }).toList();
   }
 
-  List<Story> _parseStoryList(
-    Object? value, {
-    String? expectedOwnerId,
-  }) {
+  List<Story> _parseStoryList(Object? value, {String? expectedOwnerId}) {
     if (value is! List || value.length > _maxStoriesPerSnapshot) {
       return const [];
     }
@@ -1230,7 +1256,14 @@ class StoryService {
           !seenIds.add(story.id)) {
         continue;
       }
-      stories.add(story);
+      stories.add(
+        story.copyWith(
+          userName: MatrixIdentity.displayName(
+            userId: story.userId,
+            candidate: story.userName,
+          ),
+        ),
+      );
     }
     return stories;
   }

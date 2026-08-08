@@ -11,6 +11,7 @@ import 'camera_capture_screen.dart';
 class MediaPreviewScreen extends StatefulWidget {
   final CameraCaptureMediaType type;
   final Uint8List bytes;
+  final String? filePath;
   final String fileName;
   final String mimeType;
 
@@ -18,6 +19,7 @@ class MediaPreviewScreen extends StatefulWidget {
     super.key,
     required this.type,
     required this.bytes,
+    this.filePath,
     required this.fileName,
     required this.mimeType,
   });
@@ -62,6 +64,30 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
     });
 
     try {
+      final sourcePath = widget.filePath;
+      if (sourcePath != null && sourcePath.isNotEmpty) {
+        final sourceFile = File(sourcePath);
+        if (await sourceFile.exists()) {
+          final controller = VideoPlayerController.file(
+            sourceFile,
+            videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+            viewType: _preferredVideoViewType,
+          );
+          await controller.initialize();
+          controller
+            ..setLooping(true)
+            ..addListener(_refreshVideo);
+          if (!mounted) {
+            await controller.dispose();
+            return;
+          }
+          setState(() {
+            _videoController = controller;
+            _loadingVideo = false;
+          });
+          return;
+        }
+      }
       final dir = Directory.systemTemp;
       final tempFile = File(
         '${dir.path}/xmo_preview_${DateTime.now().microsecondsSinceEpoch}_${widget.fileName}',
@@ -108,6 +134,7 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
       CameraCaptureResult(
         type: widget.type,
         bytes: widget.bytes,
+        filePath: widget.filePath,
         fileName: widget.fileName,
         mimeType: widget.mimeType,
         caption: _captionController.text.trim(),

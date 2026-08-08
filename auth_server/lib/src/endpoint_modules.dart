@@ -148,10 +148,12 @@ class UserDirectoryEndpointModule {
   const UserDirectoryEndpointModule({
     required this.upsert,
     required this.search,
+    required this.provisionSecureLogin,
   });
 
   final EndpointHandler upsert;
   final EndpointHandler search;
+  final EndpointHandler provisionSecureLogin;
 
   bool handlesUpsert(String path) =>
       path == '/users/upsert' ||
@@ -162,6 +164,11 @@ class UserDirectoryEndpointModule {
       path == '/users/search' ||
       path == '/auth/users/search' ||
       path == '/auth/otp/users/search';
+
+  bool handlesProvisionSecureLogin(String path) =>
+      path == '/users/provision-secure-login' ||
+      path == '/auth/users/provision-secure-login' ||
+      path == '/auth/otp/users/provision-secure-login';
 }
 
 class ReportEndpointModule {

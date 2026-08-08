@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../utils/matrix_identity.dart';
+
 const String xmoContactContentKey = 'com.xmo.contact';
 
 class XmoContactCard {
@@ -10,12 +12,14 @@ class XmoContactCard {
   final String? phoneNumber;
   final String? username;
   final String? userId;
+  final String? avatarUrl;
 
   const XmoContactCard({
     required this.displayName,
     this.phoneNumber,
     this.username,
     this.userId,
+    this.avatarUrl,
   });
 
   factory XmoContactCard.create({
@@ -27,16 +31,14 @@ class XmoContactCard {
     if (cleanName.isEmpty || cleanNumber.isEmpty) {
       throw const FormatException('Contact name and phone number are required');
     }
-    return XmoContactCard(
-      displayName: cleanName,
-      phoneNumber: cleanNumber,
-    );
+    return XmoContactCard(displayName: cleanName, phoneNumber: cleanNumber);
   }
 
   factory XmoContactCard.createXmoUser({
     required String displayName,
     required String userId,
     String? username,
+    String? avatarUrl,
   }) {
     final cleanName = _cleanValue(displayName, maxLength: 120);
     final cleanUserId = _cleanValue(userId, maxLength: 160);
@@ -49,9 +51,13 @@ class XmoContactCard {
       throw const FormatException('XMO user name and ID are required');
     }
     return XmoContactCard(
-      displayName: cleanName,
+      displayName: MatrixIdentity.displayName(
+        userId: cleanUserId,
+        candidate: cleanName,
+      ),
       username: cleanUsername,
       userId: cleanUserId,
+      avatarUrl: _cleanOptionalValue(avatarUrl, maxLength: 500),
     );
   }
 
@@ -64,6 +70,7 @@ class XmoContactCard {
     final number = raw['phone_number'];
     final username = raw['username'];
     final userId = raw['user_id'];
+    final avatarUrl = raw['avatar_url'];
     if (name is! String) return null;
 
     try {
@@ -72,13 +79,11 @@ class XmoContactCard {
           displayName: name,
           userId: userId,
           username: username is String ? username : null,
+          avatarUrl: avatarUrl is String ? avatarUrl : null,
         );
       }
       if (number is String) {
-        return XmoContactCard.create(
-          displayName: name,
-          phoneNumber: number,
-        );
+        return XmoContactCard.create(displayName: name, phoneNumber: number);
       }
       return null;
     } on FormatException {
@@ -103,7 +108,19 @@ class XmoContactCard {
     if (cleanUserId != null && cleanUserId.isNotEmpty) {
       json['user_id'] = cleanUserId;
     }
+    final cleanAvatarUrl = avatarUrl;
+    if (cleanAvatarUrl != null && cleanAvatarUrl.isNotEmpty) {
+      json['avatar_url'] = cleanAvatarUrl;
+    }
     return json;
+  }
+
+  bool get isXmoUser => userId != null && userId!.isNotEmpty;
+
+  String get displayLabel {
+    final id = userId;
+    if (id == null || id.isEmpty) return displayName;
+    return MatrixIdentity.displayName(userId: id, candidate: displayName);
   }
 
   String get subtitle {
@@ -147,6 +164,12 @@ class XmoContactCard {
     final clean = value.replaceAll(RegExp(r'[\r\n\u0000]'), ' ').trim();
     if (clean.length <= maxLength) return clean;
     return clean.substring(0, maxLength).trimRight();
+  }
+
+  static String? _cleanOptionalValue(String? value, {required int maxLength}) {
+    if (value == null) return null;
+    final clean = _cleanValue(value, maxLength: maxLength);
+    return clean.isEmpty ? null : clean;
   }
 
   static String _escapeVCard(String value) => value

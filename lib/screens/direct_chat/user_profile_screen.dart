@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import 'package:provider/provider.dart';
@@ -10,10 +9,12 @@ import '../../services/voip_service.dart';
 import '../../services/report_service.dart';
 import '../../models/report_models.dart';
 import '../../models/direct_chat_models.dart';
+import '../../models/xmo_contact_card.dart';
 import '../../widgets/incoming_call_fullscreen_scope.dart';
 import '../../widgets/story/story_avatar.dart';
 import '../../widgets/report_sheet.dart';
 import 'shared_media_screen.dart';
+import '../matrix_chat/forward_message_sheet.dart';
 
 /// User Profile Screen for Direct Chats
 class UserProfileScreen extends StatefulWidget {
@@ -36,6 +37,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   bool _loading = true;
   bool _isBlocked = false;
   bool _isMuted = false;
+  bool _sharingContact = false;
 
   @override
   void initState() {
@@ -103,10 +105,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
         );
       }
     }
@@ -178,10 +177,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
         );
       }
     }
@@ -226,10 +222,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
         );
       }
     }
@@ -242,8 +235,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content:
-              Text('Unable to start ${video ? 'video' : 'voice'} call: $e'),
+          content: Text(
+            'Unable to start ${video ? 'video' : 'voice'} call: $e',
+          ),
           backgroundColor: Colors.red,
         ),
       );
@@ -251,20 +245,62 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   }
 
   Future<void> _shareContact() async {
+    if (_sharingContact) return;
+    final matrixProvider = context.read<MatrixProvider>();
     final username = _xmoUsernameFromUserId(widget.userId);
     final displayName = _profile?.displayName.trim().isNotEmpty == true
         ? _profile!.displayName.trim()
         : username;
-    await Clipboard.setData(
-      ClipboardData(text: '$displayName\n$username'),
+
+    final selectedRooms = await showForwardMessageSheet(
+      context: context,
+      rooms: matrixProvider.rooms,
+      currentRoom: widget.room,
+      title: 'Share contact with',
+      actionLabel: 'Share',
+      emptyLabel: 'No chats available',
     );
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Contact copied'),
-        backgroundColor: kLimeGreen,
-      ),
-    );
+    if (!mounted || selectedRooms == null || selectedRooms.isEmpty) return;
+
+    setState(() => _sharingContact = true);
+    try {
+      final contact = XmoContactCard.createXmoUser(
+        displayName: displayName,
+        userId: widget.userId,
+        username: username,
+        avatarUrl: _profile?.avatarUrl,
+      );
+      for (final room in selectedRooms) {
+        await matrixProvider.service.sendFileWithProgress(
+          roomId: room.id,
+          bytes: contact.toVCardBytes(),
+          fileName: contact.fileName,
+          mimeType: 'text/vcard',
+          xmoContact: contact.toJson(),
+        );
+      }
+      if (!mounted) return;
+      final count = selectedRooms.length;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            count == 1 ? 'Contact shared' : 'Contact shared to $count chats',
+          ),
+          backgroundColor: kLimeGreen,
+        ),
+      );
+      matrixProvider.refreshRooms();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to share contact. Please try again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _sharingContact = false);
+    }
   }
 
   String _xmoUsernameFromUserId(String userId) {
@@ -326,11 +362,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
   List<PopupMenuEntry<String>> _buildMenuItems() {
     return [
-      _buildMenuItem(
-        value: 'share',
-        icon: Icons.share,
-        label: 'Share Contact',
-      ),
+      _buildMenuItem(value: 'share', icon: Icons.share, label: 'Share Contact'),
       _buildMenuItem(
         value: 'archive',
         icon: Icons.archive_outlined,
@@ -393,41 +425,43 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         body: _loading
             ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
             : _profile == null
-                ? Center(
-                    child: Text(
-                      'Failed to load profile',
-                      style: GoogleFonts.inter(color: kLightGrey),
-                    ),
-                  )
-                : SingleChildScrollView(
-                    child: Column(
-                      children: [
-                        // Profile Header
-                        _buildProfileHeader(),
-                        const SizedBox(height: 24),
+            ? Center(
+                child: Text(
+                  'Failed to load profile',
+                  style: GoogleFonts.inter(color: kLightGrey),
+                ),
+              )
+            : SingleChildScrollView(
+                child: Column(
+                  children: [
+                    // Profile Header
+                    _buildProfileHeader(),
+                    const SizedBox(height: 24),
 
-                        // Actions
-                        _buildActionsSection(),
-                        const SizedBox(height: 8),
+                    // Actions
+                    _buildActionsSection(),
+                    const SizedBox(height: 8),
 
-                        // Shared Media
-                        _buildSharedMediaSection(),
+                    // Shared Media
+                    _buildSharedMediaSection(),
 
-                        const SizedBox(height: 80),
-                      ],
-                    ),
-                  ),
+                    const SizedBox(height: 80),
+                  ],
+                ),
+              ),
       ),
     );
   }
 
   Widget _buildProfileHeader() {
+    final displayName = _profile!.displayName;
+    final username = _xmoUsernameFromUserId(widget.userId);
     return Container(
       padding: const EdgeInsets.all(20),
       child: Column(
         children: [
           StoryAvatar(
-            userName: _profile!.displayName,
+            userName: displayName,
             avatarUrl: _profile!.avatarUrl,
             size: 80,
           ),
@@ -435,12 +469,24 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
           // Name
           Text(
-            _profile!.displayName,
+            displayName,
             style: GoogleFonts.inter(
               color: kWhite,
               fontSize: 20,
               fontWeight: FontWeight.bold,
             ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            username,
+            style: GoogleFonts.inter(
+              color: kLightGrey,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
           ),
         ],

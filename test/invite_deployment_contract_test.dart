@@ -12,6 +12,11 @@ void main() {
       expect(manifest, contains('android:autoVerify="true"'));
       expect(manifest, contains('android:host="xmo.dpdns.org"'));
       expect(manifest, contains('android:pathPrefix="/join/"'));
+      expect(manifest, contains('android:pathPrefix="/auth/callback"'));
+      expect(
+        manifest,
+        isNot(contains('android:scheme="xmo" android:host="auth"')),
+      );
     });
 
     test('Android retains warm-start links until Flutter is listening', () {
@@ -28,9 +33,7 @@ void main() {
       final redirects = File(
         'deploy/netlify-invite/_redirects',
       ).readAsStringSync();
-      final headers = File(
-        'deploy/netlify-invite/_headers',
-      ).readAsStringSync();
+      final headers = File('deploy/netlify-invite/_headers').readAsStringSync();
 
       expect(redirects, contains('/join/*  /join/index.html  200'));
       expect(headers, contains('Cache-Control: no-store'));
@@ -47,9 +50,7 @@ void main() {
 
       expect(
         page,
-        contains(
-          'https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp',
-        ),
+        contains('https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp'),
       );
       expect(
         page,
@@ -87,6 +88,17 @@ void main() {
       expect(script, contains("'assetlinks.json'"));
       expect(script, contains("'build\\netlify-invite'"));
       expect(script, contains("'com.xmo.xmo'"));
+      expect(script, contains("'auth\\callback\\index.html'"));
+    });
+
+    test('SSO browser fallback does not execute or forward login tokens', () {
+      final page = File(
+        'deploy/netlify-invite/auth/callback/index.html',
+      ).readAsStringSync();
+
+      expect(page, contains('Return to XMO'));
+      expect(page, isNot(contains('<script')));
+      expect(page, isNot(contains('loginToken')));
     });
 
     test('private invite previews do not expose room topics', () {

@@ -153,7 +153,7 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
 
     final session = _voip.activeSession;
     final groupCall = _voip.activeGroupCall;
-    final screenSize = MediaQuery.of(context).size;
+    final screenSize = MediaQuery.sizeOf(context);
 
     // Clamp position within screen bounds
     final clampedX = _position.dx.clamp(0.0, screenSize.width - _pipWidth);

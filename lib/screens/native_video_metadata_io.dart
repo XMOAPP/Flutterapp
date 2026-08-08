@@ -58,3 +58,30 @@ Future<NativeVideoMetadata?> readNativeVideoMetadata(
     }
   }
 }
+
+Future<NativeVideoMetadata?> readNativeVideoMetadataFromPath(
+  String videoPath,
+) async {
+  final file = File(videoPath);
+  if (!await file.exists()) return null;
+
+  VideoPlayerController? controller;
+  try {
+    controller = VideoPlayerController.file(file);
+    await controller.initialize();
+
+    final size = controller.value.size;
+    final duration = controller.value.duration;
+    if (size.isEmpty && duration == Duration.zero) return null;
+    return NativeVideoMetadata(
+      width: size.width > 0 ? size.width.round() : null,
+      height: size.height > 0 ? size.height.round() : null,
+      durationMs: duration == Duration.zero ? null : duration.inMilliseconds,
+    );
+  } catch (e) {
+    debugPrint('[VideoMeta] Failed to read video metadata from path: $e');
+    return null;
+  } finally {
+    await controller?.dispose();
+  }
+}
