@@ -409,7 +409,230 @@ See `pubspec.yaml` for complete list.
 5. Update Flutter app URL to your domain
 6. Build and deploy
 
-See `matrix_local_backend_setup.md` for detailed VPS setup guide.
+## 🏭 Production handbook
+
+This section is the single operational source of truth for the project. The
+application is a Flutter client backed by a Matrix homeserver (Synapse), an
+XMO Dart authentication/API server, Authentik for OIDC credentials, Firebase
+Cloud Messaging for push delivery, and optional Azure Blob Storage for large
+encrypted media chunks.
+
+### Production architecture
+
+```text
+Flutter Android/iOS client
+  ├─ Matrix Client-Server API ──> Synapse homeserver
+  ├─ OIDC login ────────────────> Authentik
+  ├─ OTP, wallet, deletion, media signing ──> XMO auth server
+  ├─ Push registration ─────────> Firebase Cloud Messaging
+  └─ Encrypted large-media chunks ─────────> Azure Blob Storage
+```
+
+The client uses Provider-based state management, Matrix Dart, Olm-compatible
+E2EE services, local encrypted storage, repository/service boundaries, native
+Android call and notification integrations, and Flutter screens/widgets for
+presentation. Synapse stores Matrix identities, room state, events, devices,
+and encrypted media metadata. The XMO backend must never receive plaintext
+room keys or plaintext message content.
+
+### Production endpoints and configuration
+
+Use production values only in release builds or authorized staging tests:
+
+```text
+XMO_HOMESERVER_URL=https://xmo-matrix.centralindia.cloudapp.azure.com
+XMO_MATRIX_SERVER_NAME=xmo-matrix.centralindia.cloudapp.azure.com
+XMO_STREAM_CHUNK_STORAGE=azure
+XMO_AZURE_CHUNK_SIGN_URL=https://xmo-matrix.centralindia.cloudapp.azure.com/auth/media/chunks/azure/sign-upload
+```
+
+Never commit passwords, signing secrets, Azure keys, JWT secrets, OTP
+credentials, or production tokens. Supply them through deployment secrets or
+dart-defines. Release builds must use HTTPS, production signing, the intended
+application ID, privacy URLs, backup rules, and the real Matrix server name.
+
+### Authentication and account lifecycle
+
+Authentik is the credential authority for the normal OIDC flow. Registration
+uses email OTP, creates the linked identity, and hands the user to Authentik;
+login uses Authentik credentials and optional TOTP; recovery changes the
+Authentik credential through the verified recovery flow. Synapse provides the
+Matrix session but does not become the source of usable local passwords.
+
+Wallet-only accounts are a separate path. The user connects a wallet, selects
+an available username for a new account or signs a fresh challenge for an
+existing account, receives a short-lived JWT, and then receives a Synapse
+device session. Wallet authentication must validate nonce, signature, wallet
+address, username ownership, expiry, and replay protection server-side.
+
+Account deletion must be idempotent and available both in-app and through the
+public deletion route. It must remove or schedule removal of XMO account data,
+linked Authentik identity data, local session/cache data, and documented
+external data while retaining only legally required records.
+
+### Matrix, E2EE, and device recovery
+
+XMO uses Matrix Olm/Megolm, cross-signing, SAS device verification, Secure
+Secret Storage, and Matrix key backup. Recovery is Matrix-native: no custom
+recovery PIN, plaintext recovery key, backend key escrow, or decrypted room-key
+upload is permitted.
+
+Required production workflows are:
+
+1. First-device setup creates cross-signing and secure recovery material.
+2. A second device authenticates, verifies through SAS or an already trusted
+   device, and restores the encrypted key backup.
+3. Recovery without the old device uses the user’s protected recovery key or
+   passphrase and then re-verifies the new device.
+4. Logout, reinstall, backup restore, historical-event decryption, encrypted
+   media, cross-signing, and verified-device key requests are tested before
+   release.
+
+The E2EE release gate requires successful XMO-to-XMO text and media tests,
+XMO-to-Element interoperability, recovery setup, reinstall restore,
+cross-signing reliability, and verified-device key-request handling on two
+independent devices. Automated tests do not replace physical-device evidence.
+
+### Groups, channels, and invite links
+
+Invite links use:
+
+```text
+https://xmo.dpdns.org/join/<opaque-token>
+```
+
+The backend supports authenticated create, list, revoke, preview, and redeem
+operations. Raw tokens must not be logged or stored as lookup keys. One active
+primary link per room is supported; resetting a link invalidates the previous
+token. Public unencrypted rooms may join directly. Private encrypted rooms
+must retain the approval/knock flow and must never be made public or
+unencrypted by an invite.
+
+Android App Links open the installed app. Netlify provides a browser preview,
+Open XMO action, and download fallback. iOS and unsupported platforms remain
+browser-only until Universal Links are separately configured. Synapse enforces
+the final membership limits: groups allow up to 50 joined members and channels
+up to 100 joined subscribers, regardless of which client performs the join.
+
+### Media, streaming, and calls
+
+Small media follows Matrix encrypted-media handling. Large media may use
+chunked upload/download with Azure Blob Storage. Signing endpoints must require
+Matrix authentication and room membership, use short-lived authorized URLs,
+avoid secrets in manifests, validate manifests and ranges, and support retry,
+resume, cancellation, and bounded local storage.
+
+Before shipping streaming, verify text, image, audio, and video paths; upload,
+download, resume, cancellation, background/foreground transitions, offline
+behavior, expired URLs, unauthorized-room access, large files, encrypted media,
+and Android physical-device playback. Confirm the backend reports
+`azureBlob:"ready"` when Azure storage is enabled.
+
+Calls require notification, microphone, camera, background, lock-screen,
+recent-apps, direct-call, and group-call regression coverage. Validate Android
+permissions, notification actions, incoming-call handling, and cleanup after
+hang-up or process termination.
+
+### Deployment runbook
+
+#### Auth server
+
+Deploy the Dart service with HTTPS and protected environment secrets. Verify
+health, OTP send/verify and resend, password recovery, wallet nonce/verify,
+username availability, donation creation, invite operations, account deletion,
+and Azure chunk-signing authorization. Review logs for token, password, OTP,
+wallet signature, and media-secret leakage.
+
+#### Synapse
+
+Deploy homeserver configuration, OIDC integration, templates, and the room
+capacity module. The capacity module is the final enforcement point for
+direct joins, invites, public joins, join-request approvals, tracked invite
+links, Element, and other clients. Verify group and channel boundary cases,
+including attempts made by unauthorized clients.
+
+#### Authentik and Android links
+
+Configure the XMO brand, production domain, default application, OIDC client,
+redirect URIs, logout URIs, optional TOTP policy, and secure cookie/session
+settings. Verify Android App Links using the production domain and asset
+links. Confirm browser fallback behavior for unsupported platforms.
+
+#### Wallet accounts
+
+Provision the wallet account database with restricted permissions, configure
+the auth-server database connection and JWT secret, enable the Synapse JWT
+login module, and test new-wallet registration, existing-wallet login,
+username collision, nonce expiry, replay, invalid signature, logout, and
+device-session creation.
+
+### Deterministic quality gates
+
+Run from the Flutter project root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\run_quality_gates.ps1
+```
+
+The gate must run formatting checks, static analysis, Flutter tests, auth-server
+tests, and fixed-timeout checks without mutating source files. CI must repeat
+the same checks with the exact production configuration contract. Keep the
+generated report and redacted logs as release evidence.
+
+### Release and Play testing
+
+The release candidate is not production-ready until all of the following are
+true:
+
+- A reproducible commit is built with production dart-defines and release
+  signing.
+- No deterministic phone-derived credentials remain as a security shortcut.
+- Azure chunk signing is authenticated, authorized, secret-managed, and
+  tested with real encrypted media.
+- Account deletion, Android backup exclusions, temporary-media cleanup, and
+  local credential protection are verified.
+- Native libraries, Android components, permissions, calls, and 16 KB page
+  size compatibility pass on supported devices.
+- E2EE evidence, privacy policy, data-safety declarations, financial
+  declarations, store listing, and public account-deletion URLs are complete.
+- Internal testing covers authentication, messaging, E2EE, media, calls,
+  notifications, upgrade, storage, logout, reinstall, and failure recovery.
+
+Retain privately: commit SHA, signed AAB checksum, build configuration, test
+device IDs, E2EE evidence, backend health output, Azure rotation evidence,
+Play Console reports, crash/ANR results, and the final go/no-go decision.
+
+### Production QA matrix
+
+Test a small phone (320–360 logical pixels), normal phone (390–430 pixels),
+landscape, split-screen, a physical Android device, an encrypted private room,
+and an applicable unencrypted room. Cover reactions, polls, stickers, link
+previews, stories, replies, app lock, device/session management, search,
+attachments, notifications, calls, and account switching. Every blocking item
+needs dated evidence; a green automated test alone is insufficient.
+
+### Privacy and service rules
+
+XMO processes account identifiers, profiles, Matrix events, rooms, media,
+device/session information, calls, usage data, OTP information, wallet
+addresses, donation metadata, and permission-related data as required to run
+the service. E2EE protects eligible content in transit and at rest, but
+metadata, recipients, homeserver storage, local caches, notifications, and
+third-party services may still expose operational information.
+
+Users control sessions, app lock, device verification, recovery material,
+message deletion/redaction where supported, and account deletion. Third-party
+providers—including Authentik, Matrix/Synapse infrastructure, email delivery,
+Firebase, Azure, wallet providers, blockchain networks, and app stores—have
+separate terms and policies. Keep public privacy and terms URLs synchronized
+with the deployed behavior and review them whenever data flows change.
+
+### Project maintenance rule
+
+This README intentionally replaces the former scattered Markdown guides. Keep
+production architecture, deployment commands, security constraints, release
+gates, and operator evidence requirements here. Do not create a second project
+guide without merging its useful content into this file.
 
 ## 📝 License
 

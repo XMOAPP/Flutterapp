@@ -378,7 +378,7 @@ $lines.Add("- Confirm Play Console developer identity and contact verification a
 $lines.Add("- Confirm versionCode is unused in Play Console before upload.") | Out-Null
 $lines.Add("- Upload the AAB to internal testing before production.") | Out-Null
 $lines.Add("- Inspect Play pre-launch report, SDK Index warnings, permissions, Data Safety, content rating, and financial declarations.") | Out-Null
-$lines.Add("- Run the real-device streaming checklist in docs/streaming_release_verification_checklist.md.") | Out-Null
+$lines.Add("- Run the real-device streaming checks in the Production handbook section of README.md.") | Out-Null
 $lines.Add("- Verify 16 KB page-size compatibility for native libraries using Android Studio/Play report or bundletool extraction.") | Out-Null
 
 Set-Content -Path $reportFullPath -Value $lines -Encoding UTF8
