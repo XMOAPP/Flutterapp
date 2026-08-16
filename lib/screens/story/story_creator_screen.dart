@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
@@ -79,7 +80,7 @@ class _StoryCreatorScreenState extends State<StoryCreatorScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to pick media: $e'),
+            content: Text(safeUserFacingText('Failed to pick media: $e')),
             backgroundColor: Colors.red,
           ),
         );

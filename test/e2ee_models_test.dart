@@ -3,11 +3,15 @@ import 'package:xmo/services/e2ee_service.dart';
 
 void main() {
   test('E2EE bootstrap result preserves a generated recovery key', () {
-    final result = E2eeBootstrapResult.success(recoveryKey: 'recovery-key');
+    final result = E2eeBootstrapResult.success(
+      recoveryKey: 'recovery-key',
+      warning: 'cleanup pending',
+    );
 
     expect(result.success, isTrue);
     expect(result.recoveryKey, 'recovery-key');
     expect(result.error, isNull);
+    expect(result.warning, 'cleanup pending');
   });
 
   test('E2EE bootstrap failure does not expose a recovery key', () {
@@ -29,10 +33,16 @@ void main() {
       deviceId: 'DEVICE',
       identityKey: 'identity',
       fingerprintKey: 'fingerprint',
+      recoveryConfigured: true,
+      recoveryHasPassphrase: true,
+      recoverySavedConfirmed: true,
     );
 
     expect(status.available, isTrue);
     expect(status.crossSigningCached, isFalse);
     expect(status.keyBackupCached, isTrue);
+    expect(status.recoveryConfigured, isTrue);
+    expect(status.recoveryHasPassphrase, isTrue);
+    expect(status.recoverySavedConfirmed, isTrue);
   });
 }

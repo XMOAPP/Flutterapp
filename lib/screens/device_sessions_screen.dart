@@ -1,10 +1,16 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:matrix/matrix.dart';
 import 'package:provider/provider.dart';
 
+import '../config/app_config.dart';
 import '../providers/matrix_provider.dart';
 import '../services/device_session_service.dart';
+import '../services/matrix_device_verification_service.dart';
+import '../services/matrix_uia_fallback_service.dart';
 import '../theme.dart';
+import 'device_verification_screen.dart';
 
 class DeviceSessionsScreen extends StatefulWidget {
   const DeviceSessionsScreen({super.key});
@@ -15,6 +21,8 @@ class DeviceSessionsScreen extends StatefulWidget {
 
 class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
   late final DeviceSessionService _service;
+  late final MatrixDeviceVerificationService _verificationService;
+  static const _uiaFallbackService = MatrixUiaFallbackService();
   List<DeviceSession> _sessions = const [];
   bool _loading = true;
   bool _working = false;
@@ -24,7 +32,43 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
   void initState() {
     super.initState();
     _service = DeviceSessionService(context.read<MatrixProvider>().service);
+    _verificationService = MatrixDeviceVerificationService(
+      context.read<MatrixProvider>().service,
+    );
     _load();
+  }
+
+  Future<void> _verify(DeviceSession session) async {
+    if (_working || session.isCurrent || session.isVerified) return;
+    setState(() => _working = true);
+    try {
+      final verification = await _verificationService.startVerification(
+        session.device.deviceId,
+      );
+      if (!mounted) return;
+      await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => DeviceVerificationScreen(
+            verification: verification,
+            matrixService: context.read<MatrixProvider>().service,
+          ),
+        ),
+      );
+      await _load();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              safeUserFacingText('Unable to verify device: $error'),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
   }
 
   Future<void> _load() async {
@@ -40,7 +84,7 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Unable to load devices: $error';
+        _error = userFacingError(error, fallback: 'Unable to load devices.');
       });
     }
   }
@@ -48,9 +92,8 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
   Future<void> _rename(DeviceSession session) async {
     final name = await showDialog<String>(
       context: context,
-      builder: (_) => _RenameDeviceDialog(
-        initialName: session.device.displayName ?? '',
-      ),
+      builder: (_) =>
+          _RenameDeviceDialog(initialName: session.device.displayName ?? ''),
     );
     if (name == null || name.isEmpty) return;
     await _run(() => _service.rename(session.device.deviceId, name));
@@ -66,6 +109,12 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
     try {
       await _run(() => _service.delete(session.device.deviceId));
     } on DeviceReauthenticationRequired catch (challenge) {
+      if (AppConfig.oidcOnlyAuthentication) {
+        final auth = await _confirmWithSso(challenge.session);
+        if (auth == null) return;
+        await _run(() => _service.delete(session.device.deviceId, auth: auth));
+        return;
+      }
       final password = await _askForPassword();
       if (password == null) return;
       await _run(
@@ -88,6 +137,12 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
     try {
       await _run(_service.deleteAllOther);
     } on DeviceReauthenticationRequired catch (challenge) {
+      if (AppConfig.oidcOnlyAuthentication) {
+        final auth = await _confirmWithSso(challenge.session);
+        if (auth == null) return;
+        await _run(() => _service.deleteAllOther(auth: auth));
+        return;
+      }
       final password = await _askForPassword();
       if (password == null) return;
       await _run(
@@ -109,7 +164,9 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Device action failed: $error')),
+          SnackBar(
+            content: Text(safeUserFacingText('Device action failed: $error')),
+          ),
         );
       }
     } finally {
@@ -123,10 +180,7 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
           builder: (context) => AlertDialog(
             backgroundColor: kDarkerGrey,
             title: Text(title, style: GoogleFonts.inter(color: kWhite)),
-            content: Text(
-              message,
-              style: GoogleFonts.inter(color: kLightGrey),
-            ),
+            content: Text(message, style: GoogleFonts.inter(color: kLightGrey)),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
@@ -151,6 +205,58 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
       barrierDismissible: false,
       builder: (_) => const _PasswordDialog(),
     );
+  }
+
+  Future<AuthenticationData?> _confirmWithSso(String? session) async {
+    try {
+      await _uiaFallbackService.open(
+        authenticationType: AuthenticationTypes.sso,
+        session: session,
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              userFacingError(
+                error,
+                fallback: 'Unable to sign out this device.',
+              ),
+            ),
+          ),
+        );
+      }
+      return null;
+    }
+    if (!mounted) return null;
+
+    final completed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: kDarkerGrey,
+        title: Text(
+          'Confirm device sign-out',
+          style: GoogleFonts.inter(color: kWhite),
+        ),
+        content: Text(
+          'Complete secure account confirmation in the browser, then return to XMO and continue.',
+          style: GoogleFonts.inter(color: kLightGrey),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    if (completed != true) return null;
+    return _uiaFallbackService.completedSession(session);
   }
 
   String _deviceName(DeviceSession session) {
@@ -193,73 +299,68 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
         ),
       ),
       body: _loading
-          ? const Center(
-              child: CircularProgressIndicator(color: kLimeGreen),
-            )
+          ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
           : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(
-                      _error!,
-                      style: GoogleFonts.inter(color: kLightGrey),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                )
-              : ListView(
-                  padding: const EdgeInsets.fromLTRB(22, 12, 22, 24),
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  _error!,
+                  style: GoogleFonts.inter(color: kLightGrey),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            )
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(22, 12, 22, 24),
+              children: [
+                Text(
+                  'These are the devices currently signed in to your XMO account.',
+                  style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+                ),
+                const SizedBox(height: 14),
+                _settingsCard(
                   children: [
-                    Text(
-                      'These are the devices currently signed in to your XMO account.',
-                      style: GoogleFonts.inter(
-                        color: kLightGrey,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    _settingsCard(
-                      children: [
-                        for (var i = 0; i < _sessions.length; i++) ...[
-                          _deviceTile(_sessions[i]),
-                          if (i != _sessions.length - 1) _divider(),
-                        ],
-                      ],
-                    ),
-                    if (_sessions.any((session) => !session.isCurrent)) ...[
-                      const SizedBox(height: 16),
-                      Center(
-                        child: SizedBox(
-                          width: 270,
-                          height: 44,
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: kWhite,
-                              foregroundColor: kBlack,
-                              disabledBackgroundColor: const Color(0xFF2C2C2E),
-                              disabledForegroundColor: kLightGrey,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(22),
-                              ),
-                              textStyle: GoogleFonts.inter(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            onPressed: _working ? null : _signOutAllOthers,
-                            child: const Text('Sign out all other devices'),
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (_working) ...[
-                      const SizedBox(height: 20),
-                      const Center(
-                        child: CircularProgressIndicator(color: kLimeGreen),
-                      ),
+                    for (var i = 0; i < _sessions.length; i++) ...[
+                      _deviceTile(_sessions[i]),
+                      if (i != _sessions.length - 1) _divider(),
                     ],
                   ],
                 ),
+                if (_sessions.any((session) => !session.isCurrent)) ...[
+                  const SizedBox(height: 16),
+                  Center(
+                    child: SizedBox(
+                      width: 270,
+                      height: 44,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kWhite,
+                          foregroundColor: kBlack,
+                          disabledBackgroundColor: const Color(0xFF2C2C2E),
+                          disabledForegroundColor: kLightGrey,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(22),
+                          ),
+                          textStyle: GoogleFonts.inter(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        onPressed: _working ? null : _signOutAllOthers,
+                        child: const Text('Sign out all other devices'),
+                      ),
+                    ),
+                  ),
+                ],
+                if (_working) ...[
+                  const SizedBox(height: 20),
+                  const Center(
+                    child: CircularProgressIndicator(color: kLimeGreen),
+                  ),
+                ],
+              ],
+            ),
     );
   }
 
@@ -268,8 +369,8 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
       session.isCurrent
           ? 'This device'
           : session.isVerified
-              ? 'Verified session'
-              : 'Unverified session',
+          ? 'Verified session'
+          : 'Unverified session',
       _lastSeen(session),
       if (session.device.lastSeenIp?.isNotEmpty == true)
         session.device.lastSeenIp!,
@@ -384,11 +485,17 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (!mounted) return;
                 if (value == 'rename') _rename(session);
+                if (value == 'verify') _verify(session);
                 if (value == 'sign_out') _signOut(session);
               });
             },
             itemBuilder: (context) => [
               const PopupMenuItem(value: 'rename', child: Text('Rename')),
+              if (!session.isCurrent && !session.isVerified)
+                const PopupMenuItem(
+                  value: 'verify',
+                  child: Text('Verify device'),
+                ),
               if (!session.isCurrent)
                 const PopupMenuItem(
                   value: 'sign_out',
@@ -429,11 +536,7 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
       child: SizedBox(
         width: 32,
         height: 32,
-        child: Icon(
-          icon,
-          color: kWhite,
-          size: 21,
-        ),
+        child: Icon(icon, color: kWhite, size: 21),
       ),
     );
   }
@@ -484,9 +587,7 @@ class _RenameDeviceDialogState extends State<_RenameDeviceDialog> {
         autofocus: true,
         cursorColor: kWhite,
         style: GoogleFonts.inter(color: kWhite),
-        decoration: _deviceDialogFieldDecoration(
-          hintText: 'Device name',
-        ),
+        decoration: _deviceDialogFieldDecoration(hintText: 'Device name'),
         onSubmitted: (_) => _close(_controller.text.trim()),
       ),
       actions: [
@@ -531,10 +632,7 @@ class _PasswordDialogState extends State<_PasswordDialog> {
       titlePadding: const EdgeInsets.fromLTRB(28, 24, 28, 14),
       contentPadding: const EdgeInsets.symmetric(horizontal: 28),
       actionsPadding: const EdgeInsets.fromLTRB(20, 14, 24, 18),
-      title: Text(
-        'Confirm password',
-        style: GoogleFonts.inter(color: kWhite),
-      ),
+      title: Text('Confirm password', style: GoogleFonts.inter(color: kWhite)),
       content: TextField(
         controller: _controller,
         autofocus: true,

@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -100,7 +101,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = 'Failed to open camera: $e';
+        _error = userFacingError(e, fallback: 'Failed to open camera.');
         _loading = false;
       });
     }
@@ -134,7 +135,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       await controller.dispose();
       if (!mounted) return;
       setState(() {
-        _error = 'Failed to initialize camera: $e';
+        _error = userFacingError(e, fallback: 'Failed to initialize camera.');
         _loading = false;
       });
     }
@@ -208,7 +209,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       setState(() => _capturing = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to capture photo: $e'),
+          content: Text(safeUserFacingText('Failed to capture photo: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -262,7 +263,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to start video: $e'),
+          content: Text(safeUserFacingText('Failed to start video: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -316,7 +317,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to record video: $e'),
+          content: Text(safeUserFacingText('Failed to record video: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -363,8 +364,9 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
 
     final videoFile = File(path);
     if (!mounted || !await videoFile.exists()) return;
-    final bytes =
-        widget.returnVideoFile ? Uint8List(0) : await videoFile.readAsBytes();
+    final bytes = widget.returnVideoFile
+        ? Uint8List(0)
+        : await videoFile.readAsBytes();
     if (!mounted || (!widget.returnVideoFile && bytes.isEmpty)) return;
 
     Navigator.pop(
@@ -398,16 +400,11 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       body: SafeArea(
         child: Stack(
           children: [
-            Positioned.fill(
-              child: _buildPreview(controller),
-            ),
+            Positioned.fill(child: _buildPreview(controller)),
             Positioned(
               top: 12,
               left: 12,
-              child: _roundButton(
-                icon: Icons.close,
-                onTap: () => _close(),
-              ),
+              child: _roundButton(icon: Icons.close, onTap: () => _close()),
             ),
             Positioned(
               top: 12,
@@ -431,8 +428,8 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
                       onTap: _capturing
                           ? null
                           : _videoMode
-                              ? _toggleVideoRecording
-                              : _capture,
+                          ? _toggleVideoRecording
+                          : _capture,
                       child: Container(
                         width: 78,
                         height: 78,
@@ -480,18 +477,14 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
                 left: 0,
                 right: 0,
                 bottom: 120,
-                child: Center(
-                  child: _buildModeSwitch(),
-                ),
+                child: Center(child: _buildModeSwitch()),
               ),
             if (_recording)
               Positioned(
                 top: 18,
                 left: 0,
                 right: 0,
-                child: Center(
-                  child: _buildRecordingPill(),
-                ),
+                child: Center(child: _buildRecordingPill()),
               ),
           ],
         ),
@@ -520,10 +513,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
             Positioned(
               top: 12,
               left: 12,
-              child: _roundButton(
-                icon: Icons.close,
-                onTap: _retake,
-              ),
+              child: _roundButton(icon: Icons.close, onTap: _retake),
             ),
             Positioned(
               left: 0,
@@ -554,10 +544,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
             Positioned(
               top: 12,
               left: 12,
-              child: _roundButton(
-                icon: Icons.close,
-                onTap: _retake,
-              ),
+              child: _roundButton(icon: Icons.close, onTap: _retake),
             ),
             Center(
               child: GestureDetector(
@@ -613,8 +600,10 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
             if (widget.showCaption)
               Expanded(
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: kDarkGrey,
                     borderRadius: BorderRadius.circular(24),
@@ -649,11 +638,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
                   color: kLimeGreen,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                  Icons.send_rounded,
-                  color: kBlack,
-                  size: 20,
-                ),
+                child: const Icon(Icons.send_rounded, color: kBlack, size: 20),
               ),
             ),
           ],
@@ -710,10 +695,14 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
   }
 
   Widget _buildRecordingPill() {
-    final minutes =
-        _recordingDuration.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final seconds =
-        _recordingDuration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    final minutes = _recordingDuration.inMinutes
+        .remainder(60)
+        .toString()
+        .padLeft(2, '0');
+    final seconds = _recordingDuration.inSeconds
+        .remainder(60)
+        .toString()
+        .padLeft(2, '0');
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
@@ -748,9 +737,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
 
   Widget _buildPreview(CameraController? controller) {
     if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(color: kLimeGreen),
-      );
+      return const Center(child: CircularProgressIndicator(color: kLimeGreen));
     }
 
     if (_error != null) {
@@ -770,9 +757,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       return const SizedBox.shrink();
     }
 
-    return Center(
-      child: CameraPreview(controller),
-    );
+    return Center(child: CameraPreview(controller));
   }
 
   Widget _roundButton({

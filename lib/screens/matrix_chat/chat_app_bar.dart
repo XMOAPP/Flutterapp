@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
@@ -93,7 +94,9 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Unable to start ${video ? 'video' : 'voice'} call: $e',
+            safeUserFacingText(
+              'Unable to start ${video ? 'video' : 'voice'} call: $e',
+            ),
           ),
           backgroundColor: Colors.red,
         ),
@@ -407,7 +410,7 @@ class ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Unable to update mute: $e'),
+          content: Text(safeUserFacingText('Unable to update mute: $e')),
           backgroundColor: Colors.red,
         ),
       );

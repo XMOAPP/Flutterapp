@@ -1005,7 +1005,7 @@ class VoipService with WidgetsBindingObserver {
       );
     } catch (e) {
       throw StateError(
-        'Unable to access microphone or camera. Check app permissions and try again. ($e)',
+        'Unable to access microphone or camera. Check app permissions and try again.',
       );
     }
   }

@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
@@ -45,7 +46,7 @@ class _AdminLogScreenState extends State<AdminLogScreen> {
         setState(() => _loading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to load admin log: $e'),
+            content: Text(safeUserFacingText('Failed to load admin log: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -83,21 +84,20 @@ class _AdminLogScreenState extends State<AdminLogScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
           : _actions.isEmpty
-              ? Center(
-                  child: Text(
-                    'No admin actions yet',
-                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
-                  ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: _actions.length,
-                  separatorBuilder: (_, __) =>
-                      const Divider(color: kMediumGrey, height: 1),
-                  itemBuilder: (_, index) => _AdminActionTile(
-                    action: _actions[index],
-                  ),
-                ),
+          ? Center(
+              child: Text(
+                'No admin actions yet',
+                style: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
+              ),
+            )
+          : ListView.separated(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              itemCount: _actions.length,
+              separatorBuilder: (_, __) =>
+                  const Divider(color: kMediumGrey, height: 1),
+              itemBuilder: (_, index) =>
+                  _AdminActionTile(action: _actions[index]),
+            ),
     );
   }
 }

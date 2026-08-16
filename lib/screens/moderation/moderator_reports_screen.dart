@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
@@ -46,7 +47,10 @@ class _ModeratorReportsScreenState extends State<ModeratorReportsScreen> {
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$error'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(safeUserFacingText('$error')),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
@@ -64,7 +68,10 @@ class _ModeratorReportsScreenState extends State<ModeratorReportsScreen> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$error'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text(safeUserFacingText('$error')),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }
@@ -93,8 +100,10 @@ class _ModeratorReportsScreenState extends State<ModeratorReportsScreen> {
                   builder: (_) => const ModeratorReportsScreen(),
                 ),
               ),
-              icon: const Icon(Icons.admin_panel_settings_outlined,
-                  color: kWhite),
+              icon: const Icon(
+                Icons.admin_panel_settings_outlined,
+                color: kWhite,
+              ),
             ),
           IconButton(
             tooltip: 'Refresh reports',
@@ -106,24 +115,24 @@ class _ModeratorReportsScreenState extends State<ModeratorReportsScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
           : _reports.isEmpty
-              ? Center(
-                  child: Text(
-                    widget.room == null
-                        ? 'No reports awaiting server review'
-                        : 'No reports for this room',
-                    style: GoogleFonts.inter(color: kLightGrey),
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  color: kLimeGreen,
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _reports.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (_, index) => _reportCard(_reports[index]),
-                  ),
-                ),
+          ? Center(
+              child: Text(
+                widget.room == null
+                    ? 'No reports awaiting server review'
+                    : 'No reports for this room',
+                style: GoogleFonts.inter(color: kLightGrey),
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              color: kLimeGreen,
+              child: ListView.separated(
+                padding: const EdgeInsets.all(16),
+                itemCount: _reports.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (_, index) => _reportCard(_reports[index]),
+              ),
+            ),
     );
   }
 
@@ -168,24 +177,36 @@ class _ModeratorReportsScreenState extends State<ModeratorReportsScreen> {
             ],
           ),
           const SizedBox(height: 10),
-          Text('Reason: ${report.reason.replaceAll('_', ' ')}',
-              style: GoogleFonts.inter(color: kWhite, fontSize: 13)),
-          Text('Context: ${report.contextType.name}',
-              style: GoogleFonts.inter(color: kLightGrey, fontSize: 12)),
+          Text(
+            'Reason: ${report.reason.replaceAll('_', ' ')}',
+            style: GoogleFonts.inter(color: kWhite, fontSize: 13),
+          ),
+          Text(
+            'Context: ${report.contextType.name}',
+            style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+          ),
           if (report.reportedUserId != null)
-            Text('Reported: ${report.reportedUserId}',
-                style: GoogleFonts.inter(color: kLightGrey, fontSize: 12)),
-          Text('Reporter: ${report.reporterUserId}',
-              style: GoogleFonts.inter(color: kLightGrey, fontSize: 12)),
+            Text(
+              'Reported: ${report.reportedUserId}',
+              style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+            ),
+          Text(
+            'Reporter: ${report.reporterUserId}',
+            style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+          ),
           if (report.eventId != null)
-            Text('Event: ${report.eventId}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.inter(color: kLightGrey, fontSize: 11)),
+            Text(
+              'Event: ${report.eventId}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
+            ),
           if (report.details?.isNotEmpty == true) ...[
             const SizedBox(height: 8),
-            Text(report.details!,
-                style: GoogleFonts.inter(color: kWhite, fontSize: 13)),
+            Text(
+              report.details!,
+              style: GoogleFonts.inter(color: kWhite, fontSize: 13),
+            ),
           ],
           if (report.status == XmoReportStatus.pending) ...[
             const SizedBox(height: 12),

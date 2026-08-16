@@ -8,10 +8,22 @@ import 'package:web3dart/web3dart.dart';
 import 'package:xmo_auth_server/src/wallet_auth_service.dart';
 
 void main() {
-  test('verifies personal_sign challenge and rejects replay', () async {
+  group('WalletAuthService username rules', () {
+    test('normalizes capitals and rejects punctuation', () {
+      expect(WalletAuthService.normalizeUsername('Alice01'), 'alice01');
+      expect(
+        () => WalletAuthService.normalizeUsername('alice_01'),
+        throwsA(isA<WalletAuthException>()),
+      );
+    });
+  });
+
+  test('verifies a personal_sign challenge and issues a short JWT', () async {
     final service = WalletAuthService(
       config: const WalletAuthConfig(
-        secret: 'test-wallet-secret-that-is-long-enough-for-hmac',
+        jwtSecret: 'test-wallet-secret-that-is-long-enough-for-hmac',
+        jwtIssuer: 'xmo-wallet-auth',
+        jwtAudience: 'xmo-matrix',
         domain: 'xmo.test',
         uri: 'https://xmo.test',
         statement: 'Sign in to XMO.',
@@ -31,7 +43,8 @@ void main() {
       utf8.encode(challenge.message),
     );
 
-    final verification = await service.verify(
+    await service.verify(
+      challenge: challenge,
       username: 'alice',
       address: address,
       message: challenge.message,
@@ -39,25 +52,24 @@ void main() {
       mode: 'login',
     );
 
-    expect(verification.username, 'alice');
-    expect(verification.address, address.toLowerCase());
-    expect(verification.matrixPassword, startsWith('xmo_wallet_v1_'));
-    await expectLater(
-      service.verify(
-        username: 'alice',
-        address: address,
-        message: challenge.message,
-        signature: bytesToHex(signature, include0x: true),
-        mode: 'login',
-      ),
-      throwsA(isA<WalletAuthException>()),
-    );
+    final token = service.issueMatrixLoginToken('alice');
+    final parts = token.split('.');
+    expect(parts, hasLength(3));
+    final claims = jsonDecode(
+      utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
+    ) as Map<String, dynamic>;
+    expect(claims['sub'], 'alice');
+    expect(claims['iss'], 'xmo-wallet-auth');
+    expect(claims['aud'], 'xmo-matrix');
+    expect((claims['exp'] as int) - (claims['iat'] as int), 60);
   });
 
   test('verifies Solana Ed25519 challenge', () async {
     final service = WalletAuthService(
       config: const WalletAuthConfig(
-        secret: 'test-wallet-secret-that-is-long-enough-for-hmac',
+        jwtSecret: 'test-wallet-secret-that-is-long-enough-for-hmac',
+        jwtIssuer: 'xmo-wallet-auth',
+        jwtAudience: 'xmo-matrix',
         domain: 'xmo.test',
         uri: 'https://xmo.test',
         statement: 'Sign in to XMO.',
@@ -83,7 +95,8 @@ void main() {
       keyPair: keyPair,
     );
 
-    final verification = await service.verify(
+    await service.verify(
+      challenge: challenge,
       username: 'alice',
       address: address,
       message: challenge.message,
@@ -92,16 +105,14 @@ void main() {
       walletType: WalletAuthTypes.solana,
     );
 
-    expect(verification.username, 'alice');
-    expect(verification.address, address);
-    expect(verification.walletType, WalletAuthTypes.solana);
-    expect(verification.matrixPassword, startsWith('xmo_wallet_v1_'));
   });
 
   test('requires a strong server secret', () {
     final service = WalletAuthService(
       config: const WalletAuthConfig(
-        secret: 'short',
+        jwtSecret: 'short',
+        jwtIssuer: 'xmo-wallet-auth',
+        jwtAudience: 'xmo-matrix',
         domain: 'xmo.test',
         uri: 'https://xmo.test',
         statement: 'Sign in to XMO.',
@@ -112,6 +123,42 @@ void main() {
       () => service.createChallenge(
         username: 'alice',
         address: '0x0000000000000000000000000000000000000001',
+        mode: 'login',
+      ),
+      throwsA(isA<WalletAuthException>()),
+    );
+  });
+
+  test('rejects a signature for a different challenge', () async {
+    final service = WalletAuthService(
+      config: const WalletAuthConfig(
+        jwtSecret: 'test-wallet-secret-that-is-long-enough-for-hmac',
+        jwtIssuer: 'xmo-wallet-auth',
+        jwtAudience: 'xmo-matrix',
+        domain: 'xmo.test',
+        uri: 'https://xmo.test',
+        statement: 'Sign in to XMO.',
+      ),
+    );
+    final credentials = EthPrivateKey.fromHex(
+      '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+    );
+    final challenge = service.createChallenge(
+      username: 'alice',
+      address: credentials.address.with0x,
+      mode: 'login',
+    );
+    final alteredMessage = '${challenge.message} changed';
+    final signature = credentials.signPersonalMessageToUint8List(
+      utf8.encode(alteredMessage),
+    );
+    await expectLater(
+      service.verify(
+        challenge: challenge,
+        username: 'alice',
+        address: credentials.address.with0x,
+        message: alteredMessage,
+        signature: bytesToHex(signature, include0x: true),
         mode: 'login',
       ),
       throwsA(isA<WalletAuthException>()),

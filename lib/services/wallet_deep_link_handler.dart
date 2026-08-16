@@ -2,9 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:reown_appkit/reown_appkit.dart';
 
+import 'account_deletion_completion_service.dart';
 import 'call_link_service.dart';
 import 'invite_link_service.dart';
 import 'matrix_sso_service.dart';
+import 'mfa_setup_completion_service.dart';
 
 class WalletDeepLinkHandler {
   static const _methodChannel = MethodChannel('com.xmo.xmo/wallet_methods');
@@ -45,6 +47,10 @@ class WalletDeepLinkHandler {
     final value = link?.toString();
     if (value == null || value.isEmpty) return;
 
+    if (MfaSetupCompletionService.instance.handleLink(value)) return;
+    if (await AccountDeletionCompletionService.instance.handleLink(value)) {
+      return;
+    }
     if (MatrixSsoService.instance.handleLink(value)) return;
 
     final appKitModal = _appKitModal;
@@ -100,9 +106,13 @@ class WalletDeepLinkHandler {
     if (uri == null || uri.userInfo.isNotEmpty || uri.hasPort) return false;
     final scheme = uri.scheme.toLowerCase();
     if (scheme == 'wc') return value.trim().length > 3;
-    return scheme == 'xmo' &&
-        uri.host.toLowerCase() == 'wallet' &&
-        (uri.path.isEmpty || uri.path == '/') &&
-        uri.fragment.isEmpty;
+    if (scheme == 'xmo') {
+      return uri.host.toLowerCase() == 'wallet' &&
+          (uri.path.isEmpty || uri.path == '/') &&
+          uri.fragment.isEmpty;
+    }
+    return scheme == 'https' &&
+        uri.host.toLowerCase() == 'xmo.dpdns.org' &&
+        (uri.path == '/wallet' || uri.path == '/wallet/');
   }
 }

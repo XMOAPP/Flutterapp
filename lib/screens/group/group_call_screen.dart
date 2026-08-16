@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -121,7 +122,11 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
       setState(() => _leaving = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to ${_canEndCall ? 'end' : 'leave'} call: $e'),
+          content: Text(
+            safeUserFacingText(
+              'Failed to ${_canEndCall ? 'end' : 'leave'} call: $e',
+            ),
+          ),
         ),
       );
     }

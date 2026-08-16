@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../config/app_config.dart';
+import '../providers/matrix_provider.dart';
+import '../services/matrix_sso_service.dart';
 import '../services/otp_service.dart';
 import '../theme.dart';
+import 'home_screen.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -80,7 +86,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         });
       } else if (_step == 1) {
         setState(() => _step = 2);
-      } else {
+      } else if (_step == 2) {
         final error = await OtpService().completePasswordReset(
           username: _usernameCtrl.text.trim(),
           email: _emailCtrl.text.trim(),
@@ -92,13 +98,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
           setState(() => _error = error);
           return;
         }
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Password changed. Login with your new password.'),
-            backgroundColor: kLimeGreen,
-          ),
-        );
-        Navigator.pop(context);
+        setState(() => _step = 3);
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -123,12 +123,63 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     });
   }
 
+  Future<void> _openTwoStepSetup() async {
+    if (!AppConfig.isSsoLoginConfigured ||
+        AppConfig.mfaSetupUrl.trim().isEmpty) {
+      setState(() {
+        _error = 'Two-step verification is not available yet.';
+      });
+      return;
+    }
+
+    final opened = await launchUrl(
+      Uri.parse(AppConfig.mfaSetupUrl),
+      mode: LaunchMode.externalApplication,
+    );
+    if (!mounted || opened) return;
+    setState(() {
+      _error = 'Could not open two-step verification. Please try again.';
+    });
+  }
+
+  Future<void> _signInAfterRecovery() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final token = await MatrixSsoService.instance.startSignIn();
+      if (!mounted) return;
+      final signedIn = await context.read<MatrixProvider>().loginWithSsoToken(
+        token,
+      );
+      if (!mounted) return;
+      if (!signedIn) {
+        setState(() {
+          _error =
+              context.read<MatrixProvider>().error ??
+              'Secure sign-in could not be completed.';
+        });
+        return;
+      }
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+        (route) => false,
+      );
+    } on MatrixSsoException catch (error) {
+      if (!mounted) return;
+      setState(() => _error = error.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     final viewInsets = MediaQuery.viewInsetsOf(context);
-    final horizontalPadding =
-        (size.width * 0.08).clamp(20.0, 28.0).toDouble();
+    final horizontalPadding = (size.width * 0.08).clamp(20.0, 28.0).toDouble();
 
     return Scaffold(
       backgroundColor: kBlack,
@@ -187,7 +238,13 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                     width: double.infinity,
                     height: 40,
                     child: ElevatedButton(
-                      onPressed: _canContinue ? _continue : null,
+                      onPressed: _step == 3
+                          ? (_busy
+                                ? null
+                                : (AppConfig.oidcOnlyAuthentication
+                                      ? _signInAfterRecovery
+                                      : _openTwoStepSetup))
+                          : (_canContinue ? _continue : null),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: kWhite,
                         foregroundColor: kBlack,
@@ -208,7 +265,11 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                               ),
                             )
                           : Text(
-                              _buttonText,
+                              _step == 3
+                                  ? (AppConfig.oidcOnlyAuthentication
+                                        ? 'Continue to login'
+                                        : 'Set Up Authenticator')
+                                  : _buttonText,
                               style: GoogleFonts.inter(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
@@ -231,6 +292,20 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                     ),
                   ),
                 ],
+                if (_step == 3) ...[
+                  const SizedBox(height: 14),
+                  TextButton(
+                    onPressed: _busy ? null : () => Navigator.pop(context),
+                    child: Text(
+                      'Back to login',
+                      style: GoogleFonts.inter(
+                        color: kLimeGreen,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -245,6 +320,11 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     }
     if (_step == 1) {
       return 'Enter the 6-digit reset code sent to your email.';
+    }
+    if (_step == 3) {
+      return AppConfig.oidcOnlyAuthentication
+          ? 'Your password was updated. Continue to sign in.'
+          : 'Your password was updated. Set up an authenticator now to add two-step verification.';
     }
     return 'Choose a new password for your XMO account.';
   }
@@ -301,56 +381,79 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         ),
       ];
     }
+    if (_step == 2) {
+      return [
+        _ResetTextField(
+          controller: _passwordCtrl,
+          label: 'New Password',
+          hint: 'Password',
+          obscure: !_showPassword,
+          suffixIcon: IconButton(
+            icon: Icon(
+              _showPassword
+                  ? Icons.visibility_outlined
+                  : Icons.visibility_off_outlined,
+              color: kLightGrey,
+            ),
+            onPressed: () => setState(() => _showPassword = !_showPassword),
+          ),
+          validator: (value) {
+            if ((value ?? '').length < 6) return 'Min 6 characters';
+            return null;
+          },
+        ),
+        const SizedBox(height: 14),
+        _ResetTextField(
+          controller: _confirmCtrl,
+          label: 'Confirm Password',
+          hint: 'Password',
+          obscure: !_showConfirm,
+          suffixIcon: IconButton(
+            icon: Icon(
+              _showConfirm
+                  ? Icons.visibility_outlined
+                  : Icons.visibility_off_outlined,
+              color: kLightGrey,
+            ),
+            onPressed: () => setState(() => _showConfirm = !_showConfirm),
+          ),
+          validator: (value) {
+            if (value == null || value.isEmpty) return 'Required';
+            if (value != _passwordCtrl.text) return 'Passwords do not match';
+            return null;
+          },
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Encrypted chat history still requires your recovery key after reinstall.',
+          textAlign: TextAlign.center,
+          style: GoogleFonts.inter(
+            color: kLightGrey,
+            fontSize: 12,
+            height: 1.35,
+          ),
+        ),
+      ];
+    }
+
     return [
-      _ResetTextField(
-        controller: _passwordCtrl,
-        label: 'New Password',
-        hint: 'Password',
-        obscure: !_showPassword,
-        suffixIcon: IconButton(
-          icon: Icon(
-            _showPassword
-                ? Icons.visibility_outlined
-                : Icons.visibility_off_outlined,
-            color: kLightGrey,
-          ),
-          onPressed: () => setState(() => _showPassword = !_showPassword),
-        ),
-        validator: (value) {
-          if ((value ?? '').length < 6) return 'Min 6 characters';
-          return null;
-        },
-      ),
-      const SizedBox(height: 14),
-      _ResetTextField(
-        controller: _confirmCtrl,
-        label: 'Confirm Password',
-        hint: 'Password',
-        obscure: !_showConfirm,
-        suffixIcon: IconButton(
-          icon: Icon(
-            _showConfirm
-                ? Icons.visibility_outlined
-                : Icons.visibility_off_outlined,
-            color: kLightGrey,
-          ),
-          onPressed: () => setState(() => _showConfirm = !_showConfirm),
-        ),
-        validator: (value) {
-          if (value == null || value.isEmpty) return 'Required';
-          if (value != _passwordCtrl.text) return 'Passwords do not match';
-          return null;
-        },
-      ),
-      const SizedBox(height: 12),
+      const Icon(Icons.verified_user_outlined, color: kLimeGreen, size: 44),
+      const SizedBox(height: 16),
       Text(
-        'Encrypted chat history still requires your recovery key after reinstall.',
-        textAlign: TextAlign.center,
+        'Password updated',
         style: GoogleFonts.inter(
-          color: kLightGrey,
-          fontSize: 12,
-          height: 1.35,
+          color: kWhite,
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
         ),
+      ),
+      const SizedBox(height: 8),
+      Text(
+        AppConfig.oidcOnlyAuthentication
+            ? 'Continue to securely sign in with your new password.'
+            : 'Use the same username and new password to continue in your secure account.',
+        textAlign: TextAlign.center,
+        style: GoogleFonts.inter(color: kLightGrey, fontSize: 13, height: 1.35),
       ),
     ];
   }
@@ -434,10 +537,7 @@ class _ResetTextField extends StatelessWidget {
 }
 
 class _ResetCodeBoxesField extends StatefulWidget {
-  const _ResetCodeBoxesField({
-    required this.controller,
-    this.validator,
-  });
+  const _ResetCodeBoxesField({required this.controller, this.validator});
 
   final TextEditingController controller;
   final String? Function(String?)? validator;
@@ -490,8 +590,10 @@ class _ResetCodeBoxesFieldState extends State<_ResetCodeBoxesField> {
                   final gap = constraints.maxWidth < 300 ? 6.0 : 8.0;
                   final availableForBoxes =
                       constraints.maxWidth - (gap * (count - 1));
-                  final boxWidth =
-                      (availableForBoxes / count).clamp(32.0, 46.0);
+                  final boxWidth = (availableForBoxes / count).clamp(
+                    32.0,
+                    46.0,
+                  );
                   final boxHeight = (boxWidth * 1.22).clamp(44.0, 56.0);
                   final complete = code.length == count;
 
@@ -504,8 +606,9 @@ class _ResetCodeBoxesFieldState extends State<_ResetCodeBoxesField> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: List.generate(count, (index) {
-                              final digit =
-                                  index < code.length ? code[index] : '';
+                              final digit = index < code.length
+                                  ? code[index]
+                                  : '';
                               return SizedBox(
                                 width: boxWidth,
                                 height: boxHeight,
@@ -559,10 +662,7 @@ class _ResetCodeBoxesFieldState extends State<_ResetCodeBoxesField> {
               const SizedBox(height: 6),
               Text(
                 field.errorText!,
-                style: GoogleFonts.inter(
-                  color: Colors.redAccent,
-                  fontSize: 12,
-                ),
+                style: GoogleFonts.inter(color: Colors.redAccent, fontSize: 12),
               ),
             ],
           ],
@@ -583,11 +683,7 @@ class _StatusText extends StatelessWidget {
     return Text(
       text,
       textAlign: TextAlign.center,
-      style: GoogleFonts.inter(
-        color: color,
-        fontSize: 13,
-        height: 1.35,
-      ),
+      style: GoogleFonts.inter(color: color, fontSize: 13, height: 1.35),
     );
   }
 }

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../theme.dart';
+import '../../utils/xmo_username.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // WALLET AUTH STEPS
@@ -14,9 +14,9 @@ class UsernameStep extends StatelessWidget {
   final VoidCallback onContinue;
   final bool isBusy;
   final String buttonLabel;
-  final String footerText;
-  final String footerActionLabel;
-  final VoidCallback onFooterAction;
+  final String? footerText;
+  final String? footerActionLabel;
+  final VoidCallback? onFooterAction;
 
   const UsernameStep({
     super.key,
@@ -25,9 +25,9 @@ class UsernameStep extends StatelessWidget {
     required this.onContinue,
     this.isBusy = false,
     this.buttonLabel = 'Continue',
-    required this.footerText,
-    required this.footerActionLabel,
-    required this.onFooterAction,
+    this.footerText,
+    this.footerActionLabel,
+    this.onFooterAction,
   });
 
   @override
@@ -41,18 +41,19 @@ class UsernameStep extends StatelessWidget {
             child: Text(
               'USERNAME',
               style: GoogleFonts.inter(
-                  color: kLightGrey,
-                  fontSize: 9,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.8),
+                color: kLightGrey,
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.8,
+              ),
             ),
           ),
           const SizedBox(height: 6),
           TextFormField(
             controller: controller,
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9_\-]'))
-            ],
+            autocorrect: false,
+            textCapitalization: TextCapitalization.none,
+            inputFormatters: xmoUsernameInputFormatters(),
             cursorColor: kWhite,
             style: GoogleFonts.inter(color: kWhite, fontSize: 14),
             decoration: InputDecoration(
@@ -61,34 +62,47 @@ class UsernameStep extends StatelessWidget {
               filled: true,
               fillColor: const Color(0xFF2C2C2E),
               border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(25),
-                  borderSide: BorderSide.none),
+                borderRadius: BorderRadius.circular(25),
+                borderSide: BorderSide.none,
+              ),
               enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(25),
-                  borderSide: BorderSide.none),
+                borderRadius: BorderRadius.circular(25),
+                borderSide: BorderSide.none,
+              ),
               focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(25),
-                  borderSide: const BorderSide(color: kWhite, width: 1)),
+                borderRadius: BorderRadius.circular(25),
+                borderSide: const BorderSide(color: kWhite, width: 1),
+              ),
               errorBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(25),
-                  borderSide:
-                      BorderSide(color: Colors.red.withValues(alpha: 0.6))),
+                borderRadius: BorderRadius.circular(25),
+                borderSide: BorderSide(
+                  color: Colors.red.withValues(alpha: 0.6),
+                ),
+              ),
               focusedErrorBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(25),
-                  borderSide: BorderSide(
-                      color: Colors.red.withValues(alpha: 0.6), width: 2)),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                borderRadius: BorderRadius.circular(25),
+                borderSide: BorderSide(
+                  color: Colors.red.withValues(alpha: 0.6),
+                  width: 2,
+                ),
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 18,
+                vertical: 12,
+              ),
             ),
             validator: (v) {
               if (v == null || v.trim().isEmpty) return 'Username is required';
+              if (!isValidXmoUsername(v.trim())) {
+                return 'Use lowercase letters and numbers only';
+              }
               if (v.trim().length < 3) return 'Min 3 characters';
               return null;
             },
           ),
           const SizedBox(height: 6),
           Text(
-            'Only letters, numbers, _ and - allowed',
+            'Only lowercase letters and numbers allowed',
             style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
           ),
           const SizedBox(height: 24),
@@ -104,7 +118,8 @@ class UsernameStep extends StatelessWidget {
                   foregroundColor: kBlack,
                   disabledBackgroundColor: kWhite.withValues(alpha: 0.5),
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30)),
+                    borderRadius: BorderRadius.circular(30),
+                  ),
                   elevation: 0,
                 ),
                 child: isBusy
@@ -119,38 +134,44 @@ class UsernameStep extends StatelessWidget {
                     : Text(
                         buttonLabel,
                         style: GoogleFonts.inter(
-                            fontSize: 14, fontWeight: FontWeight.w600),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
               ),
             ),
           ),
-          const SizedBox(height: 14),
-          TextButton(
-            onPressed: isBusy ? null : onFooterAction,
-            style: TextButton.styleFrom(
-              foregroundColor: kWhite,
-              disabledForegroundColor: kLightGrey,
-              padding: EdgeInsets.zero,
-              minimumSize: const Size(0, 32),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            child: RichText(
-              text: TextSpan(
-                style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
-                children: [
-                  TextSpan(text: '$footerText '),
-                  TextSpan(
-                    text: footerActionLabel,
-                    style: GoogleFonts.inter(
-                      color: kWhite,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+          if (footerText != null &&
+              footerActionLabel != null &&
+              onFooterAction != null) ...[
+            const SizedBox(height: 14),
+            TextButton(
+              onPressed: isBusy ? null : onFooterAction,
+              style: TextButton.styleFrom(
+                foregroundColor: kWhite,
+                disabledForegroundColor: kLightGrey,
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: RichText(
+                text: TextSpan(
+                  style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
+                  children: [
+                    TextSpan(text: '$footerText '),
+                    TextSpan(
+                      text: footerActionLabel!,
+                      style: GoogleFonts.inter(
+                        color: kWhite,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -178,10 +199,11 @@ class ConnectWalletStep extends StatelessWidget {
           child: Text(
             'CHOOSE WALLET',
             style: GoogleFonts.inter(
-                color: kLightGrey,
-                fontSize: 9,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.8),
+              color: kLightGrey,
+              fontSize: 9,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.8,
+            ),
           ),
         ),
         const SizedBox(height: 12),
@@ -195,10 +217,9 @@ class ConnectWalletStep extends StatelessWidget {
         else if (wallets.isEmpty)
           const _WalletUnavailableMessage()
         else
-          ...wallets.map((name) => WalletTile(
-                name: name,
-                onTap: () => onConnect(name),
-              )),
+          ...wallets.map(
+            (name) => WalletTile(name: name, onTap: () => onConnect(name)),
+          ),
       ],
     );
   }
@@ -223,11 +244,7 @@ class _WalletUnavailableMessage extends StatelessWidget {
       child: Text(
         message,
         textAlign: TextAlign.center,
-        style: GoogleFonts.inter(
-          color: kLightGrey,
-          fontSize: 13,
-          height: 1.4,
-        ),
+        style: GoogleFonts.inter(color: kLightGrey, fontSize: 13, height: 1.4),
       ),
     );
   }
@@ -240,6 +257,7 @@ class SignMessageStep extends StatelessWidget {
   final VoidCallback onSign;
   final String Function(String) shortAddress;
   final String buttonLabel;
+  final bool showWalletLossWarning;
 
   const SignMessageStep({
     super.key,
@@ -249,6 +267,7 @@ class SignMessageStep extends StatelessWidget {
     required this.onSign,
     required this.shortAddress,
     this.buttonLabel = 'Sign & Continue',
+    this.showWalletLossWarning = false,
   });
 
   @override
@@ -267,7 +286,10 @@ class SignMessageStep extends StatelessWidget {
             child: Text(
               shortAddress(connectedAddress),
               style: GoogleFonts.inter(
-                  color: kWhite, fontSize: 14, fontWeight: FontWeight.w600),
+                color: kWhite,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ),
@@ -283,7 +305,10 @@ class SignMessageStep extends StatelessWidget {
             child: Text(
               username,
               style: GoogleFonts.inter(
-                  color: kWhite, fontSize: 14, fontWeight: FontWeight.w600),
+                color: kWhite,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ),
@@ -291,9 +316,41 @@ class SignMessageStep extends StatelessWidget {
         Text(
           'Your wallet will ask you to sign a message.\nNo transaction or gas fees required.',
           textAlign: TextAlign.center,
-          style:
-              GoogleFonts.inter(color: kLightGrey, fontSize: 12, height: 1.6),
+          style: GoogleFonts.inter(
+            color: kLightGrey,
+            fontSize: 12,
+            height: 1.6,
+          ),
         ),
+        if (showWalletLossWarning) ...[
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.red.withValues(alpha: 0.12),
+              border: Border.all(color: Colors.red.withValues(alpha: 0.45)),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.warning_amber_rounded, color: Colors.red),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'This wallet is your account key. If you lose access to it, XMO cannot recover this wallet-only account.',
+                    style: GoogleFonts.inter(
+                      color: kWhite,
+                      fontSize: 12,
+                      height: 1.45,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 24),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 40),
@@ -307,7 +364,8 @@ class SignMessageStep extends StatelessWidget {
                 foregroundColor: kBlack,
                 disabledBackgroundColor: kWhite.withValues(alpha: 0.5),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30)),
+                  borderRadius: BorderRadius.circular(30),
+                ),
                 elevation: 0,
               ),
               child: isBusy
@@ -315,11 +373,16 @@ class SignMessageStep extends StatelessWidget {
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2.5, color: kBlack))
+                        strokeWidth: 2.5,
+                        color: kBlack,
+                      ),
+                    )
                   : Text(
                       buttonLabel,
                       style: GoogleFonts.inter(
-                          fontSize: 14, fontWeight: FontWeight.w600),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
             ),
           ),
@@ -333,11 +396,7 @@ class WalletTile extends StatelessWidget {
   final String name;
   final VoidCallback? onTap;
 
-  const WalletTile({
-    super.key,
-    required this.name,
-    this.onTap,
-  });
+  const WalletTile({super.key, required this.name, this.onTap});
 
   @override
   Widget build(BuildContext context) {

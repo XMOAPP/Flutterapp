@@ -53,16 +53,13 @@ class MessageReplyContext extends StatelessWidget {
     if (!_replyEventFutures.containsKey(cacheKey)) {
       _trimOldestEntry(_replyEventFutures, _maxReplyEventCacheEntries);
     }
-    final future = _replyEventFutures.putIfAbsent(
-      cacheKey,
-      () async {
-        try {
-          return await relationEvent.room.getEventById(replyEventId);
-        } catch (_) {
-          return null;
-        }
-      },
-    );
+    final future = _replyEventFutures.putIfAbsent(cacheKey, () async {
+      try {
+        return await relationEvent.room.getEventById(replyEventId);
+      } catch (_) {
+        return null;
+      }
+    });
 
     return FutureBuilder<Event?>(
       future: future,
@@ -167,7 +164,6 @@ String _replyPreviewText(Event event) {
       final body = matrixVisibleBody(event).trim();
       return body.isEmpty ? 'File' : body;
     default:
-      if (event.type == EventTypes.Sticker) return 'Sticker';
       final body = matrixVisibleBody(event).trim();
       return body.isEmpty ? 'Message' : body;
   }
@@ -204,10 +200,7 @@ class _ReplyThumbnail extends StatelessWidget {
     final isImage = source.messageType == MessageTypes.Image;
     final cacheKey = '${source.room.id}|${source.eventId}|$isImage';
     if (!_replyThumbnailFutures.containsKey(cacheKey)) {
-      _trimOldestEntry(
-        _replyThumbnailFutures,
-        _maxReplyThumbnailCacheEntries,
-      );
+      _trimOldestEntry(_replyThumbnailFutures, _maxReplyThumbnailCacheEntries);
     }
     final future = _replyThumbnailFutures.putIfAbsent(cacheKey, () {
       if (isImage) {

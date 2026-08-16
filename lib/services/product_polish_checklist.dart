@@ -43,17 +43,6 @@ class ProductPolishChecklist {
       ],
     ),
     ProductPolishItem(
-      id: 'stickers',
-      title: 'Sticker send and receive',
-      objective:
-          'Sticker events display the image, sender label, timestamp, and fallback state.',
-      requiredEvidence: [
-        'Sticker sent and received in encrypted and unencrypted rooms',
-        'Broken sticker media shows fallback icon',
-        'Sticker bubble does not overflow in split screen',
-      ],
-    ),
-    ProductPolishItem(
       id: 'link_previews',
       title: 'Link previews',
       objective:
@@ -113,9 +102,7 @@ class ProductPolishChecklist {
   static Iterable<ProductPolishItem> get blockingItems =>
       items.where((item) => item.blocksBetaClaim);
 
-  static bool isBetaReady(
-    Map<String, ProductPolishEvidenceStatus> evidence,
-  ) {
+  static bool isBetaReady(Map<String, ProductPolishEvidenceStatus> evidence) {
     return blockingItems.every(
       (item) => evidence[item.id] == ProductPolishEvidenceStatus.passed,
     );
@@ -126,7 +113,8 @@ class ProductPolishChecklist {
   ) {
     return blockingItems
         .where(
-            (item) => evidence[item.id] != ProductPolishEvidenceStatus.passed)
+          (item) => evidence[item.id] != ProductPolishEvidenceStatus.passed,
+        )
         .map((item) => item.id)
         .toList(growable: false);
   }

@@ -6,6 +6,7 @@ import 'package:hive/hive.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../models/story_models.dart';
+import '../utils/user_facing_error.dart';
 import 'story_service.dart';
 
 enum StoryUploadStatus { queued, running, completed, failed, cancelled }
@@ -199,7 +200,12 @@ class StoryUploadJob {
           DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
           DateTime.now(),
       nextRetryAt: DateTime.tryParse(json['nextRetryAt'] as String? ?? ''),
-      error: json['error'] as String?,
+      error: json['error'] == null
+          ? null
+          : userFacingError(
+              json['error'],
+              fallback: 'Story upload failed. Please retry.',
+            ),
     );
   }
 }
@@ -625,8 +631,10 @@ class StoryUploadQueueService {
   }
 
   String _shortError(Object error) {
-    final value = error.toString();
-    return value.length > 180 ? '${value.substring(0, 180)}...' : value;
+    return userFacingError(
+      error,
+      fallback: 'Story upload failed. Please retry.',
+    );
   }
 
   void _emit() {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:xmo/utils/user_facing_error.dart';
 
 import '../services/app_lock_service.dart';
 import '../theme.dart';
@@ -31,19 +32,13 @@ class _AppLockSettingsScreenState extends State<AppLockSettingsScreen> {
   Future<void> _toggleLock(bool enabled) async {
     if (_working) return;
     if (!enabled) {
-      final pin = await _askForPin(
-        title: 'Disable app lock',
-        confirm: false,
-      );
+      final pin = await _askForPin(title: 'Disable app lock', confirm: false);
       if (pin == null) return;
       await _run(() => _service.disable(pin));
       return;
     }
 
-    final pin = await _askForPin(
-      title: 'Create app lock PIN',
-      confirm: true,
-    );
+    final pin = await _askForPin(title: 'Create app lock PIN', confirm: true);
     if (pin == null) return;
     await _run(
       () => _service.enable(
@@ -71,9 +66,9 @@ class _AppLockSettingsScreenState extends State<AppLockSettingsScreen> {
       await action();
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_messageFor(error))),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_messageFor(error))));
       }
     } finally {
       if (mounted) setState(() => _working = false);
@@ -81,10 +76,10 @@ class _AppLockSettingsScreenState extends State<AppLockSettingsScreen> {
   }
 
   String _messageFor(Object error) {
-    final message = error.toString();
-    return message
-        .replaceFirst('Bad state: ', '')
-        .replaceFirst('Invalid argument(s): ', '');
+    return userFacingError(
+      error,
+      fallback: 'Could not update App Lock. Please try again.',
+    );
   }
 
   @override
@@ -129,7 +124,7 @@ class _AppLockSettingsScreenState extends State<AppLockSettingsScreen> {
                       onChanged: !_biometricsAvailable || _working
                           ? null
                           : (value) =>
-                              _run(() => _service.setBiometricEnabled(value)),
+                                _run(() => _service.setBiometricEnabled(value)),
                     ),
                   ],
                 ],
@@ -153,15 +148,13 @@ class _AppLockSettingsScreenState extends State<AppLockSettingsScreen> {
                         ),
                       ),
                     ),
-                    ..._timeoutEntries().expand(
-                      (entry) sync* {
-                        yield _timeoutOption(
-                          value: entry.key,
-                          label: entry.value,
-                        );
-                        if (entry.key != 1800) yield _cardDivider();
-                      },
-                    ),
+                    ..._timeoutEntries().expand((entry) sync* {
+                      yield _timeoutOption(
+                        value: entry.key,
+                        label: entry.value,
+                      );
+                      if (entry.key != 1800) yield _cardDivider();
+                    }),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -212,26 +205,24 @@ class _AppLockSettingsScreenState extends State<AppLockSettingsScreen> {
   }
 
   Iterable<MapEntry<int, String>> _timeoutEntries() => const {
-        0: 'Immediately',
-        30: 'After 30 seconds',
-        60: 'After 1 minute',
-        300: 'After 5 minutes',
-        1800: 'After 30 minutes',
-      }.entries;
+    0: 'Immediately',
+    30: 'After 30 seconds',
+    60: 'After 1 minute',
+    300: 'After 5 minutes',
+    1800: 'After 30 minutes',
+  }.entries;
 
   Text _title(String text) => Text(
-        text,
-        style: GoogleFonts.inter(
-          color: kWhite,
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-        ),
-      );
+    text,
+    style: GoogleFonts.inter(
+      color: kWhite,
+      fontSize: 14,
+      fontWeight: FontWeight.w600,
+    ),
+  );
 
-  Text _subtitle(String text) => Text(
-        text,
-        style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
-      );
+  Text _subtitle(String text) =>
+      Text(text, style: GoogleFonts.inter(color: kLightGrey, fontSize: 12));
 
   Widget _settingsCard({required List<Widget> children}) {
     return Container(
@@ -244,11 +235,7 @@ class _AppLockSettingsScreenState extends State<AppLockSettingsScreen> {
   }
 
   Widget _cardDivider() {
-    return const Divider(
-      color: Color(0xFF242B33),
-      height: 1,
-      indent: 72,
-    );
+    return const Divider(color: Color(0xFF242B33), height: 1, indent: 72);
   }
 
   Widget _iconBox(IconData icon) {
@@ -297,10 +284,7 @@ class _AppLockSettingsScreenState extends State<AppLockSettingsScreen> {
     );
   }
 
-  Widget _timeoutOption({
-    required int value,
-    required String label,
-  }) {
+  Widget _timeoutOption({required int value, required String label}) {
     final selected = _service.timeoutSeconds == value;
     return InkWell(
       onTap: _working ? null : () => _run(() => _service.setTimeout(value)),
@@ -328,10 +312,7 @@ class _AppLockPinDialog extends StatefulWidget {
   final String title;
   final bool confirm;
 
-  const _AppLockPinDialog({
-    required this.title,
-    required this.confirm,
-  });
+  const _AppLockPinDialog({required this.title, required this.confirm});
 
   @override
   State<_AppLockPinDialog> createState() => _AppLockPinDialogState();
@@ -421,8 +402,10 @@ class _AppLockPinDialogState extends State<_AppLockPinDialog> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(18),
-          borderSide:
-              BorderSide(color: kWhite.withValues(alpha: 0.45), width: 1),
+          borderSide: BorderSide(
+            color: kWhite.withValues(alpha: 0.45),
+            width: 1,
+          ),
         ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 16,
@@ -445,9 +428,7 @@ class _AppLockPinDialogState extends State<_AppLockPinDialog> {
       titlePadding: const EdgeInsets.fromLTRB(28, 26, 28, 12),
       contentPadding: const EdgeInsets.fromLTRB(28, 0, 28, 18),
       actionsPadding: const EdgeInsets.fromLTRB(18, 0, 22, 18),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(28),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
       title: Text(
         widget.title,
         style: GoogleFonts.inter(
@@ -470,10 +451,7 @@ class _AppLockPinDialogState extends State<_AppLockPinDialog> {
               alignment: Alignment.centerLeft,
               child: Text(
                 _error!,
-                style: GoogleFonts.inter(
-                  color: Colors.redAccent,
-                  fontSize: 12,
-                ),
+                style: GoogleFonts.inter(color: Colors.redAccent, fontSize: 12),
               ),
             ),
           ],

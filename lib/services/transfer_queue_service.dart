@@ -6,6 +6,7 @@ import 'package:hive/hive.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../models/message_reply_reference.dart';
+import '../utils/user_facing_error.dart';
 
 enum TransferDirection { upload, download }
 
@@ -205,7 +206,12 @@ class TransferJob {
       updatedAt:
           DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
           DateTime.now(),
-      error: json['error'] as String?,
+      error: json['error'] == null
+          ? null
+          : userFacingError(
+              json['error'],
+              fallback: 'Upload failed. Please retry.',
+            ),
       nextRetryAt: DateTime.tryParse(json['nextRetryAt'] as String? ?? ''),
       replyReference: json['replyReference'] is Map
           ? MessageReplyReference.fromJson(
@@ -602,8 +608,7 @@ class TransferQueueService {
   }
 
   String _shortError(Object error) {
-    final text = error.toString();
-    return text.length > 180 ? '${text.substring(0, 180)}...' : text;
+    return userFacingError(error, fallback: 'Upload failed. Please retry.');
   }
 
   void _emit() {

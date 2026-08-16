@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import '../config/app_config.dart';
 import '../providers/matrix_provider.dart';
+import '../services/matrix_sso_service.dart';
 import '../services/otp_service.dart';
 import '../theme.dart';
 import 'home_screen.dart';
@@ -194,7 +196,15 @@ class _OtpScreenState extends State<OtpScreen>
 
     if (!mounted) return;
     final provider = context.read<MatrixProvider>();
-    bool ok;
+    if (widget.isRegister && AppConfig.oidcOnlyAuthentication) {
+      await _completeOidcRegistration(
+        provider: provider,
+        enrollmentProof: verification.secureLoginEnrollmentProof,
+      );
+      return;
+    }
+
+    final bool ok;
     if (widget.isRegister) {
       ok = await provider.register(widget.username!, widget.password!);
     } else {
@@ -232,15 +242,8 @@ class _OtpScreenState extends State<OtpScreen>
         }
         if (!mounted) return;
       }
-      Navigator.of(context).pushAndRemoveUntil(
-        PageRouteBuilder(
-          pageBuilder: (_, __, ___) => const HomeScreen(),
-          transitionDuration: const Duration(milliseconds: 600),
-          transitionsBuilder: (_, anim, __, child) =>
-              FadeTransition(opacity: anim, child: child),
-        ),
-        (route) => false,
-      );
+      if (!mounted) return;
+      _openHome();
     } else {
       final error = provider.error ?? 'Authentication failed.';
       if (widget.isRegister && _isUsernameTakenError(error)) {
@@ -248,6 +251,91 @@ class _OtpScreenState extends State<OtpScreen>
         return;
       }
       setState(() => _error = provider.error ?? 'Authentication failed.');
+    }
+  }
+
+  Future<void> _completeOidcRegistration({
+    required MatrixProvider provider,
+    required String? enrollmentProof,
+  }) async {
+    final proof = enrollmentProof?.trim() ?? '';
+    if (proof.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _isVerifying = false;
+        _error = 'Email verification expired. Request a new code.';
+      });
+      return;
+    }
+
+    final registration = await OtpService().registerOidcAccount(
+      username: widget.username!,
+      email: widget.email,
+      password: widget.password!,
+      secureLoginEnrollmentProof: proof,
+    );
+    if (!mounted) return;
+    if (!registration.success) {
+      setState(() => _isVerifying = false);
+      final error = registration.error ?? 'Could not create the account.';
+      if (_isUsernameTakenError(error)) {
+        Navigator.pop(context, {'usernameError': 'Username already taken.'});
+        return;
+      }
+      setState(() => _error = error);
+      return;
+    }
+
+    await _signInAfterOidcRegistration(provider);
+  }
+
+  Future<void> _signInAfterOidcRegistration(MatrixProvider provider) async {
+    MatrixSsoService.instance.cancelPendingSignIn(
+      message: 'A new secure sign-in replaced the previous attempt.',
+    );
+    while (mounted) {
+      try {
+        final token = await MatrixSsoService.instance.startSignIn();
+        if (!mounted) return;
+        final signedIn = await provider.loginWithSsoToken(token);
+        if (!mounted) return;
+        if (signedIn) {
+          setState(() => _isVerifying = false);
+          _openHome();
+          return;
+        }
+        throw MatrixSsoException(
+          provider.error ?? 'Secure sign-in could not be completed.',
+        );
+      } on MatrixSsoException catch (error) {
+        if (!mounted) return;
+        MatrixSsoService.instance.cancelPendingSignIn();
+        final retry = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Account created'),
+            content: Text(
+              '${error.message}\n\nSign in to finish opening your XMO account.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Back to login'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Try again'),
+              ),
+            ],
+          ),
+        );
+        if (retry == true) continue;
+        if (!mounted) return;
+        setState(() => _isVerifying = false);
+        Navigator.of(context).popUntil((route) => route.isFirst);
+        return;
+      }
     }
   }
 
@@ -290,6 +378,18 @@ class _OtpScreenState extends State<OtpScreen>
       );
       if (retry != true) return;
     }
+  }
+
+  void _openHome() {
+    Navigator.of(context).pushAndRemoveUntil(
+      PageRouteBuilder(
+        pageBuilder: (_, __, ___) => const HomeScreen(),
+        transitionDuration: const Duration(milliseconds: 600),
+        transitionsBuilder: (_, anim, __, child) =>
+            FadeTransition(opacity: anim, child: child),
+      ),
+      (route) => false,
+    );
   }
 
   String get _enteredCode => _ctrs.map((c) => c.text).join();

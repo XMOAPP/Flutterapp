@@ -3,6 +3,7 @@ import 'package:matrix/matrix.dart';
 import '../models/channel_models.dart';
 import '../utils/matrix_identity.dart';
 import 'matrix_service.dart';
+import 'room_capacity_policy.dart';
 import 'room_controls_service.dart';
 import 'channel_analytics_service.dart';
 
@@ -17,6 +18,14 @@ class ChannelService {
   }
 
   Client get _client => _matrixService.client;
+
+  /// Refreshes the subscriber list before approving a join request.
+  Future<void> ensureCanAddSubscriber(String roomId) async {
+    final room = _client.getRoomById(roomId);
+    if (room == null) throw Exception('Channel not found: $roomId');
+    await room.requestParticipants();
+    RoomCapacityPolicy.ensureChannelHasSpace(room);
+  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // CHANNEL SETTINGS

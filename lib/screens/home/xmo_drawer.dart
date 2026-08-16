@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 // ignore_for_file: deprecated_member_use, use_build_context_synchronously
 
 import 'dart:async';
@@ -12,6 +13,7 @@ import '../../providers/chat_filter_provider.dart';
 import '../../providers/matrix_provider.dart';
 import '../../models/group_models.dart';
 import '../../services/group_service.dart';
+import '../../services/e2ee_service.dart';
 import '../../services/matrix_service.dart';
 import '../../widgets/story/story_avatar.dart';
 import '../app_settings_screen.dart';
@@ -184,7 +186,9 @@ class XmoDrawer extends StatelessWidget {
     } catch (e) {
       messenger.showSnackBar(
         SnackBar(
-          content: Text('Unable to open Saved Messages: $e'),
+          content: Text(
+            safeUserFacingText('Unable to open Saved Messages: $e'),
+          ),
           backgroundColor: Colors.red,
         ),
       );
@@ -460,7 +464,10 @@ Future<void> _createAndOpenRoom({
     closeLoader();
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$errorPrefix: $e'), backgroundColor: Colors.red),
+      SnackBar(
+        content: Text(safeUserFacingText('$errorPrefix: $e')),
+        backgroundColor: Colors.red,
+      ),
     );
   }
 }
@@ -685,6 +692,58 @@ class LogoutTile extends StatelessWidget {
       onTap: () async {
         final provider = context.read<MatrixProvider>();
         final navigator = Navigator.of(context, rootNavigator: true);
+
+        E2eeStatus? status;
+        try {
+          status = await E2eeService(provider.service).getStatus();
+        } catch (_) {
+          status = null;
+        }
+        if (!context.mounted) return;
+        final recoveryReady =
+            status?.crossSigningCached == true &&
+            status?.keyBackupEnabled == true &&
+            status?.keyBackupCached == true;
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            backgroundColor: const Color(0xFF2C2C2E),
+            title: Row(
+              children: [
+                Text(
+                  'Log out of XMO?',
+                  style: GoogleFonts.inter(color: kWhite),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  Icons.warning_amber_rounded,
+                  color: Colors.red[400],
+                  size: 24,
+                ),
+              ],
+            ),
+            content: Text(
+              recoveryReady
+                  ? 'This removes this device session and its local encryption keys. Your encrypted-message recovery is ready.'
+                  : 'This removes this device session and its local encryption keys. Set up recovery and key backup first to avoid losing access to encrypted history.',
+              style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel', style: TextStyle(color: kWhite)),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: Text(
+                  'Log out',
+                  style: TextStyle(color: Colors.red[400]),
+                ),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true || !context.mounted) return;
         Navigator.pop(context);
         await provider.logout();
         navigator.pushAndRemoveUntil(

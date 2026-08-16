@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 import '../models/group_models.dart';
@@ -9,7 +10,7 @@ class GroupProvider extends ChangeNotifier {
   final GroupService _groupService;
 
   GroupProvider(MatrixService matrixService)
-      : _groupService = GroupService(matrixService);
+    : _groupService = GroupService(matrixService);
 
   // Current group being viewed
   String? _currentGroupId;
@@ -31,9 +32,9 @@ class GroupProvider extends ChangeNotifier {
   String? _error;
   String? get error => _error;
 
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // GROUP OPERATIONS
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   /// Creates a new group
   Future<String?> createGroup({
@@ -58,7 +59,7 @@ class GroupProvider extends ChangeNotifier {
       notifyListeners();
       return roomId;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       _isLoading = false;
       notifyListeners();
       return null;
@@ -67,7 +68,9 @@ class GroupProvider extends ChangeNotifier {
 
   /// Updates group settings
   Future<bool> updateGroupSettings(
-      String roomId, GroupSettings settings) async {
+    String roomId,
+    GroupSettings settings,
+  ) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -78,7 +81,7 @@ class GroupProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       _isLoading = false;
       notifyListeners();
       return false;
@@ -90,19 +93,21 @@ class GroupProvider extends ChangeNotifier {
     try {
       return await _groupService.getGroupSettings(roomId);
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return null;
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // MEMBER MANAGEMENT
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   /// Gets group members (with caching)
-  Future<List<GroupMember>> getGroupMembers(String roomId,
-      {bool forceRefresh = false}) async {
+  Future<List<GroupMember>> getGroupMembers(
+    String roomId, {
+    bool forceRefresh = false,
+  }) async {
     if (!forceRefresh && _membersCache.containsKey(roomId)) {
       return _membersCache[roomId]!;
     }
@@ -113,7 +118,7 @@ class GroupProvider extends ChangeNotifier {
       notifyListeners();
       return members;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return [];
     }
@@ -129,15 +134,18 @@ class GroupProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return false;
     }
   }
 
   /// Removes a member from the group
-  Future<bool> removeMember(String roomId, String userId,
-      {String? reason}) async {
+  Future<bool> removeMember(
+    String roomId,
+    String userId, {
+    String? reason,
+  }) async {
     try {
       await _groupService.removeMember(roomId, userId, reason: reason);
       // Invalidate cache
@@ -146,7 +154,7 @@ class GroupProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return false;
     }
@@ -162,7 +170,7 @@ class GroupProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return false;
     }
@@ -178,7 +186,7 @@ class GroupProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return false;
     }
@@ -189,15 +197,15 @@ class GroupProvider extends ChangeNotifier {
     try {
       return await _groupService.getBannedMembers(roomId);
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return [];
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // GROUP DELETION
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   /// Deletes a group permanently (admin only)
   Future<bool> deleteGroup(String roomId) async {
@@ -210,15 +218,15 @@ class GroupProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return false;
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // ADMIN MANAGEMENT
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   /// Promotes a user to admin
   Future<bool> promoteToAdmin(
@@ -234,7 +242,7 @@ class GroupProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return false;
     }
@@ -250,7 +258,7 @@ class GroupProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return false;
     }
@@ -261,7 +269,7 @@ class GroupProvider extends ChangeNotifier {
     try {
       return _groupService.getAdminPermissions(roomId, userId);
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return null;
     }
@@ -272,15 +280,15 @@ class GroupProvider extends ChangeNotifier {
     try {
       return await _groupService.getAdmins(roomId);
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return [];
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // PINNED MESSAGES
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   /// Pins a message
   Future<bool> pinMessage(String roomId, String eventId) async {
@@ -292,7 +300,7 @@ class GroupProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return false;
     }
@@ -308,15 +316,17 @@ class GroupProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return false;
     }
   }
 
   /// Gets pinned messages (with caching)
-  Future<List<PinnedMessage>> getPinnedMessages(String roomId,
-      {bool forceRefresh = false}) async {
+  Future<List<PinnedMessage>> getPinnedMessages(
+    String roomId, {
+    bool forceRefresh = false,
+  }) async {
     if (!forceRefresh && _pinnedCache.containsKey(roomId)) {
       return _pinnedCache[roomId]!;
     }
@@ -327,24 +337,27 @@ class GroupProvider extends ChangeNotifier {
       notifyListeners();
       return pinned;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return [];
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // REPLIES & MENTIONS
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   /// Sends a reply to a message
   Future<bool> sendReply(
-      String roomId, String text, String replyToEventId) async {
+    String roomId,
+    String text,
+    String replyToEventId,
+  ) async {
     try {
       await _groupService.sendReply(roomId, text, replyToEventId);
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return false;
     }
@@ -352,12 +365,15 @@ class GroupProvider extends ChangeNotifier {
 
   /// Sends a message with mentions
   Future<bool> sendMention(
-      String roomId, String text, List<String> mentionedUserIds) async {
+    String roomId,
+    String text,
+    List<String> mentionedUserIds,
+  ) async {
     try {
       await _groupService.sendMention(roomId, text, mentionedUserIds);
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return false;
     }
@@ -368,7 +384,7 @@ class GroupProvider extends ChangeNotifier {
     try {
       return await _groupService.getReplyInfo(roomId, eventId);
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return null;
     }
@@ -385,7 +401,7 @@ class GroupProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return false;
     }
@@ -399,7 +415,7 @@ class GroupProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return false;
     }
@@ -419,15 +435,15 @@ class GroupProvider extends ChangeNotifier {
       notifyListeners();
       return actions;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return [];
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // UTILITY METHODS
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   /// Sets the current group being viewed
   void setCurrentGroup(String? roomId) {

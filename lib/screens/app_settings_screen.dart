@@ -1,10 +1,13 @@
+import 'package:xmo/utils/user_facing_error.dart';
 // ignore_for_file: deprecated_member_use
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -19,12 +22,17 @@ import 'package:video_thumbnail/video_thumbnail.dart';
 import '../providers/matrix_provider.dart';
 import '../providers/story_provider.dart';
 import '../config/app_config.dart';
+import '../services/app_lock_service.dart';
 import '../services/app_settings_service.dart';
 import '../services/direct_chat_service.dart';
 import '../services/e2ee_service.dart';
+import '../services/mfa_setup_completion_service.dart';
+import '../services/matrix_sso_service.dart';
+import '../services/matrix_uia_fallback_service.dart';
 import '../services/privacy_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/story_service.dart';
+import '../services/sensitive_screen_service.dart';
 import '../theme.dart';
 import '../utils/matrix_identity.dart';
 import '../widgets/matrix_chat/fullscreen_video_player.dart';
@@ -426,43 +434,26 @@ class DeleteAccountScreen extends StatefulWidget {
 }
 
 class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
-  final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
-  bool _eraseContent = true;
   bool _deleting = false;
-  bool _passwordVisible = false;
 
   bool get _confirmMatches =>
       _confirmController.text.trim().toUpperCase() == 'DELETE';
 
-  bool _canDelete(bool hasCachedPassword) {
-    return _confirmMatches &&
-        (hasCachedPassword || _passwordController.text.trim().isNotEmpty);
-  }
+  bool get _canDelete => _confirmMatches;
 
   @override
   void dispose() {
-    _passwordController.dispose();
     _confirmController.dispose();
     super.dispose();
   }
 
   Future<void> _deleteAccount() async {
     final provider = context.read<MatrixProvider>();
-    final hasCachedPassword = provider.service.hasCachedPasswordForCurrentUser;
-    if (_deleting || !_canDelete(hasCachedPassword)) return;
-
-    final password = _passwordController.text.trim();
-    if (!hasCachedPassword && password.isEmpty) {
-      _showError('Enter your account password to continue.');
-      return;
-    }
+    if (_deleting || !_canDelete) return;
 
     setState(() => _deleting = true);
-    final success = await provider.deleteAccount(
-      password: password.isEmpty ? null : password,
-      erase: _eraseContent,
-    );
+    final success = await provider.deleteAccount();
     if (!mounted) return;
 
     if (success) {
@@ -496,9 +487,8 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
   @override
   Widget build(BuildContext context) {
     final service = context.read<MatrixProvider>().service;
-    final hasCachedPassword = service.hasCachedPasswordForCurrentUser;
     final accountName = _shortAccountName(service.userId);
-    final canDelete = _canDelete(hasCachedPassword);
+    final canDelete = _canDelete;
 
     return Scaffold(
       backgroundColor: kBlack,
@@ -528,7 +518,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
           ),
           const SizedBox(height: 10),
           Text(
-            'This permanently deactivates your XMO account and removes your public profile, recovery email, and report records. You will not be able to log in again.',
+            'This permanently deletes your secure sign-in identity and deactivates your Matrix account. You will not be able to log in again.',
             textAlign: TextAlign.center,
             style: GoogleFonts.inter(
               color: kLightGrey,
@@ -546,56 +536,6 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
             style: TextButton.styleFrom(foregroundColor: kWhite),
           ),
           const SizedBox(height: 18),
-          SwitchListTile(
-            value: _eraseContent,
-            onChanged: _deleting
-                ? null
-                : (value) => setState(() => _eraseContent = value),
-            activeThumbColor: kLimeGreen,
-            contentPadding: EdgeInsets.zero,
-            title: Text(
-              'Erase my message content where possible',
-              style: GoogleFonts.inter(
-                color: kWhite,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            subtitle: Text(
-              'Some messages may still remain for users or servers that already received them.',
-              style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
-            ),
-          ),
-          const SizedBox(height: 10),
-          if (!hasCachedPassword) ...[
-            _inputLabel('Account password'),
-            _inputField(
-              controller: _passwordController,
-              hint: 'Password',
-              obscure: !_passwordVisible,
-              suffix: IconButton(
-                onPressed: _deleting
-                    ? null
-                    : () {
-                        setState(() => _passwordVisible = !_passwordVisible);
-                      },
-                icon: Icon(
-                  _passwordVisible
-                      ? Icons.visibility_off_outlined
-                      : Icons.visibility_outlined,
-                  color: kLightGrey,
-                  size: 20,
-                ),
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: 14),
-          ] else
-            Text(
-              'This phone has the saved login credentials needed to confirm deletion.',
-              style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
-            ),
-          const SizedBox(height: 14),
           _inputLabel('Type DELETE to confirm'),
           _inputField(
             controller: _confirmController,
@@ -653,7 +593,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
 
   Widget _warningBox() {
     final rows = [
-      'Your local session, cached rooms, and device data will be cleared.',
+      'Your secure sign-in sessions, Matrix devices, and local app data will be cleared.',
       'Encrypted message recovery can be lost if you did not save your recovery key.',
       'Delivered messages and uploaded media may remain on recipient devices or connected servers.',
       'This is different from logout and cannot be undone.',
@@ -766,6 +706,8 @@ class SecuritySettingsScreen extends StatefulWidget {
 
 class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   late final E2eeService _e2eeService;
+  static const _uiaFallbackService = MatrixUiaFallbackService();
+  static const _sensitiveScreenService = SensitiveScreenService();
   bool _loading = true;
   bool _working = false;
   E2eeStatus? _status;
@@ -787,18 +729,34 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   }
 
   Future<void> _setupRecovery() async {
-    final passphrase = await _promptInput(
-      title: 'Set up recovery',
-      hint: 'Optional passphrase',
-      obscure: true,
-      message:
-          'Leave this empty to create a recovery key only. Store the recovery key somewhere safe.',
-    );
-    if (passphrase == null || !mounted) return;
+    String? existingCredential;
+    String? passphrase;
+    if (_status?.recoveryConfigured == true) {
+      existingCredential = await _promptInput(
+        title: 'Unlock existing recovery',
+        hint: 'Recovery key or passphrase',
+        obscure: true,
+        message: 'Unlock the current recovery key to finish security setup.',
+      );
+      if (existingCredential == null || existingCredential.trim().isEmpty) {
+        return;
+      }
+    } else {
+      passphrase = await _promptInput(
+        title: 'Set up recovery',
+        hint: 'Optional passphrase',
+        obscure: true,
+        message:
+            'A passphrase lets XMO recreate the recovery key later. Leave it empty to use a key-only setup.',
+      );
+      if (passphrase == null || !mounted) return;
+    }
 
     setState(() => _working = true);
     final result = await _e2eeService.setupRecoveryAndKeyBackup(
       passphrase: passphrase,
+      existingRecoveryCredential: existingCredential,
+      requestSsoAuthentication: _confirmSensitiveActionWithSso,
       requestAccountPassword: () {
         if (!mounted) return Future<String?>.value();
         return _promptInput(
@@ -815,10 +773,228 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     await _loadStatus();
 
     if (result.success) {
-      await _showRecoveryKey(result.recoveryKey);
+      final saved = await _showRecoveryKey(result.recoveryKey);
+      if (saved) await _e2eeService.markCurrentRecoveryKeySaved();
+      if (result.warning != null) _showSnack(result.warning!);
+      await _loadStatus();
     } else {
       _showSnack(result.error ?? 'Recovery setup failed');
     }
+  }
+
+  Future<bool> _authorizeSensitiveAction() async {
+    final appLock = AppLockService.instance;
+    if (!appLock.enabled) return true;
+    if (appLock.biometricEnabled && await appLock.authenticateBiometric()) {
+      return true;
+    }
+    if (!mounted) return false;
+    final pin = await _promptInput(
+      title: 'Confirm App Lock PIN',
+      hint: 'PIN',
+      obscure: true,
+      message: 'Confirm your identity before managing the recovery key.',
+    );
+    if (pin == null || pin.isEmpty) return false;
+    final verified = await appLock.verifyPin(pin);
+    if (!verified) _showSnack('Incorrect App Lock PIN');
+    return verified;
+  }
+
+  Future<void> _verifyRecoveryKey() async {
+    if (!await _authorizeSensitiveAction() || !mounted) return;
+    final credential = await _promptInput(
+      title: 'Verify recovery key',
+      hint: 'Recovery key or passphrase',
+      obscure: true,
+      message: 'Enter your saved key or passphrase to confirm it works.',
+    );
+    if (credential == null || credential.trim().isEmpty || !mounted) return;
+    setState(() => _working = true);
+    final result = await _e2eeService.verifyRecoveryCredential(credential);
+    if (!mounted) return;
+    if (result.success) await _e2eeService.markCurrentRecoveryKeySaved();
+    setState(() => _working = false);
+    await _loadStatus();
+    _showSnack(result.success ? 'Recovery key verified' : result.error!);
+  }
+
+  Future<void> _revealRecoveryKey() async {
+    if (!await _authorizeSensitiveAction() || !mounted) return;
+    final passphrase = await _promptInput(
+      title: 'Reveal recovery key',
+      hint: 'Recovery passphrase',
+      obscure: true,
+      message: 'Enter the passphrase used when recovery was created.',
+    );
+    if (passphrase == null || passphrase.trim().isEmpty || !mounted) return;
+    setState(() => _working = true);
+    final result = await _e2eeService.revealRecoveryKey(passphrase);
+    if (!mounted) return;
+    setState(() => _working = false);
+    if (!result.success) {
+      _showSnack(result.error!);
+      return;
+    }
+    final saved = await _showRecoveryKey(result.recoveryKey);
+    if (saved) await _e2eeService.markCurrentRecoveryKeySaved();
+    await _loadStatus();
+  }
+
+  Future<void> _replaceRecoveryKey() async {
+    if (!await _authorizeSensitiveAction() || !mounted) return;
+    final confirmed =
+        await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            backgroundColor: kDarkerGrey,
+            title: Text(
+              'Replace recovery key',
+              style: GoogleFonts.inter(color: kWhite),
+            ),
+            content: Text(
+              'The current key will stop being the primary recovery key. Continue only if you can unlock it now.',
+              style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Continue'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) return;
+    final current = await _promptInput(
+      title: 'Unlock current recovery',
+      hint: 'Recovery key or passphrase',
+      obscure: true,
+      message: 'Enter the current recovery key or passphrase.',
+    );
+    if (current == null || current.trim().isEmpty || !mounted) return;
+    final replacementPassphrase = await _promptInput(
+      title: 'New recovery passphrase',
+      hint: 'Optional passphrase',
+      obscure: true,
+      message:
+          'Add a passphrase to allow secure key reveal later, or leave it empty for key-only recovery.',
+    );
+    if (replacementPassphrase == null || !mounted) return;
+    setState(() => _working = true);
+    final result = await _e2eeService.rotateRecoveryKey(
+      currentCredential: current,
+      newPassphrase: replacementPassphrase,
+    );
+    if (!mounted) return;
+    setState(() => _working = false);
+    if (!result.success) {
+      _showSnack(result.error!);
+      return;
+    }
+    final saved = await _showRecoveryKey(result.recoveryKey);
+    if (saved) await _e2eeService.markCurrentRecoveryKeySaved();
+    if (result.warning != null) _showSnack(result.warning!);
+    await _loadStatus();
+  }
+
+  Future<void> _manageRecoveryKey() async {
+    final status = _status;
+    if (status?.recoveryConfigured != true || _working) return;
+    final action = await showModalBottomSheet<_RecoveryKeyAction>(
+      context: context,
+      backgroundColor: const Color(0xFF11171D),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.verified_outlined, color: kWhite),
+              title: const Text(
+                'Verify saved key',
+                style: TextStyle(color: kWhite),
+              ),
+              onTap: () => Navigator.pop(context, _RecoveryKeyAction.verify),
+            ),
+            if (status!.recoveryHasPassphrase)
+              ListTile(
+                leading: const Icon(Icons.visibility_outlined, color: kWhite),
+                title: const Text(
+                  'Reveal recovery key',
+                  style: TextStyle(color: kWhite),
+                ),
+                onTap: () => Navigator.pop(context, _RecoveryKeyAction.reveal),
+              ),
+            ListTile(
+              leading: const Icon(Icons.autorenew, color: kWhite),
+              title: const Text(
+                'Replace recovery key',
+                style: TextStyle(color: kWhite),
+              ),
+              onTap: () => Navigator.pop(context, _RecoveryKeyAction.replace),
+            ),
+          ],
+        ),
+      ),
+    );
+    switch (action) {
+      case _RecoveryKeyAction.verify:
+        await _verifyRecoveryKey();
+      case _RecoveryKeyAction.reveal:
+        await _revealRecoveryKey();
+      case _RecoveryKeyAction.replace:
+        await _replaceRecoveryKey();
+      case null:
+        return;
+    }
+  }
+
+  Future<bool> _confirmSensitiveActionWithSso(UiaRequest request) async {
+    try {
+      await _uiaFallbackService.open(
+        authenticationType: AuthenticationTypes.sso,
+        session: request.session,
+      );
+    } catch (error) {
+      if (mounted) {
+        _showSnack(
+          userFacingError(error, fallback: 'Could not open recovery settings.'),
+        );
+      }
+      return false;
+    }
+    if (!mounted) return false;
+
+    return await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            backgroundColor: kDarkerGrey,
+            title: Text(
+              'Confirm recovery setup',
+              style: GoogleFonts.inter(color: kWhite, fontSize: 18),
+            ),
+            content: Text(
+              'Complete secure account confirmation in the browser, then return to XMO and continue.',
+              style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Continue'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   Future<void> _unlockRecovery() async {
@@ -859,61 +1035,23 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     );
   }
 
-  Future<void> _showRecoveryKey(String? recoveryKey) async {
+  Future<bool> _showRecoveryKey(String? recoveryKey) async {
     if (recoveryKey == null || recoveryKey.isEmpty) {
       _showSnack('Recovery and key backup are ready');
-      return;
+      return false;
     }
-
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: kDarkerGrey,
-          title: Text(
-            'Recovery key',
-            style: GoogleFonts.inter(color: kWhite, fontSize: 18),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Save this key. It is needed to recover encrypted messages on another device.',
-                style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
-              ),
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2C2C2E),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: SelectableText(
-                  recoveryKey,
-                  style: GoogleFonts.robotoMono(color: kWhite, fontSize: 13),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: recoveryKey));
-                _showSnack('Recovery key copied');
-              },
-              child: Text('Copy', style: GoogleFonts.inter(color: kWhite)),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('Done', style: GoogleFonts.inter(color: kWhite)),
-            ),
-          ],
-        );
-      },
-    );
+    await _sensitiveScreenService.setProtected(true);
+    try {
+      if (!mounted) return false;
+      return await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => _RecoveryKeyDialog(recoveryKey: recoveryKey),
+          ) ??
+          false;
+    } finally {
+      await _sensitiveScreenService.setProtected(false);
+    }
   }
 
   void _showSnack(String message) {
@@ -1005,7 +1143,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
           _securityNavTile(
             icon: Icons.devices,
             title: 'Devices and Sessions',
-            subtitle: 'Review and sign out XMO sessions',
+            subtitle: 'Review, verify, and sign out XMO sessions',
             onTap: () {
               Navigator.push(
                 context,
@@ -1066,6 +1204,22 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                 status?.keyBackupEnabled == true &&
                 status?.keyBackupCached == true,
           ),
+          _panelDivider(),
+          _statusRow(
+            icon: Icons.key,
+            label: 'Recovery key',
+            value: status?.recoveryConfigured != true
+                ? 'Not set up'
+                : status?.recoverySavedConfirmed == true
+                ? 'Saved and verified'
+                : 'Confirm your saved copy',
+            ok:
+                status?.recoveryConfigured == true &&
+                status?.recoverySavedConfirmed == true,
+            onTap: status?.recoveryConfigured == true
+                ? _manageRecoveryKey
+                : null,
+          ),
         ],
       ),
       if (needsRecoverySetup) ...[
@@ -1120,8 +1274,9 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     required bool ok,
     String? actionLabel,
     VoidCallback? onAction,
+    VoidCallback? onTap,
   }) {
-    return Padding(
+    final row = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
       child: Row(
         children: [
@@ -1153,9 +1308,13 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
             ),
           ),
           if (actionLabel != null) _miniActionButton(actionLabel, onAction),
+          if (onTap != null)
+            const Icon(Icons.chevron_right, color: kLightGrey, size: 22),
         ],
       ),
     );
+    if (onTap == null) return row;
+    return InkWell(onTap: onTap, child: row);
   }
 
   Widget _securityNavTile({
@@ -1306,6 +1465,133 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   }
 }
 
+enum _RecoveryKeyAction { verify, reveal, replace }
+
+class _RecoveryKeyDialog extends StatefulWidget {
+  const _RecoveryKeyDialog({required this.recoveryKey});
+
+  final String recoveryKey;
+
+  @override
+  State<_RecoveryKeyDialog> createState() => _RecoveryKeyDialogState();
+}
+
+class _RecoveryKeyDialogState extends State<_RecoveryKeyDialog>
+    with WidgetsBindingObserver {
+  bool _confirmedSaved = false;
+  bool _visible = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed && mounted) {
+      setState(() => _visible = false);
+    }
+  }
+
+  Future<void> _copyRecoveryKey() async {
+    await Clipboard.setData(ClipboardData(text: widget.recoveryKey));
+    Timer(const Duration(seconds: 60), () async {
+      final clipboard = await Clipboard.getData(Clipboard.kTextPlain);
+      if (clipboard?.text == widget.recoveryKey) {
+        await Clipboard.setData(const ClipboardData(text: ''));
+      }
+    });
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Copied. Clipboard clears in 60 seconds.')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: kDarkerGrey,
+      title: Text(
+        'Recovery key',
+        style: GoogleFonts.inter(color: kWhite, fontSize: 18),
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Save this key in a password manager or another secure place. XMO cannot recover it for you.',
+              style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(minHeight: 82),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF2C2C2E),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              alignment: Alignment.centerLeft,
+              child: _visible
+                  ? SelectableText(
+                      widget.recoveryKey,
+                      style: GoogleFonts.robotoMono(
+                        color: kWhite,
+                        fontSize: 13,
+                      ),
+                    )
+                  : Center(
+                      child: TextButton.icon(
+                        onPressed: () => setState(() => _visible = true),
+                        icon: const Icon(Icons.visibility_outlined),
+                        label: const Text('Tap to reveal'),
+                      ),
+                    ),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _copyRecoveryKey,
+              icon: const Icon(Icons.copy_outlined),
+              label: const Text('Copy recovery key'),
+            ),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              activeColor: kLimeGreen,
+              checkColor: kBlack,
+              value: _confirmedSaved,
+              onChanged: (value) {
+                setState(() => _confirmedSaved = value == true);
+              },
+              title: Text(
+                'I saved this recovery key',
+                style: GoogleFonts.inter(color: kWhite, fontSize: 13),
+              ),
+              controlAffinity: ListTileControlAffinity.leading,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _confirmedSaved
+              ? () => Navigator.pop(context, true)
+              : null,
+          child: const Text('Done'),
+        ),
+      ],
+    );
+  }
+}
+
 class _SecurityInputDialog extends StatefulWidget {
   final String title;
   final String hint;
@@ -1389,17 +1675,119 @@ class _SecurityInputDialogState extends State<_SecurityInputDialog> {
   }
 }
 
-class TwoFactorStatusScreen extends StatelessWidget {
+class TwoFactorStatusScreen extends StatefulWidget {
   const TwoFactorStatusScreen({super.key});
 
-  Future<void> _openMfaSetup() async {
-    final uri = Uri.parse(AppConfig.mfaSetupUrl);
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  @override
+  State<TwoFactorStatusScreen> createState() => _TwoFactorStatusScreenState();
+}
+
+class _TwoFactorStatusScreenState extends State<TwoFactorStatusScreen> {
+  static const _secureStorage = FlutterSecureStorage();
+  static const _setupStatusKeyPrefix = 'xmo_mfa_setup_completed_v1_';
+
+  StreamSubscription<void>? _completionSubscription;
+  bool _setupCompleted = false;
+  bool _setupStarting = false;
+  bool _setupStatusLoading = true;
+
+  String? get _setupStatusKey {
+    final userId = context.read<MatrixProvider>().userId?.trim();
+    if (userId == null || userId.isEmpty) return null;
+    return _setupStatusKeyPrefix + base64Url.encode(utf8.encode(userId));
   }
 
-  Future<void> _openSecureAccount() async {
-    final uri = Uri.parse(AppConfig.secureAccountUrl);
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  @override
+  void initState() {
+    super.initState();
+    final completionService = MfaSetupCompletionService.instance;
+    _setupCompleted = completionService.consumePendingCompletion();
+    _completionSubscription = completionService.completions.listen((_) {
+      if (!mounted) return;
+      completionService.consumePendingCompletion();
+      unawaited(_markSetupCompleted(showConfirmation: true));
+    });
+    unawaited(_loadSetupStatus());
+  }
+
+  Future<void> _loadSetupStatus() async {
+    var completed = _setupCompleted;
+    final storageKey = _setupStatusKey;
+    if (storageKey != null && !completed) {
+      try {
+        completed = await _secureStorage.read(key: storageKey) == 'true';
+      } catch (_) {
+        // The completion callback still updates the current screen if secure
+        // storage is unavailable on a device.
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _setupCompleted = _setupCompleted || completed;
+      _setupStatusLoading = false;
+    });
+  }
+
+  Future<void> _markSetupCompleted({required bool showConfirmation}) async {
+    final storageKey = _setupStatusKey;
+    if (storageKey != null) {
+      try {
+        await _secureStorage.write(key: storageKey, value: 'true');
+      } catch (_) {
+        // Authentik remains the source of truth; this value only avoids a UI
+        // reset after the verified completion callback on this device.
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _setupCompleted = true;
+      _setupStatusLoading = false;
+    });
+    if (showConfirmation) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Two-step verification set up'),
+          backgroundColor: kLimeGreen,
+        ),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    unawaited(_completionSubscription?.cancel());
+    super.dispose();
+  }
+
+  Future<void> _verifyAndOpenMfaSetup() async {
+    if (_setupStarting) return;
+    setState(() => _setupStarting = true);
+    try {
+      // Authentik owns this browser flow. Starting Matrix SSO here first
+      // causes the browser to return to XMO before the QR setup is opened.
+      final opened = await launchUrl(
+        Uri.parse(AppConfig.mfaSetupUrl),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened) {
+        throw const MatrixSsoException('Could not open authenticator setup.');
+      }
+    } on MatrixSsoException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message), backgroundColor: Colors.red),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open authenticator setup.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _setupStarting = false);
+    }
   }
 
   @override
@@ -1420,22 +1808,12 @@ class TwoFactorStatusScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
         children: [
-          Container(
-            width: 58,
-            height: 58,
-            decoration: BoxDecoration(
-              color: secureSignInConfigured
-                  ? kLimeGreen.withOpacity(0.16)
-                  : const Color(0xFF252B33),
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Icon(
-              secureSignInConfigured
-                  ? Icons.verified_user
-                  : Icons.shield_outlined,
-              color: secureSignInConfigured ? kLimeGreen : kWhite,
-              size: 34,
-            ),
+          Icon(
+            secureSignInConfigured
+                ? Icons.verified_user
+                : Icons.shield_outlined,
+            color: secureSignInConfigured ? kLimeGreen : kWhite,
+            size: 42,
           ),
           const SizedBox(height: 20),
           Text(
@@ -1451,9 +1829,7 @@ class TwoFactorStatusScreen extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             secureSignInConfigured
-                ? 'Add an authenticator app to protect secure sign-in. '
-                      'XMO opens the setup page directly, then you scan the QR '
-                      'code and enter the 6-digit code there.'
+                ? 'Verify with secure sign-in, then scan the QR code.'
                 : 'XMO needs server-side secure sign-in before account 2FA can '
                       'protect every login. App Lock can still protect this '
                       'phone.',
@@ -1465,40 +1841,35 @@ class TwoFactorStatusScreen extends StatelessWidget {
           ),
           const SizedBox(height: 22),
           if (secureSignInConfigured) ...[
-            _twoFactorStateCard(),
-            const SizedBox(height: 18),
             _setupInstructionCard(),
             const SizedBox(height: 18),
             _securityStep(
               icon: Icons.check_circle,
               title: 'Secure sign-in',
-              subtitle: 'Available through XMO secure account',
+              subtitle: 'Ready',
               complete: true,
             ),
             _securityStep(
               icon: Icons.phonelink_lock,
               title: 'Authenticator app',
-              subtitle: 'Scan a QR code once to generate 6-digit login codes',
-              complete: false,
-            ),
-            _securityStep(
-              icon: Icons.password,
-              title: 'Password migration',
-              subtitle:
-                  'Normal password login remains available until every user is migrated',
-              complete: false,
-            ),
-            const SizedBox(height: 22),
-            _primarySecurityButton(
-              label: 'Set up authenticator',
-              icon: Icons.qr_code_2,
-              onPressed: _openMfaSetup,
+              subtitle: _setupCompleted
+                  ? 'Set up'
+                  : 'Set up after verification',
+              complete: _setupCompleted,
             ),
             const SizedBox(height: 10),
-            _secondarySecurityButton(
-              label: 'Manage secure account',
-              icon: Icons.open_in_new,
-              onPressed: _openSecureAccount,
+            _primarySecurityButton(
+              label: _setupStatusLoading
+                  ? 'Checking authenticator...'
+                  : _setupStarting
+                  ? 'Verifying...'
+                  : _setupCompleted
+                  ? 'Authenticator already set up'
+                  : 'Set up authenticator',
+              icon: Icons.qr_code_2,
+              onPressed: _verifyAndOpenMfaSetup,
+              enabled:
+                  !_setupStatusLoading && !_setupStarting && !_setupCompleted,
             ),
           ] else ...[
             _securityStep(
@@ -1520,38 +1891,11 @@ class TwoFactorStatusScreen extends StatelessWidget {
     );
   }
 
-  Widget _twoFactorStateCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF11171D),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.info_outline, color: kLimeGreen, size: 22),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'Authenticator codes protect secure sign-in. Full account enforcement starts after normal password login is disabled on the server.',
-              style: GoogleFonts.inter(
-                color: kWhite,
-                fontSize: 12,
-                height: 1.35,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _setupInstructionCard() {
     const steps = [
-      'Log in to your XMO secure account.',
-      'XMO opens the authenticator setup page.',
-      'Scan the QR code with an authenticator app.',
-      'Enter the 6-digit code to finish setup.',
+      'Verify with secure sign-in.',
+      'Scan the QR code.',
+      'Enter the 6-digit code.',
     ];
 
     return Container(
@@ -1559,13 +1903,12 @@ class TwoFactorStatusScreen extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF11171D),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF202933)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'What happens next',
+            'Setup steps',
             style: GoogleFonts.inter(
               color: kWhite,
               fontSize: 14,
@@ -1614,6 +1957,18 @@ class TwoFactorStatusScreen extends StatelessWidget {
     );
   }
 
+  Widget _securityIcon({required IconData icon, bool limeIcon = false}) {
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        color: const Color(0xFF252B33),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Icon(icon, color: limeIcon ? kLimeGreen : kLightGrey, size: 20),
+    );
+  }
+
   Widget _securityStep({
     required IconData icon,
     required String title,
@@ -1625,20 +1980,9 @@ class TwoFactorStatusScreen extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: complete
-                  ? kLimeGreen.withOpacity(0.16)
-                  : const Color(0xFF252B33),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              complete ? Icons.check : icon,
-              color: complete ? kLimeGreen : kLightGrey,
-              size: 20,
-            ),
+          _securityIcon(
+            icon: complete ? Icons.check_circle : icon,
+            limeIcon: complete,
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1674,14 +2018,17 @@ class TwoFactorStatusScreen extends StatelessWidget {
     required String label,
     required IconData icon,
     required VoidCallback onPressed,
+    bool enabled = true,
   }) {
     return SizedBox(
       height: 46,
       child: ElevatedButton(
-        onPressed: onPressed,
+        onPressed: enabled ? onPressed : null,
         style: ElevatedButton.styleFrom(
           backgroundColor: kWhite,
           foregroundColor: kBlack,
+          disabledBackgroundColor: const Color(0xFF252B33),
+          disabledForegroundColor: const Color(0xFF9BA1A8),
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(24),
@@ -1697,40 +2044,6 @@ class TwoFactorStatusScreen extends StatelessWidget {
               style: GoogleFonts.inter(
                 fontSize: 13,
                 fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _secondarySecurityButton({
-    required String label,
-    required IconData icon,
-    required VoidCallback onPressed,
-  }) {
-    return SizedBox(
-      height: 46,
-      child: OutlinedButton(
-        onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: kWhite,
-          side: const BorderSide(color: Color(0xFF58606B)),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 18),
-            const SizedBox(width: 10),
-            Text(
-              label,
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
               ),
             ),
           ],
@@ -2765,7 +3078,7 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to clear cache: $e'),
+          content: Text(safeUserFacingText('Failed to clear cache: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -3162,7 +3475,7 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
       subtitle: Row(
         children: [
           Text(
-            '${_formatBytes(file.bytes)} • ',
+            '${_formatBytes(file.bytes)} â€¢ ',
             style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
           ),
           Flexible(
@@ -3240,7 +3553,7 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Could not open media: $e'),
+          content: Text(safeUserFacingText('Could not open media: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -3287,7 +3600,7 @@ class _DataStorageScreenState extends State<DataStorageScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Could not open file: $e'),
+          content: Text(safeUserFacingText('Could not open file: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -3750,7 +4063,7 @@ class _DownloadedAudioTileState extends State<_DownloadedAudioTile> {
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Could not play audio: $e'),
+          content: Text(safeUserFacingText('Could not play audio: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -3863,7 +4176,7 @@ class _DownloadedImageViewer extends StatelessWidget {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to share: $e'),
+          content: Text(safeUserFacingText('Failed to share: $e')),
           backgroundColor: Colors.red,
         ),
       );

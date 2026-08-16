@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
@@ -12,10 +13,7 @@ import 'shared_media_screen.dart';
 class SavedMessagesInfoScreen extends StatelessWidget {
   final Room room;
 
-  const SavedMessagesInfoScreen({
-    super.key,
-    required this.room,
-  });
+  const SavedMessagesInfoScreen({super.key, required this.room});
 
   @override
   Widget build(BuildContext context) {
@@ -47,10 +45,18 @@ class SavedMessagesInfoScreen extends StatelessWidget {
               ),
               onSelected: (value) => _handleMenuAction(context, value),
               itemBuilder: (context) => [
-                _menuItem('delete_all', Icons.delete_outline, 'Delete all',
-                    Colors.redAccent),
-                _menuItem('view_messages', Icons.chat_bubble,
-                    'View as messages', kWhite),
+                _menuItem(
+                  'delete_all',
+                  Icons.delete_outline,
+                  'Delete all',
+                  Colors.redAccent,
+                ),
+                _menuItem(
+                  'view_messages',
+                  Icons.chat_bubble,
+                  'View as messages',
+                  kWhite,
+                ),
               ],
             ),
           ],
@@ -78,10 +84,7 @@ class SavedMessagesInfoScreen extends StatelessWidget {
         children: [
           Icon(icon, color: color, size: 20),
           const SizedBox(width: 12),
-          Text(
-            label,
-            style: GoogleFonts.inter(color: color, fontSize: 14),
-          ),
+          Text(label, style: GoogleFonts.inter(color: color, fontSize: 14)),
         ],
       ),
     );
@@ -140,7 +143,9 @@ class SavedMessagesInfoScreen extends StatelessWidget {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Unable to delete saved messages: $e'),
+          content: Text(
+            safeUserFacingText('Unable to delete saved messages: $e'),
+          ),
           backgroundColor: Colors.red,
         ),
       );

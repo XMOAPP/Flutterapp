@@ -25,6 +25,10 @@ Future<void> _createInviteLink(HttpRequest request) async {
     });
     return;
   }
+  if (!_inviteCanCreateLink(room)) {
+    await _inviteRoomAtCapacity(request, room);
+    return;
+  }
   final joinMode = _inviteJoinMode(room);
   if (joinMode == null) {
     await _json(request, HttpStatus.conflict, {
@@ -297,6 +301,11 @@ Future<void> _redeemInviteLink(HttpRequest request) async {
     });
     return;
   }
+  final room = await _inviteLoadRoom(record.roomId, session.token);
+  if (!_inviteHasCapacity(room, session.userId)) {
+    await _inviteRoomAtCapacity(request, room);
+    return;
+  }
   final redeemed = await _withInviteStore((latest) {
     final current = latest[tokenHash];
     if (current == null || !current.canBeUsedBy(session.userId)) return false;
@@ -400,6 +409,29 @@ String? _inviteJoinMode(_InviteRoom room) {
     return 'knock';
   }
   return null;
+}
+
+bool _inviteHasCapacity(_InviteRoom room, String userId) {
+  return RoomCapacityPolicy.hasSpace(
+    roomType: room.roomType,
+    joinedMemberCount: room.memberCount,
+    alreadyJoined: room.memberships[userId] == 'join',
+  );
+}
+
+bool _inviteCanCreateLink(_InviteRoom room) {
+  final limit = RoomCapacityPolicy.limitForRoomType(room.roomType);
+  return limit == null || room.memberCount < limit;
+}
+
+Future<void> _inviteRoomAtCapacity(
+  HttpRequest request,
+  _InviteRoom room,
+) {
+  return _json(request, HttpStatus.conflict, {
+    'success': false,
+    'error': RoomCapacityPolicy.fullMessage(room.roomType),
+  });
 }
 
 Future<_InviteRecord?> _inviteRecordForToken(String? token) async {

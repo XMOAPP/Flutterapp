@@ -3,7 +3,7 @@ description: XMO OTP auth backend.
 publish_to: none
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: '>=3.9.0 <4.0.0'
 
 dependencies:
   bs58: ^1.0.2
@@ -12,6 +12,7 @@ dependencies:
   googleapis_auth: ^2.0.0
   http: ^1.6.0
   mailer: ^7.1.0
+  postgres: ^3.5.12
   web3dart: ^3.0.2
 
 dev_dependencies:

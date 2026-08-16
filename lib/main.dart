@@ -13,8 +13,10 @@ import '../providers/matrix_provider.dart';
 import '../providers/group_provider.dart';
 import '../providers/story_provider.dart';
 import '../services/app_lock_service.dart';
+import '../services/account_deletion_completion_service.dart';
 import '../services/call_link_service.dart';
 import '../services/crash_reporting_service.dart';
+import '../services/device_verification_coordinator.dart';
 import '../services/invite_link_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/streaming_media_service.dart';
@@ -61,6 +63,10 @@ Future<void> main() async {
   );
 
   final matrixProvider = MatrixProvider();
+  AccountDeletionCompletionService.instance.init(
+    navigatorKey: xmoNavigatorKey,
+    matrixProvider: matrixProvider,
+  );
   InviteLinkService.instance.init(
     navigatorKey: xmoNavigatorKey,
     matrixProvider: matrixProvider,
@@ -102,6 +108,18 @@ Future<void> _bootstrapServices(MatrixProvider matrixProvider) async {
       );
     },
   );
+  if (matrixProvider.state == MatrixAuthState.error) {
+    debugPrint(
+      '[main] Matrix startup stopped before dependent services: '
+      '${matrixProvider.error}',
+    );
+    return;
+  }
+  await DeviceVerificationCoordinator.instance.init(
+    navigatorKey: xmoNavigatorKey,
+    matrixProvider: matrixProvider,
+  );
+  await AccountDeletionCompletionService.instance.checkCurrentSession();
   try {
     await _storyUploadCompletionSubscription?.cancel();
     _storyUploadCompletionSubscription = StoryUploadQueueService

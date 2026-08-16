@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:xmo/config/media_upload_policy.dart';
 import 'package:xmo/services/azure_blob_chunk_storage_service.dart';
 
 void main() {
@@ -19,19 +20,21 @@ void main() {
           signedRequest = request;
           return AzureBlobChunkUploadTarget(
             uploadUrl: Uri.parse('https://blob.example.test/upload?sas=write'),
-            downloadUrl:
-                Uri.parse('https://blob.example.test/download?sas=read'),
+            downloadUrl: Uri.parse(
+              'https://blob.example.test/download?sas=read',
+            ),
           );
         },
-        uploader: ({
-          required uploadUrl,
-          required encryptedBytes,
-          required contentType,
-        }) async {
-          uploadedUrl = uploadUrl;
-          uploadedBytes = encryptedBytes;
-          uploadedContentType = contentType;
-        },
+        uploader:
+            ({
+              required uploadUrl,
+              required encryptedBytes,
+              required contentType,
+            }) async {
+              uploadedUrl = uploadUrl;
+              uploadedBytes = encryptedBytes;
+              uploadedContentType = contentType;
+            },
       );
 
       final downloadUrl = await service.uploadEncryptedChunk(
@@ -39,19 +42,25 @@ void main() {
         fileName: 'video.mp4.xmo-stream.0.chunk',
         contentType: 'application/octet-stream',
         chunkIndex: 0,
+        mediaSize: encryptedBytes.length,
         roomId: '!room:example.test',
       );
 
-      expect(downloadUrl.toString(),
-          'https://blob.example.test/download?sas=read');
+      expect(
+        downloadUrl.toString(),
+        'https://blob.example.test/download?sas=read',
+      );
       expect(signedRequest!.fileName, 'video.mp4.xmo-stream.0.chunk');
       expect(signedRequest!.contentType, 'application/octet-stream');
       expect(signedRequest!.size, encryptedBytes.length);
       expect(signedRequest!.chunkIndex, 0);
+      expect(signedRequest!.mediaSize, encryptedBytes.length);
       expect(signedRequest!.roomId, '!room:example.test');
       expect(signedRequest!.cipherSha256, isNotEmpty);
       expect(
-          uploadedUrl.toString(), 'https://blob.example.test/upload?sas=write');
+        uploadedUrl.toString(),
+        'https://blob.example.test/upload?sas=write',
+      );
       expect(uploadedBytes, encryptedBytes);
       expect(uploadedContentType, 'application/octet-stream');
     });
@@ -67,22 +76,24 @@ void main() {
       );
     });
 
-    test('sends Matrix authorization and room-bound integrity context',
-        () async {
+    test('sends Matrix authorization and room-bound integrity context', () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       Map<String, dynamic>? requestBody;
       String? authorization;
       final handled = server.first.then((request) async {
         authorization = request.headers.value(HttpHeaders.authorizationHeader);
-        requestBody = jsonDecode(await utf8.decoder.bind(request).join())
-            as Map<String, dynamic>;
+        requestBody =
+            jsonDecode(await utf8.decoder.bind(request).join())
+                as Map<String, dynamic>;
         request.response.headers.contentType = ContentType.json;
-        request.response.write(jsonEncode({
-          'success': true,
-          'uploadUrl': 'https://blob.example.test/upload?write=short',
-          'downloadUrl':
-              'https://matrix.example.test/auth/media/chunks/azure/download?ref=opaque',
-        }));
+        request.response.write(
+          jsonEncode({
+            'success': true,
+            'uploadUrl': 'https://blob.example.test/upload?write=short',
+            'downloadUrl':
+                'https://matrix.example.test/auth/media/chunks/azure/download?ref=opaque',
+          }),
+        );
         await request.response.close();
       });
       final service = AzureBlobChunkStorageService(
@@ -90,11 +101,12 @@ void main() {
           'http://${server.address.host}:${server.port}/sign',
         ),
         accessTokenProvider: () => 'matrix-token',
-        uploader: ({
-          required uploadUrl,
-          required encryptedBytes,
-          required contentType,
-        }) async {},
+        uploader:
+            ({
+              required uploadUrl,
+              required encryptedBytes,
+              required contentType,
+            }) async {},
       );
 
       try {
@@ -103,6 +115,7 @@ void main() {
           fileName: 'video.chunk',
           contentType: 'application/octet-stream',
           chunkIndex: 2,
+          mediaSize: 4,
           roomId: '!secure:example.test',
         );
         await handled;
@@ -128,10 +141,36 @@ void main() {
           fileName: 'video.chunk',
           contentType: 'application/octet-stream',
           chunkIndex: 0,
+          mediaSize: 1,
           roomId: '!secure:example.test',
         ),
         throwsA(isA<AzureBlobChunkStorageException>()),
       );
+    });
+
+    test('rejects media larger than the XMO limit before signing', () async {
+      var signerCalled = false;
+      final service = AzureBlobChunkStorageService(
+        signingEndpoint: Uri.parse('https://auth.example.test/sign'),
+        signer: (_) async {
+          signerCalled = true;
+          throw StateError('must not sign');
+        },
+      );
+      addTearDown(service.close);
+
+      await expectLater(
+        service.uploadEncryptedChunk(
+          encryptedBytes: Uint8List.fromList([1]),
+          fileName: 'video.chunk',
+          contentType: 'application/octet-stream',
+          chunkIndex: 0,
+          mediaSize: 50 * 1024 * 1024 + 1,
+          roomId: '!secure:example.test',
+        ),
+        throwsA(isA<MediaUploadPolicyException>()),
+      );
+      expect(signerCalled, isFalse);
     });
   });
 }

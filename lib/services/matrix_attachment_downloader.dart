@@ -19,11 +19,12 @@ class MatrixAttachmentDownloader {
     Future<Uint8List> Function(Uri)? downloadCallback,
     bool fromLocalStoreOnly = false,
   }) async {
-    if (![EventTypes.Message, EventTypes.Sticker].contains(event.type)) {
+    if (event.type != EventTypes.Message) {
       throw "This event has the type '${event.type}' and so it can't contain an attachment.";
     }
-    final mxcUrl =
-        event.attachmentOrThumbnailMxcUrl(getThumbnail: getThumbnail);
+    final mxcUrl = event.attachmentOrThumbnailMxcUrl(
+      getThumbnail: getThumbnail,
+    );
     if (mxcUrl == null) {
       throw "This event hasn't any attachment or thumbnail.";
     }
@@ -80,8 +81,7 @@ class MatrixAttachmentDownloader {
     final database = event.room.client.database;
     final infoMap = getThumbnail ? event.thumbnailInfoMap : event.infoMap;
     final declaredSize = infoMap['size'];
-    var storeable = declaredSize is int &&
-        declaredSize <= database.maxFileSize;
+    var storeable = declaredSize is int && declaredSize <= database.maxFileSize;
 
     Uint8List? bytes;
     if (storeable) {
@@ -92,7 +92,8 @@ class MatrixAttachmentDownloader {
       throw 'Unable to download file from local store.';
     }
     if (bytes == null) {
-      final callback = downloadCallback ??
+      final callback =
+          downloadCallback ??
           (Uri url) async =>
               (await event.room.client.httpClient.get(url)).bodyBytes;
       bytes = await callback(_downloadUri(event, mxcUrl));
@@ -114,8 +115,9 @@ class MatrixAttachmentDownloader {
     Uint8List bytes, {
     required bool getThumbnail,
   }) {
-    final fileMap =
-        getThumbnail ? event.infoMap['thumbnail_file'] : event.content['file'];
+    final fileMap = getThumbnail
+        ? event.infoMap['thumbnail_file']
+        : event.content['file'];
     if (fileMap is! Map) {
       throw 'Missing encrypted file metadata.';
     }
@@ -138,12 +140,7 @@ class MatrixAttachmentDownloader {
       throw 'Invalid encrypted file metadata.';
     }
 
-    return EncryptedFile(
-      data: bytes,
-      iv: iv,
-      k: key,
-      sha256: sha256,
-    );
+    return EncryptedFile(data: bytes, iv: iv, k: key, sha256: sha256);
   }
 
   Uri _downloadUri(Event event, Uri mxcUrl) {

@@ -74,6 +74,10 @@ Future<void> _verifyOtp(HttpRequest request) async {
 
   _otpStore.remove(email);
   final enrollmentProof = _secureLoginEnrollmentProofs.issue(email);
+  logInfo('otp_verified', {
+    'emailHash': email.hashCode,
+    'secureLoginEnrollmentProofIssued': true,
+  });
   await _json(request, HttpStatus.ok, {
     'success': true,
     'secureLoginEnrollmentProof': enrollmentProof,

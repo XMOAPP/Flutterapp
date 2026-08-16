@@ -3,22 +3,26 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
-import 'package:sqflite/sqflite.dart' as sqflite;
+import 'package:sqflite_sqlcipher/sqflite.dart' as sqflite;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../config/app_config.dart';
+import '../config/media_upload_policy.dart';
 import '../models/invite_link_models.dart';
+import '../models/xmo_contact_card.dart';
 import '../utils/matrix_identity.dart';
 import '../utils/message_presentation.dart';
 import 'azure_blob_chunk_storage_service.dart';
 import 'channel_analytics_service.dart';
 import 'encrypted_hive_box_store.dart';
 import 'matrix_encrypted_media_helper.dart';
+import 'matrix_attachment_downloader.dart';
 import 'matrix_media_helper.dart';
 import 'message_draft_service.dart';
 import 'native_video_probe_stub.dart'
@@ -35,10 +39,154 @@ import 'package:flutter_vodozemac/flutter_vodozemac.dart' as vodozemac;
 
 Future<sqflite.Database> _openMatrixDatabase() async {
   final directory = await getApplicationSupportDirectory();
-  return sqflite.openDatabase(
-    p.join(directory.path, 'matrix_xmo_vodozemac_v1.db'),
-  );
+  final path = p.join(directory.path, 'matrix_xmo_vodozemac_v1.db');
+  const secureStorage = FlutterSecureStorage();
+  const storageKey = 'xmo_matrix_database_key_v1';
+
+  var cipher = await secureStorage.read(key: storageKey);
+  if (cipher == null || cipher.isEmpty) {
+    cipher = base64UrlEncode(Hive.generateSecureKey());
+    await secureStorage.write(key: storageKey, value: cipher);
+  }
+
+  await _ensureMatrixDatabaseEncrypted(path: path, cipher: cipher);
+  return sqflite.openDatabase(path, password: cipher);
 }
+
+Future<void> _ensureMatrixDatabaseEncrypted({
+  required String path,
+  required String cipher,
+}) async {
+  var databaseFile = io.File(path);
+  final backupPath = '$path.plaintext-backup';
+  final backupFile = io.File(backupPath);
+
+  // Restore the plaintext source if the process stopped after the original
+  // file was moved but before the encrypted replacement was installed.
+  if (!await databaseFile.exists() && await backupFile.exists()) {
+    await backupFile.rename(path);
+    databaseFile = io.File(path);
+  }
+  if (!await databaseFile.exists()) {
+    return;
+  }
+
+  if (!await _hasPlaintextSqliteHeader(databaseFile)) {
+    try {
+      await _validateEncryptedDatabase(path, cipher);
+      await _deleteFileIfPresent(backupPath);
+      return;
+    } catch (_) {
+      if (!await backupFile.exists()) rethrow;
+      await _deleteFileIfPresent(path);
+      await backupFile.rename(path);
+      databaseFile = io.File(path);
+    }
+  }
+
+  final encryptedPath = '$path.encrypted';
+  await _deleteFileIfPresent(encryptedPath);
+  await _deleteFileIfPresent('$encryptedPath-wal');
+  await _deleteFileIfPresent('$encryptedPath-shm');
+  if (await backupFile.exists()) {
+    // The current plaintext database is authoritative after recovery above.
+    await backupFile.delete();
+  }
+
+  sqflite.Database? plaintextDatabase;
+  var encryptedAttached = false;
+  try {
+    plaintextDatabase = await sqflite.openDatabase(path, singleInstance: false);
+    await plaintextDatabase.rawQuery('PRAGMA wal_checkpoint(FULL)');
+    await plaintextDatabase.execute(
+      "ATTACH DATABASE '${_escapeSqlLiteral(encryptedPath)}' "
+      "AS encrypted KEY '${_escapeSqlLiteral(cipher)}'",
+    );
+    encryptedAttached = true;
+
+    // sqflite rejects SELECT statements passed to execute(). Matrix SDK 9's
+    // helper currently does that, so run sqlcipher_export as a query here.
+    await plaintextDatabase.rawQuery("SELECT sqlcipher_export('encrypted')");
+    await plaintextDatabase.execute('DETACH DATABASE encrypted');
+    encryptedAttached = false;
+  } finally {
+    if (encryptedAttached && plaintextDatabase != null) {
+      try {
+        await plaintextDatabase.execute('DETACH DATABASE encrypted');
+      } catch (_) {
+        // Closing the database also releases the failed attachment.
+      }
+    }
+    await plaintextDatabase?.close();
+  }
+
+  // These sidecars belong to the plaintext source. Leaving them beside the
+  // encrypted replacement can make SQLite replay plaintext pages into it.
+  await _deleteFileIfPresent('$path-wal');
+  await _deleteFileIfPresent('$path-shm');
+
+  final encryptedFile = io.File(encryptedPath);
+  if (!await encryptedFile.exists() ||
+      await _hasPlaintextSqliteHeader(encryptedFile)) {
+    await _deleteFileIfPresent(encryptedPath);
+    throw StateError(
+      'Matrix database encryption did not produce a valid file.',
+    );
+  }
+  await _validateEncryptedDatabase(encryptedPath, cipher);
+
+  final migratedBackupFile = await databaseFile.rename(backupPath);
+  try {
+    await encryptedFile.rename(path);
+    await _validateEncryptedDatabase(path, cipher);
+    await migratedBackupFile.delete();
+  } catch (_) {
+    await _deleteFileIfPresent(path);
+    if (await migratedBackupFile.exists()) {
+      await migratedBackupFile.rename(path);
+    }
+    rethrow;
+  } finally {
+    await _deleteFileIfPresent(encryptedPath);
+    await _deleteFileIfPresent('$encryptedPath-wal');
+    await _deleteFileIfPresent('$encryptedPath-shm');
+  }
+}
+
+Future<void> _validateEncryptedDatabase(String path, String cipher) async {
+  sqflite.Database? database;
+  try {
+    database = await sqflite.openDatabase(
+      path,
+      password: cipher,
+      singleInstance: false,
+    );
+    final result = await database.rawQuery('PRAGMA integrity_check');
+    if (result.isEmpty || result.first.values.first.toString() != 'ok') {
+      throw StateError('Encrypted Matrix database failed its integrity check.');
+    }
+  } finally {
+    await database?.close();
+  }
+}
+
+Future<bool> _hasPlaintextSqliteHeader(io.File file) async {
+  final handle = await file.open();
+  try {
+    final bytes = await handle.read(16);
+    return bytes.length >= 16 &&
+        ascii.decode(bytes, allowInvalid: true) == 'SQLite format 3\u0000';
+  } finally {
+    await handle.close();
+  }
+}
+
+Future<void> _deleteFileIfPresent(String path) async {
+  final file = io.File(path);
+  if (await file.exists()) await file.delete();
+}
+
+String _escapeSqlLiteral(String value) => value.replaceAll("'", "''");
 
 enum XmoRoomKind { direct, group, channel, saved }
 
@@ -53,6 +201,16 @@ class MatrixAccountDeactivationException implements Exception {
   const MatrixAccountDeactivationException(this.message);
 
   final String message;
+
+  @override
+  String toString() => message;
+}
+
+class MatrixWalletLoginException implements Exception {
+  const MatrixWalletLoginException(this.message, {this.statusCode});
+
+  final String message;
+  final int? statusCode;
 
   @override
   String toString() => message;
@@ -92,6 +250,7 @@ class MatrixService implements MatrixRepositoryApi {
   static const String groupCallPushMarkerEvent = 'xmo.group_call_invite';
 
   late Client _client;
+  bool _clientReadyForAuthentication = false;
   late Box _authBox;
   late Box _channelBox;
   late Box _groupBox;
@@ -136,6 +295,7 @@ class MatrixService implements MatrixRepositoryApi {
       MatrixSdkCommunityRepository(this);
 
   Client get client => _client;
+  bool get clientReadyForAuthentication => _clientReadyForAuthentication;
 
   bool get isLoggedIn => _client.isLogged();
   String? get userId => _client.userID;
@@ -225,6 +385,7 @@ class MatrixService implements MatrixRepositoryApi {
       _profileAvatarUrl = null;
       _profileAvatarRemoved = true;
     } else if (avatarBytes != null && avatarBytes.isNotEmpty) {
+      MediaUploadPolicy.validate(avatarBytes.lengthInBytes);
       final avatarMxc = await _client.uploadContent(
         avatarBytes,
         filename: avatarFileName,
@@ -436,7 +597,16 @@ class MatrixService implements MatrixRepositoryApi {
         KeyVerificationMethod.numbers,
         KeyVerificationMethod.emoji,
       },
+      supportedLoginTypes: {
+        LoginType.mLoginPassword,
+        LoginType.mLoginToken,
+        'org.matrix.login.jwt',
+      },
     );
+
+    // From this point authentication can safely use the client even if
+    // restoring a cached session below fails or times out during startup.
+    _clientReadyForAuthentication = true;
 
     await _client.init();
   }
@@ -529,6 +699,119 @@ class MatrixService implements MatrixRepositoryApi {
     );
   }
 
+  Future<void> loginWithWalletToken(String token) async {
+    if (token.trim().isEmpty) {
+      throw ArgumentError.value(
+        token,
+        'token',
+        'Wallet login token is required',
+      );
+    }
+
+    // Client.login() performs homeserver discovery and waits for the first
+    // sync after the login response. A slow initial sync can therefore turn a
+    // successful JWT exchange into an apparent authentication failure. The
+    // wallet token is already scoped to this homeserver, so perform the
+    // standard Matrix login request directly and initialize the SDK without
+    // blocking on sync. startSync() is called by MatrixProvider afterwards.
+    final homeserver = Uri.parse(homeserverUrl);
+    final loginUri = homeserver.replace(
+      path: '/_matrix/client/v3/login',
+      query: null,
+      fragment: null,
+    );
+    final httpClient = io.HttpClient()
+      ..connectionTimeout = const Duration(seconds: 12);
+    try {
+      final request = await httpClient.postUrl(loginUri);
+      request.headers.contentType = io.ContentType.json;
+      request.write(
+        jsonEncode({
+          'type': 'org.matrix.login.jwt',
+          'token': token.trim(),
+          'initial_device_display_name': 'XMO Android',
+        }),
+      );
+      final response = await request.close().timeout(
+        const Duration(seconds: 20),
+      );
+      final responseBody = await utf8.decodeStream(response);
+      final decoded = responseBody.isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(responseBody) as Map<String, dynamic>;
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final serverMessage = decoded['error']?.toString().trim();
+        throw MatrixWalletLoginException(
+          serverMessage?.isNotEmpty == true
+              ? serverMessage!
+              : 'Wallet session was rejected by the homeserver.',
+          statusCode: response.statusCode,
+        );
+      }
+
+      final accessToken = decoded['access_token']?.toString();
+      final userId = decoded['user_id']?.toString();
+      final deviceId = decoded['device_id']?.toString();
+      if (accessToken == null ||
+          accessToken.isEmpty ||
+          userId == null ||
+          userId.isEmpty ||
+          deviceId == null ||
+          deviceId.isEmpty) {
+        throw const MatrixWalletLoginException(
+          'Wallet login returned an incomplete Matrix session.',
+        );
+      }
+
+      // Wallet login is a new account transition. Clear the SDK's local
+      // account record before init so a failed restore, a previous account,
+      // or a stale logged-out token cannot block the replacement JWT session.
+      // The server session and wallet account remain intact; only local SDK
+      // state is removed. This is also important when switching wallet-only
+      // accounts on the same device.
+      debugPrint(
+        '[MatrixService] Resetting local Matrix state before wallet login.',
+      );
+      await _client.clear();
+
+      final expiresInMs = decoded['expires_in_ms'];
+      final expiresAt = expiresInMs is num
+          ? DateTime.now().add(Duration(milliseconds: expiresInMs.toInt()))
+          : null;
+      await _client.init(
+        newToken: accessToken,
+        newTokenExpiresAt: expiresAt,
+        newRefreshToken: decoded['refresh_token']?.toString(),
+        newUserID: userId,
+        newHomeserver: homeserver,
+        newDeviceName: 'XMO Android',
+        newDeviceID: deviceId,
+        waitForFirstSync: false,
+        waitUntilLoadCompletedLoaded: false,
+      );
+      debugPrint('[MatrixService] Wallet Matrix session initialized.');
+    } on TimeoutException {
+      throw const MatrixWalletLoginException(
+        'Wallet login timed out. Check your connection and try again.',
+      );
+    } on io.SocketException {
+      throw const MatrixWalletLoginException(
+        'XMO could not reach the login service. Check your connection.',
+      );
+    } on io.HandshakeException {
+      throw const MatrixWalletLoginException(
+        'XMO could not establish a secure login connection.',
+      );
+    } on FormatException {
+      throw const MatrixWalletLoginException(
+        'Wallet login returned an invalid response.',
+      );
+    } finally {
+      httpClient.close(force: true);
+    }
+  }
+
   Future<bool> isUsernameAvailable(String username) async {
     await _client.checkHomeserver(Uri.parse(homeserverUrl));
     return await _client.checkUsernameAvailability(username) == true;
@@ -580,47 +863,70 @@ class MatrixService implements MatrixRepositoryApi {
     await _clearLocalDrafts(accountUserId);
   }
 
-  Future<void> deactivateAccount({String? password, bool erase = true}) async {
+  Future<void> deactivateAccount() async {
     final token = accessToken;
     final accountUserId = userId;
-    final loginUser = currentLoginUsername;
-    final authPassword = password?.trim().isNotEmpty == true
-        ? password!.trim()
-        : _storedPasswordForCurrentUser();
 
-    if (token == null || token.isEmpty || loginUser == null) {
+    if (token == null || token.isEmpty || accountUserId == null) {
       throw const MatrixAccountDeactivationException(
         'You must be logged in to delete this account.',
-      );
-    }
-    if (authPassword == null || authPassword.isEmpty) {
-      throw const MatrixAccountDeactivationException(
-        'Enter your account password to delete this account.',
       );
     }
 
     await _deleteXmoBackendAccountData(token);
 
-    final session = await _sendDeactivateAccountRequest(
-      token: token,
-      erase: erase,
-      authUser: loginUser,
-      password: authPassword,
-    );
-
-    if (session != null) {
-      await _sendDeactivateAccountRequest(
-        token: token,
-        erase: erase,
-        authUser: loginUser,
-        password: authPassword,
-        session: session,
-      );
-    }
-
     await _removeStoredCredentialsForCurrentUser();
     await _clearLocalDrafts(accountUserId);
     await _client.clear();
+  }
+
+  Future<void> clearLocalSessionAfterRemoteDeletion() async {
+    final accountUserId = userId;
+    _invalidateMediaConfig();
+    await _removeStoredCredentialsForCurrentUser();
+    await _clearLocalDrafts(accountUserId);
+    await _client.clear();
+  }
+
+  /// Returns true only when the homeserver conclusively rejects the current
+  /// access token. Network failures deliberately return false so an offline
+  /// device is never signed out just because it cannot reach the server.
+  Future<bool> isCurrentSessionInvalidated() async {
+    final token = accessToken;
+    if (token == null || token.isEmpty) return false;
+
+    final homeserver = Uri.tryParse(homeserverUrl);
+    if (homeserver == null ||
+        (homeserver.scheme != 'http' && homeserver.scheme != 'https')) {
+      return false;
+    }
+
+    final uri = homeserver.replace(
+      pathSegments: const ['_matrix', 'client', 'v3', 'account', 'whoami'],
+      query: null,
+      fragment: null,
+    );
+    final httpClient = io.HttpClient()
+      ..connectionTimeout = const Duration(seconds: 8);
+    try {
+      final request = await httpClient.getUrl(uri);
+      request.headers.set(io.HttpHeaders.authorizationHeader, 'Bearer $token');
+      final response = await request.close().timeout(
+        const Duration(seconds: 12),
+      );
+      await response.drain<void>();
+      return response.statusCode == 401 || response.statusCode == 403;
+    } on TimeoutException {
+      return false;
+    } on io.SocketException {
+      return false;
+    } on io.HandshakeException {
+      return false;
+    } catch (_) {
+      return false;
+    } finally {
+      httpClient.close(force: true);
+    }
   }
 
   Future<void> _clearLocalDrafts(String? accountUserId) async {
@@ -675,72 +981,6 @@ class MatrixService implements MatrixRepositoryApi {
       throw const MatrixAccountDeactivationException(
         'Could not contact the account deletion service. Try again.',
       );
-    } finally {
-      httpClient.close(force: true);
-    }
-  }
-
-  Future<String?> _sendDeactivateAccountRequest({
-    required String token,
-    required bool erase,
-    required String authUser,
-    required String password,
-    String? session,
-  }) async {
-    final uri = Uri.parse(
-      '$homeserverUrl/_matrix/client/v3/account/deactivate',
-    );
-    final httpClient = io.HttpClient();
-    try {
-      final request = await httpClient.postUrl(uri);
-      request.headers
-        ..set(io.HttpHeaders.authorizationHeader, 'Bearer $token')
-        ..set(io.HttpHeaders.contentTypeHeader, 'application/json');
-      request.write(
-        jsonEncode({
-          'erase': erase,
-          'auth': {
-            'type': 'm.login.password',
-            'identifier': {'type': 'm.id.user', 'user': authUser},
-            'password': password,
-            if (session != null) 'session': session,
-          },
-        }),
-      );
-
-      final response = await request.close().timeout(
-        const Duration(seconds: 20),
-      );
-      final responseBody = await utf8.decodeStream(response);
-      final decoded = responseBody.isEmpty
-          ? <String, dynamic>{}
-          : jsonDecode(responseBody) as Map<String, dynamic>;
-
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return null;
-      }
-
-      if (response.statusCode == 401 && session == null) {
-        final nextSession = decoded['session'];
-        if (nextSession is String && nextSession.isNotEmpty) {
-          return nextSession;
-        }
-      }
-
-      final message = decoded['error'] as String?;
-      throw MatrixAccountDeactivationException(
-        message?.isNotEmpty == true
-            ? message!
-            : 'Failed to delete account (${response.statusCode}).',
-      );
-    } on MatrixAccountDeactivationException {
-      rethrow;
-    } on TimeoutException {
-      throw const MatrixAccountDeactivationException(
-        'Deleting account timed out. Check your connection and try again.',
-      );
-    } catch (e) {
-      throw MatrixAccountDeactivationException('Failed to delete account: $e');
     } finally {
       httpClient.close(force: true);
     }
@@ -1208,6 +1448,16 @@ class MatrixService implements MatrixRepositoryApi {
       isDirectChat: room.isDirectChat,
     );
     return kind == XmoRoomKind.channel || isKnownChannel(room.id);
+  }
+
+  bool isGroupRoom(Room room) {
+    final kind = classifyRoomKind(
+      typeContent: room.getState(roomTypeStateType)?.content,
+      powerLevelsContent: room.getState(EventTypes.RoomPowerLevels)?.content,
+      isDirectChat: room.isDirectChat,
+      useGroupFallback: true,
+    );
+    return kind == XmoRoomKind.group || isKnownGroup(room.id);
   }
 
   /// Returns true if this room is known to be a group (from persistent cache).
@@ -1794,45 +2044,6 @@ class MatrixService implements MatrixRepositoryApi {
     });
   }
 
-  Future<void> sendSticker({
-    required String roomId,
-    required Uint8List bytes,
-    required String fileName,
-    required String mimeType,
-    Event? inReplyTo,
-  }) async {
-    final room = _client.getRoomById(roomId);
-    if (room == null) throw Exception('Room not found: $roomId');
-
-    final preparedSticker = await _prepareMediaUpload(
-      room,
-      bytes: bytes,
-      fileName: fileName,
-      mimeType: mimeType,
-    );
-    final stickerMxc = await _client.uploadContent(
-      preparedSticker.bytes,
-      filename: fileName,
-      contentType: preparedSticker.contentType,
-    );
-
-    await room.sendEvent(
-      {
-        'body': fileName,
-        if (preparedSticker.encryptedFile == null) 'url': stickerMxc.toString(),
-        if (preparedSticker.encryptedFile != null)
-          'file': _encryptedFileContent(
-            preparedSticker.encryptedFile!,
-            stickerMxc,
-            mimeType: mimeType,
-          ),
-        'info': {'mimetype': mimeType, 'size': bytes.length},
-      },
-      type: EventTypes.Sticker,
-      inReplyTo: inReplyTo,
-    );
-  }
-
   Future<void> sendPoll({
     required String roomId,
     required String question,
@@ -1841,6 +2052,9 @@ class MatrixService implements MatrixRepositoryApi {
   }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
+    if (!isGroupRoom(room)) {
+      throw Exception('Polls are only available in groups');
+    }
 
     final cleanQuestion = question.trim();
     final answers = <Map<String, dynamic>>[];
@@ -1887,6 +2101,9 @@ class MatrixService implements MatrixRepositoryApi {
   }) async {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
+    if (!isGroupRoom(room)) {
+      throw Exception('Polls are only available in groups');
+    }
 
     final response = {
       'answers': [answerId],
@@ -2085,8 +2302,10 @@ class MatrixService implements MatrixRepositoryApi {
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
     Map<String, dynamic>? xmoStream,
+    Map<String, dynamic>? forwarded,
     Event? inReplyTo,
   }) async {
+    MediaUploadPolicy.validate(audioBytes.lengthInBytes);
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
 
@@ -2124,6 +2343,7 @@ class MatrixService implements MatrixRepositoryApi {
             if (durationMs > 0) 'duration': durationMs,
           },
           if (isVoiceMessage) 'org.matrix.msc3245.voice': {},
+          if (forwarded != null) 'xmo.forwarded': forwarded,
         },
         xmoStream: xmoStream,
       ),
@@ -2138,7 +2358,7 @@ class MatrixService implements MatrixRepositoryApi {
     if (event.redacted) {
       throw Exception('Deleted messages cannot be forwarded');
     }
-    if (event.type != EventTypes.Message && event.type != EventTypes.Sticker) {
+    if (event.type != EventTypes.Message) {
       throw Exception('This message type cannot be forwarded');
     }
 
@@ -2148,19 +2368,180 @@ class MatrixService implements MatrixRepositoryApi {
       throw Exception('You cannot send messages in this chat');
     }
 
-    final content = _forwardableContent(event);
-    final targetEventId = await targetRoom.sendEvent(content, type: event.type);
-    if (targetEventId != null && isChannelRoom(event.room)) {
-      try {
-        await ChannelAnalyticsService(_client).recordForward(
-          roomId: event.room.id,
-          eventId: event.eventId,
-          targetRoomId: targetRoomId,
-          targetEventId: targetEventId,
+    final msgtype = event.content['msgtype'];
+    if (msgtype is! String) {
+      throw Exception('This message type cannot be forwarded');
+    }
+
+    final forwardMarker = _forwardMarker(event);
+    if (_isTextMessageType(msgtype)) {
+      final content = _forwardableContent(event);
+      final targetEventId = await targetRoom.sendEvent(
+        content,
+        type: event.type,
+      );
+      await _recordForwardIfNeeded(
+        event: event,
+        targetRoomId: targetRoomId,
+        targetEventId: targetEventId,
+      );
+      return;
+    }
+
+    if (!_isAttachmentMessageType(msgtype)) {
+      throw Exception('This message type cannot be forwarded');
+    }
+
+    // An attachment's `file` map can contain a source-room encryption key.
+    // Downloading its plaintext and using the normal send APIs ensures the
+    // destination receives fresh media encryption metadata when required.
+    final file = await const MatrixAttachmentDownloader().download(
+      event,
+      downloadCallback: _downloadForwardAttachment,
+    );
+    final mimeType = _forwardMimeType(file, msgtype);
+    final info = event.infoMap;
+    switch (msgtype) {
+      case MessageTypes.Image:
+        await sendImageWithCaption(
+          roomId: targetRoomId,
+          bytes: file.bytes,
+          fileName: file.name,
+          mimeType: mimeType,
+          caption: _forwardCaption(event, file.name),
+          forwarded: forwardMarker,
         );
-      } catch (error) {
-        debugPrint('[ChannelAnalytics] Forward tracking failed: $error');
+        return;
+      case MessageTypes.Video:
+        await sendVideoWithThumbnail(
+          roomId: targetRoomId,
+          videoBytes: file.bytes,
+          videoFileName: file.name,
+          videoMimeType: mimeType,
+          videoWidth: _infoInt(info, 'w'),
+          videoHeight: _infoInt(info, 'h'),
+          durationMs: _infoInt(info, 'duration'),
+          caption: _forwardCaption(event, file.name),
+          forwarded: forwardMarker,
+        );
+        return;
+      case MessageTypes.Audio:
+        await sendAudio(
+          roomId: targetRoomId,
+          audioBytes: file.bytes,
+          fileName: file.name,
+          mimeType: mimeType,
+          durationMs: _infoInt(info, 'duration') ?? 0,
+          isVoiceMessage: event.content.containsKey('org.matrix.msc3245.voice'),
+          forwarded: forwardMarker,
+        );
+        return;
+      case MessageTypes.File:
+        final contact = XmoContactCard.fromEventContent(event.content);
+        await sendFileWithProgress(
+          roomId: targetRoomId,
+          bytes: file.bytes,
+          fileName: file.name,
+          mimeType: mimeType,
+          xmoContact: contact?.toJson(),
+          forwarded: forwardMarker,
+        );
+        return;
+    }
+  }
+
+  bool _isTextMessageType(String msgtype) {
+    return msgtype == MessageTypes.Text ||
+        msgtype == MessageTypes.Notice ||
+        msgtype == MessageTypes.Emote;
+  }
+
+  bool _isAttachmentMessageType(String msgtype) {
+    return msgtype == MessageTypes.Image ||
+        msgtype == MessageTypes.Video ||
+        msgtype == MessageTypes.Audio ||
+        msgtype == MessageTypes.File;
+  }
+
+  String _forwardMimeType(MatrixFile file, String msgtype) {
+    final mimeType = file.mimeType.trim();
+    if (mimeType.isNotEmpty) return mimeType;
+    switch (msgtype) {
+      case MessageTypes.Image:
+        return 'image/*';
+      case MessageTypes.Video:
+        return 'video/*';
+      case MessageTypes.Audio:
+        return 'audio/*';
+      default:
+        return 'application/octet-stream';
+    }
+  }
+
+  int? _infoInt(Map<String, dynamic> info, String key) {
+    final value = info[key];
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '');
+  }
+
+  String _forwardCaption(Event event, String fileName) {
+    final caption = event.content['xmo_caption'];
+    if (caption is String && caption.trim().isNotEmpty) return caption.trim();
+    final body = event.content['body'];
+    if (body is String && body.trim().isNotEmpty && body.trim() != fileName) {
+      return body.trim();
+    }
+    return '';
+  }
+
+  Map<String, dynamic> _forwardMarker(Event event) {
+    return <String, dynamic>{
+      'event_id': event.eventId,
+      'room_id': event.room.id,
+      'sender': event.senderId,
+    };
+  }
+
+  Future<void> _recordForwardIfNeeded({
+    required Event event,
+    required String targetRoomId,
+    required String? targetEventId,
+  }) async {
+    if (targetEventId == null || !isChannelRoom(event.room)) return;
+    try {
+      await ChannelAnalyticsService(_client).recordForward(
+        roomId: event.room.id,
+        eventId: event.eventId,
+        targetRoomId: targetRoomId,
+        targetEventId: targetEventId,
+      );
+    } catch (error) {
+      debugPrint('[ChannelAnalytics] Forward tracking failed: $error');
+    }
+  }
+
+  Future<Uint8List> _downloadForwardAttachment(Uri url) async {
+    final mediaRequest = getMediaRequestForUrl(url);
+    final httpClient = io.HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15);
+    try {
+      final request = await httpClient.getUrl(mediaRequest.uri);
+      mediaRequest.headers.forEach(request.headers.set);
+      final response = await request.close().timeout(
+        const Duration(minutes: 2),
+      );
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        await response.drain<void>();
+        throw Exception('Unable to download attachment for forwarding');
       }
+      final bytes = BytesBuilder(copy: false);
+      await for (final chunk in response) {
+        bytes.add(chunk);
+      }
+      return bytes.takeBytes();
+    } finally {
+      httpClient.close(force: true);
     }
   }
 
@@ -2174,11 +2555,7 @@ class MatrixService implements MatrixRepositoryApi {
     final copied = jsonDecode(jsonEncode(source)) as Map<String, dynamic>;
     copied.remove('m.relates_to');
     copied.remove('m.new_content');
-    copied['xmo.forwarded'] = {
-      'event_id': event.eventId,
-      'room_id': event.room.id,
-      'sender': event.senderId,
-    };
+    copied['xmo.forwarded'] = _forwardMarker(event);
 
     if (copied['body'] is String) {
       copied['body'] = stripMatrixReplyFallback(
@@ -2219,8 +2596,10 @@ class MatrixService implements MatrixRepositoryApi {
     bool Function()? isCancelled,
     Map<String, dynamic>? xmoStream,
     Map<String, dynamic>? xmoContact,
+    Map<String, dynamic>? forwarded,
     Event? inReplyTo,
   }) async {
+    MediaUploadPolicy.validate(bytes.lengthInBytes);
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
 
@@ -2254,6 +2633,7 @@ class MatrixService implements MatrixRepositoryApi {
             ),
           'info': {'mimetype': mimeType, 'size': bytes.length},
           if (xmoContact != null) 'com.xmo.contact': xmoContact,
+          if (forwarded != null) 'xmo.forwarded': forwarded,
         },
         xmoStream: xmoStream,
       ),
@@ -2273,8 +2653,10 @@ class MatrixService implements MatrixRepositoryApi {
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
     Map<String, dynamic>? xmoStream,
+    Map<String, dynamic>? forwarded,
     Event? inReplyTo,
   }) async {
+    MediaUploadPolicy.validate(bytes.lengthInBytes);
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
 
@@ -2338,6 +2720,7 @@ class MatrixService implements MatrixRepositoryApi {
           'body': cleanCaption.isEmpty ? fileName : cleanCaption,
           'filename': fileName,
           if (cleanCaption.isNotEmpty) 'xmo_caption': cleanCaption,
+          if (forwarded != null) 'xmo.forwarded': forwarded,
           if (preparedImage.encryptedFile == null) 'url': imageMxc.toString(),
           if (preparedImage.encryptedFile != null)
             'file': _encryptedFileContent(
@@ -2375,8 +2758,10 @@ class MatrixService implements MatrixRepositoryApi {
     void Function(TransferStage stage)? onStageChanged,
     bool Function()? isCancelled,
     Map<String, dynamic>? xmoStream,
+    Map<String, dynamic>? forwarded,
     Event? inReplyTo,
   }) async {
+    MediaUploadPolicy.validate(videoBytes.lengthInBytes);
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
 
@@ -2520,6 +2905,7 @@ class MatrixService implements MatrixRepositoryApi {
           'body': cleanCaption.isEmpty ? effectiveVideoFileName : cleanCaption,
           'filename': effectiveVideoFileName,
           if (cleanCaption.isNotEmpty) 'xmo_caption': cleanCaption,
+          if (forwarded != null) 'xmo.forwarded': forwarded,
           if (preparedVideo.encryptedFile == null) 'url': videoMxc.toString(),
           if (preparedVideo.encryptedFile != null)
             'file': _encryptedFileContent(
@@ -2578,6 +2964,7 @@ class MatrixService implements MatrixRepositoryApi {
                     fileName: fileName,
                     contentType: contentType,
                     chunkIndex: chunkIndex,
+                    mediaSize: videoBytes.lengthInBytes,
                     roomId: roomId,
                   );
                 } catch (e) {
@@ -2677,17 +3064,18 @@ class MatrixService implements MatrixRepositoryApi {
     void Function(int uploadedBytes, int totalBytes)? onProgress,
     bool Function()? isCancelled,
   }) async {
+    MediaUploadPolicy.validate(content.lengthInBytes);
+    final maxMediaSize = await _maxUploadSize();
+    if (maxMediaSize != null && maxMediaSize < content.lengthInBytes) {
+      throw FileTooBigMatrixException(content.lengthInBytes, maxMediaSize);
+    }
+
     if (onProgress == null && isCancelled == null) {
       return _client.uploadContent(
         content,
         filename: filename,
         contentType: contentType,
       );
-    }
-
-    final maxMediaSize = await _maxUploadSize();
-    if (maxMediaSize != null && maxMediaSize < content.lengthInBytes) {
-      throw FileTooBigMatrixException(content.lengthInBytes, maxMediaSize);
     }
 
     final token = accessToken;
@@ -2774,6 +3162,7 @@ class MatrixService implements MatrixRepositoryApi {
     }
 
     final fileLength = await file.length();
+    MediaUploadPolicy.validate(fileLength);
     final maxMediaSize = await _maxUploadSize();
     if (maxMediaSize != null && maxMediaSize < fileLength) {
       throw FileTooBigMatrixException(fileLength, maxMediaSize);
@@ -2893,11 +3282,23 @@ class MatrixService implements MatrixRepositoryApi {
     final inFlight = _mediaConfigRequest;
     if (inFlight != null) return inFlight;
 
-    final request = _client.getConfig().then((config) {
-      _cachedMaxUploadSize = config.mUploadSize;
-      _mediaConfigCachedAt = DateTime.now();
-      return _cachedMaxUploadSize;
-    });
+    final request = _client
+        .getConfig()
+        .then((config) {
+          final advertised = config.mUploadSize;
+          _cachedMaxUploadSize =
+              advertised == null ||
+                  advertised > MediaUploadPolicy.maxUploadBytes
+              ? MediaUploadPolicy.maxUploadBytes
+              : advertised;
+          _mediaConfigCachedAt = DateTime.now();
+          return _cachedMaxUploadSize;
+        })
+        .catchError((Object _) {
+          _cachedMaxUploadSize = MediaUploadPolicy.maxUploadBytes;
+          _mediaConfigCachedAt = DateTime.now();
+          return _cachedMaxUploadSize;
+        });
     _mediaConfigRequest = request;
     return request.whenComplete(() {
       if (identical(_mediaConfigRequest, request)) {

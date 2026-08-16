@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
 import 'package:matrix/matrix.dart';
+import '../config/media_upload_policy.dart';
 import '../models/story_models.dart';
 import '../utils/matrix_identity.dart';
 import 'matrix_service.dart';
@@ -35,7 +36,7 @@ class StoryService {
   static const int _maxStoredViewReceiptsPerOwner = 256;
   static const int _maxStoriesPerSnapshot = 100;
   static const int _maxImageBytes = 25 * 1024 * 1024;
-  static const int _maxVideoBytes = 250 * 1024 * 1024;
+  static const int _maxVideoBytes = MediaUploadPolicy.maxUploadBytes;
   static const int _maxThumbnailBytes = 5 * 1024 * 1024;
   static const int _maxUploadAttempts = 3;
   static const int _maxBroadcastAttempts = 8;

@@ -1,9 +1,12 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import 'package:file_picker/file_picker.dart';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:provider/provider.dart';
+import '../../config/media_upload_policy.dart';
 import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/group_service.dart';
@@ -189,19 +192,26 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.image,
-        withData: true,
+        withData: false,
       );
 
       debugPrint('[GroupSettings] FilePicker result: ${result != null}');
 
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.first;
+        MediaUploadPolicy.validate(file.size);
+        final path = file.path;
+        if (path == null || path.isEmpty) {
+          throw const FileSystemException('Selected image is unavailable');
+        }
+        final bytes = await File(path).readAsBytes();
+        MediaUploadPolicy.validate(bytes.lengthInBytes);
         debugPrint(
-          '[GroupSettings] File selected: ${file.name}, bytes: ${file.bytes?.length}',
+          '[GroupSettings] File selected: ${file.name}, bytes: ${bytes.length}',
         );
-        if (file.bytes != null) {
+        if (mounted) {
           setState(() {
-            _selectedAvatarBytes = file.bytes;
+            _selectedAvatarBytes = bytes;
             _selectedAvatarName = file.name;
             _removeAvatar = false;
           });
@@ -210,12 +220,18 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
       } else {
         debugPrint('[GroupSettings] No file selected');
       }
+    } on MediaUploadPolicyException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.message), backgroundColor: Colors.red),
+        );
+      }
     } catch (e) {
       debugPrint('[GroupSettings] Error picking avatar: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to pick image: $e'),
+            content: Text(safeUserFacingText('Failed to pick image: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -232,6 +248,15 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
       ),
     );
     if (!mounted || result == null || result.bytes.isEmpty) return;
+
+    try {
+      MediaUploadPolicy.validate(result.bytes.lengthInBytes);
+    } on MediaUploadPolicyException catch (error) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message), backgroundColor: Colors.red),
+      );
+      return;
+    }
 
     if (result.type != CameraCaptureMediaType.image) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -287,7 +312,9 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
     await _handleJoinRequestAction(
       user,
       actionLabel: 'approved',
-      action: () => widget.room.invite(user.id),
+      action: () => GroupService(
+        context.read<MatrixProvider>().service,
+      ).addMember(widget.room.id, user.id),
     );
   }
 
@@ -326,7 +353,9 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to $actionLabel request: $e'),
+          content: Text(
+            safeUserFacingText('Failed to $actionLabel request: $e'),
+          ),
           backgroundColor: Colors.redAccent,
         ),
       );
@@ -407,7 +436,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to save: $e'),
+            content: Text(safeUserFacingText('Failed to save: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -929,7 +958,6 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                         sendMedia: _permissions.sendMedia,
                         startCalls: _permissions.startCalls,
                         sendPolls: _permissions.sendPolls,
-                        sendStickers: _permissions.sendStickers,
                       ),
                     ),
                   ),
@@ -942,7 +970,6 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                         sendMedia: value,
                         startCalls: _permissions.startCalls,
                         sendPolls: _permissions.sendPolls,
-                        sendStickers: _permissions.sendStickers,
                       ),
                     ),
                   ),
@@ -955,7 +982,6 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                         sendMedia: _permissions.sendMedia,
                         startCalls: value,
                         sendPolls: _permissions.sendPolls,
-                        sendStickers: _permissions.sendStickers,
                       ),
                     ),
                   ),
@@ -968,20 +994,6 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                         sendMedia: _permissions.sendMedia,
                         startCalls: _permissions.startCalls,
                         sendPolls: value,
-                        sendStickers: _permissions.sendStickers,
-                      ),
-                    ),
-                  ),
-                  _buildPermissionSelector(
-                    'Send Stickers',
-                    _permissions.sendStickers,
-                    (value) => setState(
-                      () => _permissions = XmoRoomPermissions(
-                        sendMessages: _permissions.sendMessages,
-                        sendMedia: _permissions.sendMedia,
-                        startCalls: _permissions.startCalls,
-                        sendPolls: _permissions.sendPolls,
-                        sendStickers: value,
                       ),
                     ),
                   ),

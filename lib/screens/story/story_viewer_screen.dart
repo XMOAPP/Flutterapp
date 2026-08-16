@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -392,7 +393,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Unable to send: $e'),
+          content: Text(safeUserFacingText('Unable to send: $e')),
           backgroundColor: Colors.redAccent,
           duration: const Duration(seconds: 3),
         ),

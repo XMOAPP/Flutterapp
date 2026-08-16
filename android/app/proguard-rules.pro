@@ -28,6 +28,9 @@
 -keep class io.flutter.plugins.localauth.** { *; }
 -keep class io.flutter.plugins.camera.** { *; }
 
+# SQLCipher is loaded through the sqflite_sqlcipher Flutter plugin.
+-keep class net.sqlcipher.** { *; }
+
 # Preserve metadata used by serializers and reflection-based libraries.
 -keepattributes RuntimeVisibleAnnotations,RuntimeInvisibleAnnotations
 -keepattributes AnnotationDefault,Signature,InnerClasses,EnclosingMethod

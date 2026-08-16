@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -5,7 +6,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 
 import '../../screens/native_share_stub.dart'
-    if (dart.library.io) '../../screens/native_share.dart' as native_share;
+    if (dart.library.io) '../../screens/native_share.dart'
+    as native_share;
 import '../../screens/web_download_stub.dart'
     if (dart.library.js_interop) '../../screens/web_download.dart'
     as web_download;
@@ -16,7 +18,7 @@ class AlbumMediaViewer extends StatefulWidget {
   final List<Event> events;
   final int initialIndex;
   final Future<Uint8List?> Function(Event event, {bool getThumbnail})
-      loadImageBytes;
+  loadImageBytes;
   final Future<Uint8List?> Function(Event event) loadVideoThumbnail;
   final Future<MatrixFile> Function(Event event) downloadAttachment;
   final Future<void> Function(Event event) playVideo;
@@ -103,7 +105,7 @@ class _AlbumMediaViewerState extends State<AlbumMediaViewer> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('$errorPrefix: $e'),
+          content: Text(safeUserFacingText('$errorPrefix: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -231,10 +233,7 @@ class _AlbumMediaViewerState extends State<AlbumMediaViewer> {
         children: [
           Icon(icon, color: color, size: 20),
           const SizedBox(width: 12),
-          Text(
-            label,
-            style: GoogleFonts.inter(color: color, fontSize: 14),
-          ),
+          Text(label, style: GoogleFonts.inter(color: color, fontSize: 14)),
         ],
       ),
     );
@@ -244,12 +243,9 @@ class _AlbumMediaViewerState extends State<AlbumMediaViewer> {
 class _AlbumImagePage extends StatelessWidget {
   final Event event;
   final Future<Uint8List?> Function(Event event, {bool getThumbnail})
-      loadImageBytes;
+  loadImageBytes;
 
-  const _AlbumImagePage({
-    required this.event,
-    required this.loadImageBytes,
-  });
+  const _AlbumImagePage({required this.event, required this.loadImageBytes});
 
   @override
   Widget build(BuildContext context) {
@@ -260,9 +256,7 @@ class _AlbumImagePage extends StatelessWidget {
       builder: (context, snapshot) {
         final bytes = snapshot.data;
         if (bytes == null || bytes.isEmpty) {
-          return const Center(
-            child: CircularProgressIndicator(color: kWhite),
-          );
+          return const Center(child: CircularProgressIndicator(color: kWhite));
         }
         return Center(
           child: InteractiveViewer(
@@ -354,10 +348,7 @@ class _AlbumError extends StatelessWidget {
   final IconData icon;
   final String label;
 
-  const _AlbumError({
-    required this.icon,
-    required this.label,
-  });
+  const _AlbumError({required this.icon, required this.label});
 
   @override
   Widget build(BuildContext context) {

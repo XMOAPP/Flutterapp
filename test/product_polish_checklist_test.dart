@@ -9,7 +9,6 @@ void main() {
       containsAll([
         'reaction_details',
         'polls',
-        'stickers',
         'link_previews',
         'stories',
         'app_lock',
@@ -38,9 +37,9 @@ void main() {
     };
 
     expect(ProductPolishChecklist.isBetaReady(evidence), isFalse);
-    expect(
-      ProductPolishChecklist.missingBetaEvidenceIds(evidence),
-      ['stories', 'responsive_qa'],
-    );
+    expect(ProductPolishChecklist.missingBetaEvidenceIds(evidence), [
+      'stories',
+      'responsive_qa',
+    ]);
   });
 }

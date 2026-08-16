@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import 'package:provider/provider.dart';
+import 'package:xmo/utils/user_facing_error.dart';
 import '../providers/matrix_provider.dart';
 import '../models/group_models.dart';
 import '../services/group_service.dart';
@@ -400,7 +401,10 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                   if (!mounted) return;
                   setState(() {
                     _startingChat = false;
-                    _error = 'Failed to create channel: $e';
+                    _error = userFacingError(
+                      e,
+                      fallback: 'Failed to create channel.',
+                    );
                   });
                 }
               },
@@ -563,7 +567,10 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                   }
                   setState(() {
                     _startingChat = false;
-                    _error = 'Failed to create group: $e';
+                    _error = userFacingError(
+                      e,
+                      fallback: 'Failed to create group.',
+                    );
                   });
                 }
               },

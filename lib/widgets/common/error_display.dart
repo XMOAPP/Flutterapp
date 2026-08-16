@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:xmo/utils/user_facing_error.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SHARED ERROR DISPLAY WIDGET
@@ -35,10 +36,7 @@ class ErrorDisplay extends StatelessWidget {
             const Icon(Icons.error_outline, color: Colors.redAccent, size: 14),
             const SizedBox(width: 6),
             Expanded(
-              child: Text(
-                error!,
-                style: _errorTextStyle,
-              ),
+              child: Text(safeUserFacingText(error!), style: _errorTextStyle),
             ),
           ],
         ),

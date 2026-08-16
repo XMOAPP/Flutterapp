@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:reown_appkit/reown_appkit.dart';
+import 'package:xmo/utils/user_facing_error.dart';
 
 import '../config/app_config.dart';
 import '../providers/matrix_provider.dart';
@@ -13,8 +15,6 @@ import '../theme.dart';
 import 'home_screen.dart';
 import 'wallet_auth/error_display.dart';
 import 'wallet_auth/wallet_steps.dart';
-
-enum _WalletAuthMode { login, create }
 
 class WalletAuthScreen extends StatefulWidget {
   const WalletAuthScreen({super.key});
@@ -31,9 +31,10 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
   final _walletAuthService = const WalletAuthService();
   bool _isInitializing = true;
   bool _isBusy = false;
+  bool _isResolvingWallet = false;
+  bool _isNewAccount = false;
   String? _error;
-  String _step = 'username';
-  _WalletAuthMode _mode = _WalletAuthMode.login;
+  String _step = 'connect';
 
   @override
   void initState() {
@@ -65,11 +66,11 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
         metadata: const PairingMetadata(
           name: 'XMO',
           description: 'XMO chat wallet sign-in',
-          url: 'https://xmo.chat',
-          icons: ['https://xmo.chat/favicon.png'],
+          url: 'https://xmo.dpdns.org',
+          icons: ['https://xmo.dpdns.org/favicon.png'],
           redirect: Redirect(
             native: 'xmo://wallet',
-            universal: 'https://xmo.chat',
+            universal: 'https://xmo.dpdns.org/wallet',
           ),
         ),
         featuredWalletIds: const {
@@ -77,39 +78,6 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
           '1ae92b26df02f0abca6304df07debccd18262fdf5fe82daa81593582dac9a369',
           'fd20dc426fb37566d803205b19bbc1d4096b248ac04548e3cfb6b3a38bd033aa',
         },
-        customWallets: const [
-          ReownAppKitModalWalletInfo(
-            listing: AppKitModalWalletListing(
-              id: 'xmo-rabby-mobile',
-              name: 'Rabby',
-              homepage: 'https://rabby.io',
-              imageId: 'https://rabby.io/assets/images/logo-128.png',
-              order: 1,
-              mobileLink: 'rabby://',
-              playStore:
-                  'https://play.google.com/store/apps/details?id=com.debank.rabbymobile',
-              rdns: 'com.debank.rabbymobile',
-              supportsWc: true,
-              isTopWallet: true,
-            ),
-          ),
-          ReownAppKitModalWalletInfo(
-            listing: AppKitModalWalletListing(
-              id: 'xmo-trust-wallet-mobile',
-              name: 'Trust Wallet',
-              homepage: 'https://trustwallet.com',
-              imageId:
-                  'https://trustwallet.com/assets/images/media/assets/TWT.png',
-              order: 2,
-              mobileLink: 'trust://',
-              playStore:
-                  'https://play.google.com/store/apps/details?id=com.wallet.crypto.trustapp',
-              rdns: 'com.wallet.crypto.trustapp',
-              supportsWc: true,
-              isTopWallet: true,
-            ),
-          ),
-        ],
         optionalNamespaces: {
           'eip155': RequiredNamespace.fromJson({
             'chains': ['eip155:1', 'eip155:137', 'eip155:11155111'],
@@ -142,11 +110,17 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
         _appKitModal = appKitModal;
         _isInitializing = false;
       });
+      if (appKitModal.isConnected) {
+        unawaited(_resolveConnectedWallet());
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isInitializing = false;
-        _error = e.toString().replaceAll('Exception: ', '');
+        _error = userFacingError(
+          e,
+          fallback: 'Wallet connection is unavailable. Please try again.',
+        );
       });
     }
   }
@@ -154,64 +128,88 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
   void _onWalletStateChanged() {
     if (!mounted) return;
     final connected = _appKitModal?.isConnected ?? false;
-    if (connected && _step == 'connect') {
-      setState(() => _step = 'sign');
-    } else {
-      setState(() {});
+    if (connected) {
+      unawaited(_resolveConnectedWallet());
+      return;
+    }
+    if (_step != 'connect') {
+      setState(() {
+        _step = 'connect';
+        _usernameCtrl.clear();
+        _error = null;
+      });
+    }
+  }
+
+  Future<void> _resolveConnectedWallet() async {
+    if (_isResolvingWallet || _isBusy) return;
+    final wallet = _connectedWallet(_appKitModal);
+    if (wallet == null) return;
+    _isResolvingWallet = true;
+    if (mounted) {
+      setState(() {
+        _isBusy = true;
+        _error = null;
+      });
+    }
+    try {
+      final lookup = await _walletAuthService.lookupAccount(
+        address: wallet.address,
+        walletType: wallet.type,
+      );
+      if (!mounted) return;
+      setState(() {
+        _isNewAccount = !lookup.exists;
+        _usernameCtrl.text = lookup.username;
+        _step = lookup.exists ? 'sign' : 'username';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _step = 'connect';
+        _error = userFacingError(
+          e,
+          fallback: 'Could not check this wallet. Please try again.',
+        );
+      });
+    } finally {
+      _isResolvingWallet = false;
+      if (mounted) setState(() => _isBusy = false);
     }
   }
 
   Future<void> _onContinue() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (_mode == _WalletAuthMode.create) {
-      setState(() {
-        _isBusy = true;
-        _error = null;
-      });
-
-      try {
-        final available = await context
-            .read<MatrixProvider>()
-            .service
-            .isUsernameAvailable(_usernameCtrl.text.trim());
-        if (!mounted) return;
-        if (!available) {
-          setState(() {
-            _error = 'Username already taken. Choose another username.';
-          });
-          return;
-        }
-      } catch (e) {
-        if (!mounted) return;
-        if (_isUsernameTakenError(e)) {
-          setState(() {
-            _error = 'Username already taken. Choose another username.';
-          });
-          return;
-        }
+    setState(() {
+      _isBusy = true;
+      _error = null;
+    });
+    try {
+      final available = await _walletAuthService.isUsernameAvailable(
+        _usernameCtrl.text.trim(),
+      );
+      if (!mounted) return;
+      if (!available) {
         setState(() {
-          _error = e.toString().replaceAll('Exception: ', '');
+          _error = 'Username already taken. Choose another username.';
         });
         return;
-      } finally {
-        if (mounted) setState(() => _isBusy = false);
       }
+      setState(() => _step = 'sign');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = _isUsernameTakenError(e)
+            ? 'Username already taken. Choose another username.'
+            : userFacingError(
+                e,
+                fallback: 'Could not check the username. Please try again.',
+              );
+      });
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
     }
-
-    setState(() {
-      _step = (_appKitModal?.isConnected ?? false) ? 'sign' : 'connect';
-      _error = null;
-    });
-  }
-
-  void _switchMode(_WalletAuthMode mode) {
-    if (_mode == mode) return;
-    setState(() {
-      _mode = mode;
-      _step = 'username';
-      _error = null;
-    });
   }
 
   void _openWallets() {
@@ -238,7 +236,7 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
 
     try {
       final chainId = _selectedChainId(appKitModal);
-      final mode = _mode.name;
+      final mode = _isNewAccount ? 'create' : 'login';
       final challenge = await _walletAuthService.createChallenge(
         username: username,
         address: wallet.address,
@@ -256,19 +254,20 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
         throw Exception('Wallet did not return a signature.');
       }
       final verification = await _walletAuthService.verifySignature(
-        username: username,
+        username: challenge.username,
         address: wallet.address,
-        mode: mode,
+        mode: challenge.mode,
         walletType: wallet.type,
         message: challenge.message,
         signature: signature,
+        nonce: challenge.nonce,
       );
 
       if (!mounted) return;
       final provider = context.read<MatrixProvider>();
-      final ok = _mode == _WalletAuthMode.login
-          ? await provider.login(username, verification.matrixPassword)
-          : await provider.register(username, verification.matrixPassword);
+      final ok = await provider.loginWithWalletToken(
+        verification.matrixLoginToken,
+      );
 
       if (!mounted) return;
       if (ok) {
@@ -282,15 +281,22 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
           (route) => false,
         );
       } else {
-        setState(() => _error = _walletAuthError(provider.error));
+        setState(() {
+          _error = userFacingError(
+            provider.error,
+            fallback: 'Wallet login failed. Please try again.',
+          );
+        });
       }
     } catch (e) {
       if (!mounted) return;
-      final raw = e.toString().replaceAll('Exception: ', '');
       setState(() {
-        _error = _isUsernameTakenError(raw)
+        _error = _isUsernameTakenError(e)
             ? 'Username already taken. Choose another username.'
-            : raw;
+            : userFacingError(
+                e,
+                fallback: 'Wallet authentication failed. Please try again.',
+              );
       });
     } finally {
       if (mounted) setState(() => _isBusy = false);
@@ -305,16 +311,6 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
         raw.contains('user id already taken');
   }
 
-  String _walletAuthError(String? error) {
-    if (_mode == _WalletAuthMode.create && _isUsernameTakenError(error)) {
-      return 'Username already taken. Choose another username.';
-    }
-    if (_mode == _WalletAuthMode.login) {
-      return 'No account found with this username, or this wallet is not linked to this account.';
-    }
-    return error ?? 'Authentication failed.';
-  }
-
   Future<dynamic> _signWalletMessage(
     ReownAppKitModal appKitModal,
     _WalletConnection wallet,
@@ -326,9 +322,7 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
         chainId: wallet.chainId,
         request: SessionRequestParams(
           method: 'solana_signMessage',
-          params: {
-            'message': base58.encode(utf8.encode(message)),
-          },
+          params: {'message': base58.encode(utf8.encode(message))},
         ),
       );
     }
@@ -355,7 +349,8 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
 
     final evmAddress = session.getAddress('eip155');
     if (evmAddress != null && evmAddress.isNotEmpty) {
-      final chainId = appKitModal?.selectedChain?.chainId ??
+      final chainId =
+          appKitModal?.selectedChain?.chainId ??
           session.getApprovedChains(namespace: 'eip155')?.first ??
           'eip155:1';
       return _WalletConnection(
@@ -367,7 +362,8 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
 
     final solanaAddress = session.getAddress('solana');
     if (solanaAddress != null && solanaAddress.isNotEmpty) {
-      final chainId = session.getApprovedChains(namespace: 'solana')?.first ??
+      final chainId =
+          session.getApprovedChains(namespace: 'solana')?.first ??
           'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
       return _WalletConnection(
         type: 'solana',
@@ -386,7 +382,8 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
       return base64Encode(signatureResult);
     }
     if (signatureResult is Map) {
-      final dynamic signature = signatureResult['signature'] ??
+      final dynamic signature =
+          signatureResult['signature'] ??
           signatureResult['signedMessage'] ??
           signatureResult['result'];
       return _normalizeSignature(signature);
@@ -406,13 +403,10 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
   }
 
   String get _title =>
-      _mode == _WalletAuthMode.login ? 'Connect Wallet' : 'Create with Wallet';
-
-  String get _usernameButtonLabel =>
-      _mode == _WalletAuthMode.login ? 'Continue' : 'Create Account';
+      _isNewAccount && _step != 'connect' ? 'Create Wallet Account' : 'Connect Wallet';
 
   String get _signButtonLabel =>
-      _mode == _WalletAuthMode.login ? 'Sign & Login' : 'Create Account';
+      _isNewAccount ? 'Sign & Create Account' : 'Sign & Login';
 
   @override
   Widget build(BuildContext context) {
@@ -456,25 +450,11 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
                     formKey: _formKey,
                     controller: _usernameCtrl,
                     isBusy: _isBusy,
-                    buttonLabel: _usernameButtonLabel,
+                    buttonLabel: 'Continue',
                     onContinue: _onContinue,
-                    footerText: _mode == _WalletAuthMode.login
-                        ? "Don't have an account?"
-                        : 'Already have an account?',
-                    footerActionLabel: _mode == _WalletAuthMode.login
-                        ? 'Create with wallet'
-                        : 'Login with wallet',
-                    onFooterAction: () => _switchMode(
-                      _mode == _WalletAuthMode.login
-                          ? _WalletAuthMode.create
-                          : _WalletAuthMode.login,
-                    ),
                   )
                 else if (_step == 'connect')
-                  _NativeConnectStep(
-                    isBusy: _isBusy,
-                    onConnect: _openWallets,
-                  )
+                  _NativeConnectStep(isBusy: _isBusy, onConnect: _openWallets)
                 else if (_step == 'sign')
                   SignMessageStep(
                     connectedAddress: address ?? '',
@@ -483,6 +463,7 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
                     onSign: _signAndContinue,
                     shortAddress: _shortAddress,
                     buttonLabel: _signButtonLabel,
+                    showWalletLossWarning: _isNewAccount,
                   ),
                 if (_error != null) ...[
                   const SizedBox(height: 16),
@@ -501,10 +482,7 @@ class _NativeConnectStep extends StatelessWidget {
   final bool isBusy;
   final VoidCallback onConnect;
 
-  const _NativeConnectStep({
-    required this.isBusy,
-    required this.onConnect,
-  });
+  const _NativeConnectStep({required this.isBusy, required this.onConnect});
 
   @override
   Widget build(BuildContext context) {

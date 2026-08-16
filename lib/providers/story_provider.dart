@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
@@ -34,14 +35,15 @@ class StoryProvider extends ChangeNotifier {
 
   /// Initialize provider
   void _init() {
-    unawaited(_uploadQueue
-        .attach(
-      _storyService,
-      onStoryCreated: _handleQueuedStoryCreated,
-    )
-        .catchError((Object error) {
-      debugPrint('[StoryProvider] Failed to initialize upload queue: $error');
-    }));
+    unawaited(
+      _uploadQueue
+          .attach(_storyService, onStoryCreated: _handleQueuedStoryCreated)
+          .catchError((Object error) {
+            debugPrint(
+              '[StoryProvider] Failed to initialize upload queue: $error',
+            );
+          }),
+    );
     _eventSub = _storyService.onEvent.listen(_handleEventUpdate);
     _accountDataSub = _storyService.onAccountData.listen((event) {
       if (event.type == StoryService.storyAccountDataType) {
@@ -114,8 +116,9 @@ class StoryProvider extends ChangeNotifier {
     if (receipt == null || myUserId == null) return;
     if (receipt.viewerId == myUserId) return;
 
-    final storyIndex =
-        _myStories.indexWhere((story) => story.id == receipt.storyId);
+    final storyIndex = _myStories.indexWhere(
+      (story) => story.id == receipt.storyId,
+    );
     if (storyIndex == -1) return;
 
     final story = _myStories[storyIndex];
@@ -145,10 +148,7 @@ class StoryProvider extends ChangeNotifier {
       (stories) => stories.userId == incoming.userId,
     );
     if (existingIndex != -1 &&
-        !shouldReplaceStorySnapshot(
-          _contactStories[existingIndex],
-          incoming,
-        )) {
+        !shouldReplaceStorySnapshot(_contactStories[existingIndex], incoming)) {
       return false;
     }
 
@@ -161,13 +161,15 @@ class StoryProvider extends ChangeNotifier {
       return true;
     }
 
-    _contactStories.add(UserStories(
-      userId: incoming.userId,
-      userName: incoming.userName,
-      userAvatarUrl: incoming.userAvatarUrl,
-      stories: updatedStories,
-      snapshotUpdatedAt: incoming.snapshotUpdatedAt,
-    ));
+    _contactStories.add(
+      UserStories(
+        userId: incoming.userId,
+        userName: incoming.userName,
+        userAvatarUrl: incoming.userAvatarUrl,
+        stories: updatedStories,
+        snapshotUpdatedAt: incoming.snapshotUpdatedAt,
+      ),
+    );
     _sortContactStories();
     return true;
   }
@@ -207,9 +209,9 @@ class StoryProvider extends ChangeNotifier {
     unawaited(_storyService.cacheContactStories(_contactStories));
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // LOAD STORIES
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   /// Refresh all stories
   Future<void> refreshStories({bool forceTimelineScan = false}) async {
@@ -238,7 +240,7 @@ class StoryProvider extends ChangeNotifier {
       _loading = false;
       notifyListeners();
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       _loading = false;
       notifyListeners();
       debugPrint('[StoryProvider] Failed to refresh stories: $e');
@@ -267,9 +269,9 @@ class StoryProvider extends ChangeNotifier {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // CREATE STORY
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   /// Create a new story
   Future<StoryUploadJob> queueStory(CreateStoryRequest request) {
@@ -313,7 +315,7 @@ class StoryProvider extends ChangeNotifier {
 
       return story;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       _loading = false;
       notifyListeners();
       debugPrint('[StoryProvider] Failed to create story: $e');
@@ -321,9 +323,9 @@ class StoryProvider extends ChangeNotifier {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // VIEW STORY
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   /// Mark story as viewed
   Future<void> markStoryAsViewed(String storyOwnerId, String storyId) async {
@@ -347,9 +349,9 @@ class StoryProvider extends ChangeNotifier {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // DELETE STORY
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   /// Delete a story
   Future<bool> deleteStory(String storyId) async {
@@ -362,16 +364,16 @@ class StoryProvider extends ChangeNotifier {
 
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       debugPrint('[StoryProvider] Failed to delete story: $e');
       return false;
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // HELPERS
-  // ═══════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   /// Get active stories count
   int get activeStoriesCount {

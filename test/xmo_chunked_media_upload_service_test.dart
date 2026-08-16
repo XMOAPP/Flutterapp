@@ -2,6 +2,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:xmo/config/media_upload_policy.dart';
 import 'package:xmo/services/matrix_encrypted_media_helper.dart';
 import 'package:xmo/services/xmo_chunked_media_upload_service.dart';
 
@@ -41,22 +42,23 @@ void main() {
         videoFileName: 'clip.mp4',
         videoMimeType: 'video/mp4',
         durationMs: 1234,
-        uploadChunk: ({
-          required encryptedBytes,
-          required fileName,
-          required contentType,
-          required chunkIndex,
-        }) async {
-          uploadedChunks.add(
-            _UploadedChunk(
-              index: chunkIndex,
-              fileName: fileName,
-              contentType: contentType,
-              bytes: encryptedBytes,
-            ),
-          );
-          return Uri.parse('mxc://server/chunk$chunkIndex');
-        },
+        uploadChunk:
+            ({
+              required encryptedBytes,
+              required fileName,
+              required contentType,
+              required chunkIndex,
+            }) async {
+              uploadedChunks.add(
+                _UploadedChunk(
+                  index: chunkIndex,
+                  fileName: fileName,
+                  contentType: contentType,
+                  bytes: encryptedBytes,
+                ),
+              );
+              return Uri.parse('mxc://server/chunk$chunkIndex');
+            },
       );
 
       expect(uploadedChunks, hasLength(3));
@@ -112,22 +114,23 @@ void main() {
         videoFileName: 'clip.mp4',
         videoMimeType: 'video/mp4',
         durationMs: 1234,
-        uploadChunk: ({
-          required encryptedBytes,
-          required fileName,
-          required contentType,
-          required chunkIndex,
-        }) async {
-          uploadedChunks.add(
-            _UploadedChunk(
-              index: chunkIndex,
-              fileName: fileName,
-              contentType: contentType,
-              bytes: encryptedBytes,
-            ),
-          );
-          return Uri.parse('mxc://server/$fileName');
-        },
+        uploadChunk:
+            ({
+              required encryptedBytes,
+              required fileName,
+              required contentType,
+              required chunkIndex,
+            }) async {
+              uploadedChunks.add(
+                _UploadedChunk(
+                  index: chunkIndex,
+                  fileName: fileName,
+                  contentType: contentType,
+                  bytes: encryptedBytes,
+                ),
+              );
+              return Uri.parse('mxc://server/$fileName');
+            },
       );
 
       expect(manifest.qualities.keys, containsAll(['source', '480p', '240p']));
@@ -161,13 +164,13 @@ void main() {
         videoFileName: 'clip.mp4',
         videoMimeType: 'video/mp4',
         durationMs: null,
-        uploadChunk: ({
-          required encryptedBytes,
-          required fileName,
-          required contentType,
-          required chunkIndex,
-        }) async =>
-            Uri.parse('mxc://server/$fileName'),
+        uploadChunk:
+            ({
+              required encryptedBytes,
+              required fileName,
+              required contentType,
+              required chunkIndex,
+            }) async => Uri.parse('mxc://server/$fileName'),
       );
 
       expect(manifest.qualities.keys, ['source']);
@@ -257,13 +260,13 @@ void main() {
         videoFileName: 'clip.mp4',
         videoMimeType: 'video/mp4',
         durationMs: null,
-        uploadChunk: ({
-          required encryptedBytes,
-          required fileName,
-          required contentType,
-          required chunkIndex,
-        }) async =>
-            Uri.parse('mxc://server/$fileName'),
+        uploadChunk:
+            ({
+              required encryptedBytes,
+              required fileName,
+              required contentType,
+              required chunkIndex,
+            }) async => Uri.parse('mxc://server/$fileName'),
       );
 
       expect(manifest.qualities.keys, ['source']);
@@ -284,13 +287,13 @@ void main() {
           videoFileName: 'clip.mp4',
           videoMimeType: 'video/mp4',
           durationMs: null,
-          uploadChunk: ({
-            required encryptedBytes,
-            required fileName,
-            required contentType,
-            required chunkIndex,
-          }) async =>
-              Uri.parse('mxc://server/$fileName'),
+          uploadChunk:
+              ({
+                required encryptedBytes,
+                required fileName,
+                required contentType,
+                required chunkIndex,
+              }) async => Uri.parse('mxc://server/$fileName'),
         ),
         throwsA(isA<XmoChunkedMediaUploadCancelledException>()),
       );
@@ -309,15 +312,40 @@ void main() {
           videoMimeType: 'video/mp4',
           durationMs: null,
           isCancelled: () => true,
-          uploadChunk: ({
-            required encryptedBytes,
-            required fileName,
-            required contentType,
-            required chunkIndex,
-          }) async =>
-              Uri.parse('mxc://server/chunk$chunkIndex'),
+          uploadChunk:
+              ({
+                required encryptedBytes,
+                required fileName,
+                required contentType,
+                required chunkIndex,
+              }) async => Uri.parse('mxc://server/chunk$chunkIndex'),
         ),
         throwsA(isA<XmoChunkedMediaUploadCancelledException>()),
+      );
+    });
+
+    test('rejects video above the configured upload limit', () async {
+      const service = XmoChunkedMediaUploadService(
+        chunkSize: 4,
+        thresholdBytes: 4,
+        maxUploadBytes: 5,
+      );
+
+      await expectLater(
+        service.uploadVideoStream(
+          videoBytes: Uint8List.fromList([1, 2, 3, 4, 5, 6]),
+          videoFileName: 'large.mp4',
+          videoMimeType: 'video/mp4',
+          durationMs: null,
+          uploadChunk:
+              ({
+                required encryptedBytes,
+                required fileName,
+                required contentType,
+                required chunkIndex,
+              }) async => Uri.parse('mxc://server/chunk'),
+        ),
+        throwsA(isA<MediaUploadPolicyException>()),
       );
     });
   });

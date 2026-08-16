@@ -52,6 +52,12 @@ void main() {
       );
       expect(
         WalletDeepLinkHandler.isSupportedWalletLink(
+          'https://xmo.dpdns.org/wallet?uri=wc%3Atopic',
+        ),
+        isTrue,
+      );
+      expect(
+        WalletDeepLinkHandler.isSupportedWalletLink(
           'wc:topic@2?relay-protocol=irn&symKey=abc',
         ),
         isTrue,
@@ -64,6 +70,12 @@ void main() {
       );
       expect(
         WalletDeepLinkHandler.isSupportedWalletLink('xmo://wallet/extra'),
+        isFalse,
+      );
+      expect(
+        WalletDeepLinkHandler.isSupportedWalletLink(
+          'https://attacker.example/wallet?uri=wc%3Atopic',
+        ),
         isFalse,
       );
     });

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 import 'package:provider/provider.dart';
+import 'package:xmo/utils/user_facing_error.dart';
 
 import '../providers/matrix_provider.dart';
 import '../screens/matrix_chat_screen.dart';
@@ -70,7 +71,9 @@ class CallLinkService {
       try {
         await VoipService().answerIncomingGroupCall(groupCall);
       } catch (e) {
-        _showCurrentMessage('Unable to join call: $e');
+        _showCurrentMessage(
+          userFacingError(e, fallback: 'Unable to join call.'),
+        );
       }
       return true;
     }
@@ -87,10 +90,7 @@ class CallLinkService {
     final provider = Provider.of<MatrixProvider>(context, listen: false);
     await navigator.push(
       MaterialPageRoute(
-        builder: (_) => MatrixChatScreen(
-          room: room,
-          matrixProvider: provider,
-        ),
+        builder: (_) => MatrixChatScreen(room: room, matrixProvider: provider),
       ),
     );
   }

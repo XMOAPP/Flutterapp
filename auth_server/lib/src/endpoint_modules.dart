@@ -112,10 +112,24 @@ class InviteEndpointModule {
 }
 
 class WalletEndpointModule {
-  const WalletEndpointModule({required this.nonce, required this.verify});
+  const WalletEndpointModule({
+    required this.account,
+    required this.usernameAvailability,
+    required this.nonce,
+    required this.verify,
+  });
 
+  final EndpointHandler account;
+  final EndpointHandler usernameAvailability;
   final EndpointHandler nonce;
   final EndpointHandler verify;
+
+  bool handlesAccount(String path) =>
+      path == '/wallet/account' || path == '/auth/wallet/account';
+
+  bool handlesUsernameAvailability(String path) =>
+      path == '/wallet/username-availability' ||
+      path == '/auth/wallet/username-availability';
 
   bool handlesNonce(String path) =>
       path == '/wallet/nonce' || path == '/auth/wallet/nonce';
@@ -148,11 +162,17 @@ class UserDirectoryEndpointModule {
   const UserDirectoryEndpointModule({
     required this.upsert,
     required this.search,
+    required this.checkUsernameAvailability,
+    required this.registerOidcAccount,
+    required this.prepareSecureRegistration,
     required this.provisionSecureLogin,
   });
 
   final EndpointHandler upsert;
   final EndpointHandler search;
+  final EndpointHandler checkUsernameAvailability;
+  final EndpointHandler registerOidcAccount;
+  final EndpointHandler prepareSecureRegistration;
   final EndpointHandler provisionSecureLogin;
 
   bool handlesUpsert(String path) =>
@@ -164,6 +184,21 @@ class UserDirectoryEndpointModule {
       path == '/users/search' ||
       path == '/auth/users/search' ||
       path == '/auth/otp/users/search';
+
+  bool handlesUsernameAvailability(String path) =>
+      path == '/accounts/username-availability' ||
+      path == '/auth/accounts/username-availability' ||
+      path == '/auth/otp/accounts/username-availability';
+
+  bool handlesRegisterOidcAccount(String path) =>
+      path == '/accounts/register' ||
+      path == '/auth/accounts/register' ||
+      path == '/auth/otp/accounts/register';
+
+  bool handlesPrepareSecureRegistration(String path) =>
+      path == '/users/prepare-secure-registration' ||
+      path == '/auth/users/prepare-secure-registration' ||
+      path == '/auth/otp/users/prepare-secure-registration';
 
   bool handlesProvisionSecureLogin(String path) =>
       path == '/users/provision-secure-login' ||

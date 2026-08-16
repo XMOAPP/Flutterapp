@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -15,6 +16,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:record/record.dart';
 import '../config/app_config.dart';
+import '../config/media_upload_policy.dart';
 import '../theme.dart';
 import '../providers/matrix_provider.dart';
 import '../services/matrix_service.dart';
@@ -304,6 +306,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       _room != null && _matrixService.isDirectRoom(_room!);
   bool get _isChannelRoom =>
       _room != null && _matrixService.isChannelRoom(_room!);
+  bool get _isGroupRoom => _room != null && _matrixService.isGroupRoom(_room!);
 
   /// Determines if the room is a group or channel for join button text
   String _getJoinButtonText() {
@@ -833,7 +836,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       });
 
       // Pre-load video thumbnails in the background so they're ready
-      // before the user scrolls to them — eliminates the loading flash.
+      // before the user scrolls to them Ã¢â‚¬â€ eliminates the loading flash.
       if (timeline != null && _appSettings.autoDownloadMedia) {
         _preloadVideoThumbnails(timeline);
       }
@@ -1442,7 +1445,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
         _replyToEvent = replyToEvent;
         _privateReplyDraft = privateReplyDraft;
       });
-      _showSnackBar('Failed to send message: $e');
+      _showSnackBar(safeUserFacingText('Failed to send message: $e'));
     }
   }
 
@@ -1565,7 +1568,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
         _lastRecordingWaveformUiUpdate = null;
       });
     } catch (e) {
-      _showSnackBar('Failed to start recording: $e');
+      _showSnackBar(safeUserFacingText('Failed to start recording: $e'));
     }
   }
 
@@ -1613,7 +1616,11 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
         });
       }
     } catch (e) {
-      _showSnackBar('Could not ${_recordingPaused ? 'resume' : 'pause'}: $e');
+      _showSnackBar(
+        safeUserFacingText(
+          'Could not ${_recordingPaused ? 'resume' : 'pause'}: $e',
+        ),
+      );
     }
   }
 
@@ -1652,7 +1659,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
     try {
       path = await _audioRecorder.stop();
     } catch (e) {
-      _showSnackBar('Failed to stop recording: $e');
+      _showSnackBar(safeUserFacingText('Failed to stop recording: $e'));
     }
 
     if (mounted) {
@@ -1688,16 +1695,70 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       );
     } catch (e) {
       if (e is! MatrixUploadCancelledException) {
-        _showSnackBar('Failed to send voice message: $e');
+        _showMediaUploadFailure(e, source: 'voice message');
       }
     }
   }
 
-  void _showSnackBar(String message) {
+  void _showSnackBar(
+    String message, {
+    Color backgroundColor = kDarkerGrey,
+    Color? textColor,
+  }) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: kDarkerGrey),
+      SnackBar(
+        content: Text(message, style: TextStyle(color: textColor)),
+        backgroundColor: backgroundColor,
+      ),
     );
+  }
+
+  void _showMediaUploadFailure(Object error, {required String source}) {
+    debugPrint('[MediaUpload] $source upload failed: $error');
+    _showSnackBar('Upload failed. Check your connection and retry.');
+  }
+
+  bool _validatePickedUploadSizes(Iterable<PlatformFile> files) {
+    final oversized = files.where(
+      (file) => file.size > MediaUploadPolicy.maxUploadBytes,
+    );
+    if (oversized.isNotEmpty) {
+      _showSnackBar(
+        '${oversized.first.name} is larger than '
+        '${MediaUploadPolicy.maxUploadLabel}.',
+        backgroundColor: kLimeGreen,
+        textColor: kBlack,
+      );
+      return false;
+    }
+    return true;
+  }
+
+  Future<Uint8List?> _readPickedUpload(PlatformFile picked) async {
+    try {
+      MediaUploadPolicy.validate(picked.size);
+      final inMemory = picked.bytes;
+      if (inMemory != null && inMemory.isNotEmpty) return inMemory;
+      final path = picked.path;
+      if (path == null || path.isEmpty) {
+        _showSnackBar('Unable to read ${picked.name}.');
+        return null;
+      }
+      final bytes = await File(path).readAsBytes();
+      MediaUploadPolicy.validate(bytes.lengthInBytes);
+      return bytes;
+    } on MediaUploadPolicyException catch (error) {
+      _showSnackBar(
+        error.message,
+        backgroundColor: kLimeGreen,
+        textColor: kBlack,
+      );
+      return null;
+    } on FileSystemException {
+      _showSnackBar('${picked.name} is no longer available.');
+      return null;
+    }
   }
 
   void _setReplyTo(Event event) {
@@ -1786,7 +1847,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
         setState(() => _loading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to join: $e'),
+            content: Text(safeUserFacingText('Failed to join: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -2010,10 +2071,10 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       } else {
         await _transferQueue.markFailed(upload.id, e);
         upload.failed = true;
-        upload.error = e.toString();
+        upload.error = userFacingError(e, fallback: 'Upload failed.');
         if (mounted) setState(() {});
         _schedulePendingUploadRetry(roomId, upload);
-        _showSnackBar('Failed to send media: $e');
+        _showMediaUploadFailure(e, source: 'media');
       }
     } finally {
       _setUploading(false);
@@ -2310,7 +2371,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
         setState(() {
           _pendingAlbumUploads.removeWhere((item) => item.id == album.id);
         });
-        _showSnackBar('Failed to prepare media uploads: $e');
+        _showSnackBar(
+          safeUserFacingText('Failed to prepare media uploads: $e'),
+        );
       }
       return;
     }
@@ -2419,9 +2482,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
         }
         await _transferQueue.markFailed(upload.id, e);
         upload.failed = true;
-        upload.error = e.toString();
+        upload.error = userFacingError(e, fallback: 'Upload failed.');
         if (mounted) setState(() {});
-        _showSnackBar('Failed to send media: $e');
+        _showMediaUploadFailure(e, source: 'album media');
       }
     }
 
@@ -2563,7 +2626,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
         setState(() {
           _pendingUploads.removeWhere(uploads.contains);
         });
-        _showSnackBar('Failed to prepare uploads: $e');
+        _showSnackBar(safeUserFacingText('Failed to prepare uploads: $e'));
       }
       return;
     }
@@ -2597,11 +2660,12 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
             if (mounted) {
               setState(() {
                 upload.failed = true;
-                upload.error = e.toString();
+                upload.error = userFacingError(e, fallback: 'Upload failed.');
               });
             }
-            _showSnackBar(
-              'Failed to send ${upload.isAudio ? 'audio' : 'file'}: $e',
+            _showMediaUploadFailure(
+              e,
+              source: upload.isAudio ? 'audio' : 'file',
             );
           } else {
             await _transferQueue.cancel(upload.id);
@@ -2673,14 +2737,15 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
     }
     final result = await FilePicker.platform.pickFiles(
       type: FileType.audio,
-      withData: true,
+      withData: false,
       allowMultiple: true,
     );
     if (result == null || result.files.isEmpty) return;
+    if (!_validatePickedUploadSizes(result.files)) return;
     final uploads = <_PendingUpload>[];
     for (final picked in result.files) {
-      final bytes = picked.bytes;
-      if (bytes == null || bytes.isEmpty) continue;
+      final bytes = await _readPickedUpload(picked);
+      if (bytes == null) return;
       final durationMs = await _readAudioDurationMs(picked.path);
       uploads.add(
         _createPendingAudioUpload(
@@ -2728,14 +2793,15 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
     }
     final result = await FilePicker.platform.pickFiles(
       type: FileType.any,
-      withData: true,
+      withData: false,
       allowMultiple: true,
     );
     if (result == null || result.files.isEmpty) return;
+    if (!_validatePickedUploadSizes(result.files)) return;
     final uploads = <_PendingUpload>[];
     for (final picked in result.files) {
-      final bytes = picked.bytes;
-      if (bytes == null || bytes.isEmpty) continue;
+      final bytes = await _readPickedUpload(picked);
+      if (bytes == null) return;
       uploads.add(
         _createPendingFileUpload(
           bytes: bytes,
@@ -2773,9 +2839,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       onDocuments: () {
         _pickAndSendFileWithPending();
       },
-      onSticker: () {
-        _pickAndSendSticker();
-      },
+      showPoll: _isGroupRoom,
       onPoll: () {
         _showPollComposer();
       },
@@ -2845,56 +2909,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
     }
   }
 
-  Future<void> _pickAndSendSticker() async {
-    final room = _room;
-    if (room == null) return;
-    if (_isUploadBusy) {
-      _showSnackBar('Please wait for the current upload to finish.');
-      return;
-    }
-    if (!_ensureRoomActionAllowed(XmoRoomPermission.sendStickers) ||
-        !_ensureSlowModeAllowed()) {
-      return;
-    }
-
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const ['jpg', 'jpeg', 'png', 'gif', 'webp'],
-      withData: true,
-      allowMultiple: false,
-    );
-    final picked = result == null || result.files.isEmpty
-        ? null
-        : result.files.first;
-    final bytes = picked?.bytes;
-    if (picked == null || bytes == null || bytes.isEmpty) return;
-
-    final replyToEvent = _replyToEvent;
-    try {
-      _setUploading(true);
-      await widget.matrixProvider.service.sendSticker(
-        roomId: room.id,
-        bytes: bytes,
-        fileName: picked.name,
-        mimeType:
-            lookupMimeType(picked.name, headerBytes: bytes) ?? 'image/png',
-        inReplyTo: replyToEvent,
-      );
-      if (mounted && identical(_replyToEvent, replyToEvent)) {
-        setState(() => _replyToEvent = null);
-      }
-      _scrollToBottom();
-    } catch (e) {
-      if (!mounted) return;
-      _showSnackBar('Failed to send sticker: $e');
-    } finally {
-      _setUploading(false);
-    }
-  }
-
   Future<void> _showPollComposer() async {
     final room = _room;
-    if (room == null) return;
+    if (room == null || !_isGroupRoom) return;
     if (_isUploadBusy) {
       _showSnackBar('Please wait for the current upload to finish.');
       return;
@@ -2924,7 +2941,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       _scrollToBottom();
     } catch (e) {
       if (!mounted) return;
-      _showSnackBar('Failed to send poll: $e');
+      _showSnackBar(safeUserFacingText('Failed to send poll: $e'));
     }
   }
 
@@ -2956,6 +2973,19 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       final videoPath = result.filePath;
       if (result.bytes.isEmpty && (videoPath == null || videoPath.isEmpty)) {
         _showSnackBar('Unable to read the recorded video.');
+        return;
+      }
+      final videoSize = result.bytes.isNotEmpty
+          ? result.bytes.lengthInBytes
+          : await File(videoPath!).length();
+      try {
+        MediaUploadPolicy.validate(videoSize);
+      } on MediaUploadPolicyException catch (error) {
+        _showSnackBar(
+          error.message,
+          backgroundColor: kLimeGreen,
+          textColor: kBlack,
+        );
         return;
       }
       final videoBytes = result.bytes.isNotEmpty
@@ -3014,16 +3044,17 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
         'm4v',
         '3gp',
       ],
-      withData: true,
+      withData: false,
       allowMultiple: true,
     );
     if (!mounted || result == null || result.files.isEmpty) return;
+    if (!_validatePickedUploadSizes(result.files)) return;
 
     if (result.files.length > 1) {
       final uploads = <_PendingUpload>[];
       for (final picked in result.files) {
-        final bytes = picked.bytes;
-        if (bytes == null || bytes.isEmpty) continue;
+        final bytes = await _readPickedUpload(picked);
+        if (bytes == null) return;
 
         final fileName = picked.name;
         final mimeType =
@@ -3056,8 +3087,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
     }
 
     final picked = result.files.first;
-    final bytes = picked.bytes;
-    if (bytes == null || bytes.isEmpty) return;
+    final bytes = await _readPickedUpload(picked);
+    if (!mounted || bytes == null) return;
 
     final fileName = picked.name;
     final mimeType =
@@ -3138,7 +3169,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
               ),
               const SizedBox(width: 12),
               Text(
-                'Loading video…',
+                'Loading videoÃ¢â‚¬Â¦',
                 style: GoogleFonts.inter(color: kWhite, fontSize: 13),
               ),
             ],
@@ -3180,7 +3211,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to load video: $e'),
+            content: Text(safeUserFacingText('Failed to load video: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -3504,7 +3535,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
         messenger.removeCurrentSnackBar();
         messenger.showSnackBar(
           SnackBar(
-            content: Text('$failurePrefix: $e'),
+            content: Text(safeUserFacingText('$failurePrefix: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -3597,7 +3628,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Could not open file: $e'),
+          content: Text(safeUserFacingText('Could not open file: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -3650,7 +3681,6 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
                   !MatrixService.isGroupCallPushMarker(e) &&
                   (e.type == EventTypes.Message ||
                       e.type == EventTypes.Encrypted ||
-                      e.type == EventTypes.Sticker ||
                       e.type == _pollStartEventType),
             )
             .toList()
@@ -3989,20 +4019,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
                           ? CrossAxisAlignment.end
                           : CrossAxisAlignment.start,
                       children: [
-                        if (displayEvent.type == EventTypes.Sticker)
-                          _withMatrixReplyContext(
-                            displayEvent,
-                            isMe,
-                            _buildStickerBubble(
-                              event: displayEvent,
-                              isMe: isMe,
-                              senderName: senderName,
-                              time: time,
-                              status: _buildMessageStatus(event),
-                            ),
-                            replySourceEvent: event,
-                          )
-                        else if (displayEvent.type == _pollStartEventType)
+                        if (displayEvent.type == _pollStartEventType)
                           _withMatrixReplyContext(
                             displayEvent,
                             isMe,
@@ -4149,92 +4166,6 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
         if (hasMatrixReply(relationEvent)) const SizedBox(height: 4),
         child,
       ],
-    );
-  }
-
-  Widget _buildStickerBubble({
-    required Event event,
-    required bool isMe,
-    required String senderName,
-    required String time,
-    required Widget status,
-  }) {
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 220),
-      padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(
-        color: isMe ? const Color(0xFF1A2A1A) : const Color(0xFF2C2C2E),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        crossAxisAlignment: isMe
-            ? CrossAxisAlignment.end
-            : CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (!isMe)
-            Padding(
-              padding: const EdgeInsets.only(left: 4, bottom: 4),
-              child: Text(
-                senderName,
-                style: GoogleFonts.inter(
-                  color: kLimeGreen,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: SizedBox(
-              width: 190,
-              height: 190,
-              child: FutureBuilder<Uint8List?>(
-                future: _mediaHandler.loadImageBytes(event),
-                builder: (context, snapshot) {
-                  final bytes = snapshot.data;
-                  if (bytes == null || bytes.isEmpty) {
-                    return const ColoredBox(
-                      color: kDarkGrey,
-                      child: Center(
-                        child: CircularProgressIndicator(
-                          color: kLimeGreen,
-                          strokeWidth: 2,
-                        ),
-                      ),
-                    );
-                  }
-                  return Image.memory(
-                    bytes,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const ColoredBox(
-                      color: kDarkGrey,
-                      child: Icon(Icons.sticky_note_2, color: kLightGrey),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                time,
-                style: GoogleFonts.inter(
-                  color: isMe ? kLimeGreen : kLightGrey,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              if (isMe) ...[const SizedBox(width: 4), status],
-            ],
-          ),
-        ],
-      ),
     );
   }
 
@@ -4769,7 +4700,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
 
   Future<void> _voteInPoll(Event pollEvent, String answerId) async {
     final room = _room;
-    if (room == null) return;
+    if (room == null || !_isGroupRoom) return;
     if (!_ensureStableMessageActionTarget(pollEvent)) return;
     final pollEventId = pollEvent.eventId;
     final previousVote = _ownPollVote(pollEventId);
@@ -4791,7 +4722,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
           _optimisticPollVotes[pollEventId] = previousVote;
         }
       });
-      _showSnackBar('Failed to vote: $e');
+      _showSnackBar(safeUserFacingText('Failed to vote: $e'));
     }
   }
 
@@ -5541,6 +5472,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
                 )
               : _PendingMediaUploadBubble(
                   upload: upload,
+                  onCancel: () => _cancelPendingUpload(upload.id),
                   onRetry: () => _retryPendingUpload(upload),
                 ),
         ),
@@ -5586,7 +5518,6 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
   bool _canReplyToMessage(Event event) {
     if (!_isStableMessageActionTarget(event)) return false;
     return event.type == EventTypes.Message ||
-        event.type == EventTypes.Sticker ||
         event.type == _pollStartEventType;
   }
 
@@ -5617,7 +5548,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
   bool _canForwardMessage(Event event) {
     if (!_isStableMessageActionTarget(event)) return false;
     if (event.redacted) return false;
-    if (event.type != EventTypes.Message && event.type != EventTypes.Sticker) {
+    if (event.type != EventTypes.Message) {
       return false;
     }
     return event.content['msgtype'] is String;
@@ -5705,7 +5636,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to share: $e'),
+          content: Text(safeUserFacingText('Failed to share: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -5753,8 +5684,6 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
         return 'You do not have permission to start calls here.';
       case XmoRoomPermission.sendPolls:
         return 'You do not have permission to send polls here.';
-      case XmoRoomPermission.sendStickers:
-        return 'You do not have permission to send stickers here.';
     }
   }
 
@@ -5763,8 +5692,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
     if (_isReadOnlyRestricted &&
         (permission == XmoRoomPermission.sendMessages ||
             permission == XmoRoomPermission.sendMedia ||
-            permission == XmoRoomPermission.sendPolls ||
-            permission == XmoRoomPermission.sendStickers)) {
+            permission == XmoRoomPermission.sendPolls)) {
       _showSnackBar('You are in read-only mode in this group');
       return false;
     }
@@ -6130,7 +6058,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Unable to start ${video ? 'video' : 'voice'} call: $e',
+            safeUserFacingText(
+              'Unable to start ${video ? 'video' : 'voice'} call: $e',
+            ),
           ),
           backgroundColor: Colors.red,
         ),
@@ -6250,6 +6180,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       context: context,
       rooms: widget.matrixProvider.rooms,
       currentRoom: room,
+      previewEvents: events,
     );
     if (!mounted || selectedRooms == null || selectedRooms.isEmpty) return;
 
@@ -6703,6 +6634,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       context: context,
       rooms: widget.matrixProvider.rooms,
       currentRoom: room,
+      previewEvents: <Event>[event],
     );
 
     if (selectedRooms == null || selectedRooms.isEmpty) return;
@@ -6731,7 +6663,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to forward message: $e'),
+          content: Text(safeUserFacingText('Failed to forward message: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -6760,7 +6692,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to save message: $e'),
+          content: Text(safeUserFacingText('Failed to save message: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -6830,7 +6762,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Failed to add reaction: $e'),
+              content: Text(safeUserFacingText('Failed to add reaction: $e')),
               backgroundColor: Colors.red,
             ),
           );
@@ -7104,7 +7036,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to pin/unpin message: $e'),
+            content: Text(
+              safeUserFacingText('Failed to pin/unpin message: $e'),
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -7168,7 +7102,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to delete message: $e'),
+            content: Text(safeUserFacingText('Failed to delete message: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -7214,7 +7148,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to delete chat: $e'),
+            content: Text(safeUserFacingText('Failed to delete chat: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -7241,7 +7175,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       if (!mounted) return;
       messenger.showSnackBar(
         SnackBar(
-          content: Text('Unable to archive chat: $error'),
+          content: Text(safeUserFacingText('Unable to archive chat: $error')),
           backgroundColor: Colors.red,
         ),
       );
@@ -7265,7 +7199,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to leave room: $e'),
+            content: Text(safeUserFacingText('Failed to leave room: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -7354,7 +7288,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to delete $roomType: $e'),
+            content: Text(safeUserFacingText('Failed to delete $roomType: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -7497,7 +7431,9 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
                             if (!context.mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text('Unable to join call: $e'),
+                                content: Text(
+                                  safeUserFacingText('Unable to join call: $e'),
+                                ),
                                 backgroundColor: Colors.red,
                               ),
                             );
@@ -8119,10 +8055,8 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
                                             (event) =>
                                                 event.senderId != _myUserId &&
                                                 !event.redacted &&
-                                                (event.type ==
-                                                        EventTypes.Message ||
-                                                    event.type ==
-                                                        EventTypes.Sticker),
+                                                event.type ==
+                                                    EventTypes.Message,
                                           )
                                           .map((event) => event.eventId)
                                           .toList(growable: false);
@@ -9364,7 +9298,7 @@ class _PendingFileUploadBubble extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          '${_pendingBytes(upload.totalBytes)} • ',
+                          '${_pendingBytes(upload.totalBytes)} Ã¢â‚¬Â¢ ',
                           style: GoogleFonts.inter(
                             color: kLimeGreen.withValues(alpha: 0.6),
                             fontSize: 11,
@@ -9501,15 +9435,18 @@ class _PendingSmallTime extends StatelessWidget {
 
 class _PendingMediaUploadBubble extends StatelessWidget {
   final _PendingUpload upload;
+  final VoidCallback onCancel;
   final VoidCallback onRetry;
 
   const _PendingMediaUploadBubble({
     required this.upload,
+    required this.onCancel,
     required this.onRetry,
   });
 
   @override
   Widget build(BuildContext context) {
+    final progress = _uploadProgress(upload);
     final size = upload.isVideo
         ? _displayVideoSizeForRatio(context, _aspectRatio)
         : _displayImageSizeForRatio(context, _aspectRatio);
@@ -9531,8 +9468,20 @@ class _PendingMediaUploadBubble extends StatelessWidget {
                 errorBuilder: (_, __, ___) => _buildPlaceholder(Icons.image),
               ),
             Positioned(top: 6, left: 6, child: _buildUploadInfo()),
-            if (upload.failed)
-              Center(child: _PendingRetryButton(onRetry: onRetry)),
+            Center(
+              child: upload.failed
+                  ? _PendingRetryButton(onRetry: onRetry)
+                  : _PendingCancelProgressButton(
+                      progress: progress,
+                      backgroundColor: Colors.black.withValues(alpha: 0.56),
+                      progressColor: Colors.white,
+                      progressBackgroundColor: Colors.white.withValues(
+                        alpha: 0.24,
+                      ),
+                      iconColor: Colors.white,
+                      onCancel: onCancel,
+                    ),
+            ),
             Positioned(bottom: 8, right: 8, child: _buildPendingTime()),
           ],
         ),
@@ -9551,34 +9500,14 @@ class _PendingMediaUploadBubble extends StatelessWidget {
 
   Widget _buildVideoPreview() {
     final thumbnail = upload.thumbnailBytes;
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        if (thumbnail != null && thumbnail.isNotEmpty)
-          Image.memory(
-            thumbnail,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => _buildPlaceholder(Icons.videocam),
-          )
-        else
-          _buildPlaceholder(Icons.videocam),
-        Center(
-          child: Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.55),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.play_arrow_rounded,
-              color: Colors.white,
-              size: 32,
-            ),
-          ),
-        ),
-      ],
-    );
+    if (thumbnail != null && thumbnail.isNotEmpty) {
+      return Image.memory(
+        thumbnail,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _buildPlaceholder(Icons.videocam),
+      );
+    }
+    return _buildPlaceholder(Icons.videocam);
   }
 
   Widget _buildPlaceholder(IconData icon) {

@@ -1,24 +1,23 @@
 import 'dart:math';
 import 'dart:typed_data';
 
+import '../config/media_upload_policy.dart';
 import '../models/xmo_stream_manifest.dart';
 import 'matrix_encrypted_media_helper.dart';
 
-typedef XmoEncryptedChunkUploader = Future<Uri> Function({
-  required Uint8List encryptedBytes,
-  required String fileName,
-  required String contentType,
-  required int chunkIndex,
-});
+typedef XmoEncryptedChunkUploader =
+    Future<Uri> Function({
+      required Uint8List encryptedBytes,
+      required String fileName,
+      required String contentType,
+      required int chunkIndex,
+    });
 
-typedef XmoVideoQualityVariantProvider = Future<List<XmoVideoQualityVariant>>
-    Function(
-  XmoVideoQualitySource source,
-);
+typedef XmoVideoQualityVariantProvider =
+    Future<List<XmoVideoQualityVariant>> Function(XmoVideoQualitySource source);
 
-typedef XmoVideoSourceNormalizer = Future<XmoVideoQualityVariant?> Function(
-  XmoVideoQualitySource source,
-);
+typedef XmoVideoSourceNormalizer =
+    Future<XmoVideoQualityVariant?> Function(XmoVideoQualitySource source);
 
 class XmoVideoQualitySource {
   const XmoVideoQualitySource({
@@ -58,11 +57,13 @@ class XmoChunkedMediaUploadService {
         const MatrixEncryptedMediaHelper(),
     this.chunkSize = defaultChunkSize,
     this.thresholdBytes = defaultThresholdBytes,
+    this.maxUploadBytes = MediaUploadPolicy.maxUploadBytes,
     this.qualityVariantProvider,
     this.sourceNormalizer,
-  })  : assert(chunkSize > 0),
-        assert(thresholdBytes > 0),
-        _encryptedMediaHelper = encryptedMediaHelper;
+  }) : assert(chunkSize > 0),
+       assert(thresholdBytes > 0),
+       assert(maxUploadBytes > 0),
+       _encryptedMediaHelper = encryptedMediaHelper;
 
   static const int defaultChunkSize = 4 * 1024 * 1024;
   static const int defaultThresholdBytes = 16 * 1024 * 1024;
@@ -70,13 +71,11 @@ class XmoChunkedMediaUploadService {
   final MatrixEncryptedMediaHelper _encryptedMediaHelper;
   final int chunkSize;
   final int thresholdBytes;
+  final int maxUploadBytes;
   final XmoVideoQualityVariantProvider? qualityVariantProvider;
   final XmoVideoSourceNormalizer? sourceNormalizer;
 
-  bool shouldUploadAsStream({
-    required int size,
-    required String mimeType,
-  }) {
+  bool shouldUploadAsStream({required int size, required String mimeType}) {
     return size >= thresholdBytes &&
         mimeType.toLowerCase().startsWith('video/');
   }
@@ -92,6 +91,11 @@ class XmoChunkedMediaUploadService {
   }) async {
     if (videoBytes.isEmpty) {
       throw ArgumentError.value(videoBytes.length, 'videoBytes');
+    }
+    if (videoBytes.lengthInBytes > maxUploadBytes) {
+      throw const MediaUploadPolicyException(
+        MediaUploadPolicy.oversizedMessage,
+      );
     }
 
     final qualities = <String, XmoStreamQuality>{};

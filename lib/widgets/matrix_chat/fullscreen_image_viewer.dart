@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -5,7 +6,8 @@ import 'package:matrix/matrix.dart';
 import 'package:mime/mime.dart';
 import '../../theme.dart';
 import '../../screens/native_share_stub.dart'
-    if (dart.library.io) '../../screens/native_share.dart' as native_share;
+    if (dart.library.io) '../../screens/native_share.dart'
+    as native_share;
 import '../../screens/web_download_stub.dart'
     if (dart.library.js_interop) '../../screens/web_download.dart'
     as web_download;
@@ -31,17 +33,14 @@ class FullscreenImageViewer extends StatelessWidget {
 
   Future<void> _saveImage(BuildContext context) async {
     try {
-      await web_download.downloadFile(
-        imageBytes,
-        title,
-        mimeType: _mimeType,
-      );
+      await web_download.downloadFile(imageBytes, title, mimeType: _mimeType);
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content:
-                Text(kIsWeb ? 'Downloaded: $title' : 'Downloaded successfully'),
+            content: Text(
+              kIsWeb ? 'Downloaded: $title' : 'Downloaded successfully',
+            ),
             backgroundColor: kLimeGreen,
             duration: const Duration(seconds: 2),
           ),
@@ -51,7 +50,7 @@ class FullscreenImageViewer extends StatelessWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to save: $e'),
+            content: Text(safeUserFacingText('Failed to save: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -61,16 +60,12 @@ class FullscreenImageViewer extends StatelessWidget {
 
   Future<void> _shareImage(BuildContext context) async {
     try {
-      await native_share.shareFile(
-        imageBytes,
-        title,
-        mimeType: _mimeType,
-      );
+      await native_share.shareFile(imageBytes, title, mimeType: _mimeType);
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to share: $e'),
+          content: Text(safeUserFacingText('Failed to share: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -170,13 +165,18 @@ class FullscreenImageViewer extends StatelessWidget {
                   value: 'delete',
                   child: Row(
                     children: [
-                      const Icon(Icons.delete_outline,
-                          color: Colors.red, size: 20),
+                      const Icon(
+                        Icons.delete_outline,
+                        color: Colors.red,
+                        size: 20,
+                      ),
                       const SizedBox(width: 12),
                       Text(
                         'Delete Message',
-                        style:
-                            GoogleFonts.inter(color: Colors.red, fontSize: 14),
+                        style: GoogleFonts.inter(
+                          color: Colors.red,
+                          fontSize: 14,
+                        ),
                       ),
                     ],
                   ),
@@ -195,11 +195,16 @@ class FullscreenImageViewer extends StatelessWidget {
             errorBuilder: (_, __, ___) => Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.broken_image_outlined,
-                    color: kLightGrey, size: 64),
+                const Icon(
+                  Icons.broken_image_outlined,
+                  color: kLightGrey,
+                  size: 64,
+                ),
                 const SizedBox(height: 12),
-                Text('Failed to load image',
-                    style: GoogleFonts.inter(color: kLightGrey)),
+                Text(
+                  'Failed to load image',
+                  style: GoogleFonts.inter(color: kLightGrey),
+                ),
               ],
             ),
           ),

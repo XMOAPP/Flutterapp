@@ -9,10 +9,71 @@ void main() {
   const module = UserDirectoryEndpointModule(
     upsert: _noop,
     search: _noop,
+    checkUsernameAvailability: _noop,
+    registerOidcAccount: _noop,
+    prepareSecureRegistration: _noop,
     provisionSecureLogin: _noop,
   );
 
-  test('matches secure sign-in provisioning route aliases', () {
+  test('matches username availability route aliases', () {
+    expect(
+      module.handlesUsernameAvailability('/accounts/username-availability'),
+      isTrue,
+    );
+    expect(
+      module.handlesUsernameAvailability(
+        '/auth/accounts/username-availability',
+      ),
+      isTrue,
+    );
+    expect(
+      module.handlesUsernameAvailability(
+        '/auth/otp/accounts/username-availability',
+      ),
+      isTrue,
+    );
+    expect(module.handlesUsernameAvailability('/accounts/register'), isFalse);
+  });
+
+  test('matches OIDC account registration route aliases', () {
+    expect(module.handlesRegisterOidcAccount('/accounts/register'), isTrue);
+    expect(
+      module.handlesRegisterOidcAccount('/auth/accounts/register'),
+      isTrue,
+    );
+    expect(
+      module.handlesRegisterOidcAccount('/auth/otp/accounts/register'),
+      isTrue,
+    );
+    expect(module.handlesRegisterOidcAccount('/users/search'), isFalse);
+  });
+
+  test('matches secure registration route aliases', () {
+    expect(
+      module.handlesPrepareSecureRegistration(
+        '/users/prepare-secure-registration',
+      ),
+      isTrue,
+    );
+    expect(
+      module.handlesPrepareSecureRegistration(
+        '/auth/users/prepare-secure-registration',
+      ),
+      isTrue,
+    );
+    expect(
+      module.handlesPrepareSecureRegistration(
+        '/auth/otp/users/prepare-secure-registration',
+      ),
+      isTrue,
+    );
+    expect(
+      module.handlesPrepareSecureRegistration('/users/search'),
+      isFalse,
+    );
+  });
+
+  test('matches post-registration secure-login route aliases', () {
     expect(
       module.handlesProvisionSecureLogin('/users/provision-secure-login'),
       isTrue,

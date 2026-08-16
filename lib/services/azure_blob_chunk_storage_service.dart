@@ -5,12 +5,15 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
+import '../config/media_upload_policy.dart';
+
 class AzureBlobChunkSignRequest {
   const AzureBlobChunkSignRequest({
     required this.fileName,
     required this.contentType,
     required this.size,
     required this.chunkIndex,
+    required this.mediaSize,
     required this.roomId,
     required this.cipherSha256,
   });
@@ -19,17 +22,19 @@ class AzureBlobChunkSignRequest {
   final String contentType;
   final int size;
   final int chunkIndex;
+  final int mediaSize;
   final String roomId;
   final String cipherSha256;
 
   Map<String, dynamic> toJson() => {
-        'fileName': fileName,
-        'contentType': contentType,
-        'size': size,
-        'chunkIndex': chunkIndex,
-        'roomId': roomId,
-        'cipherSha256': cipherSha256,
-      };
+    'fileName': fileName,
+    'contentType': contentType,
+    'size': size,
+    'chunkIndex': chunkIndex,
+    'mediaSize': mediaSize,
+    'roomId': roomId,
+    'cipherSha256': cipherSha256,
+  };
 }
 
 class AzureBlobChunkUploadTarget {
@@ -63,15 +68,17 @@ class AzureBlobChunkUploadTarget {
   }
 }
 
-typedef AzureBlobChunkSigner = Future<AzureBlobChunkUploadTarget> Function(
-  AzureBlobChunkSignRequest request,
-);
+typedef AzureBlobChunkSigner =
+    Future<AzureBlobChunkUploadTarget> Function(
+      AzureBlobChunkSignRequest request,
+    );
 
-typedef AzureBlobChunkUploader = Future<void> Function({
-  required Uri uploadUrl,
-  required Uint8List encryptedBytes,
-  required String contentType,
-});
+typedef AzureBlobChunkUploader =
+    Future<void> Function({
+      required Uri uploadUrl,
+      required Uint8List encryptedBytes,
+      required String contentType,
+    });
 
 typedef AzureBlobAccessTokenProvider = String? Function();
 
@@ -83,10 +90,10 @@ class AzureBlobChunkStorageService {
     AzureBlobAccessTokenProvider? accessTokenProvider,
     HttpClient? httpClient,
     this.timeout = const Duration(seconds: 30),
-  })  : _signer = signer,
-        _uploader = uploader,
-        _accessTokenProvider = accessTokenProvider,
-        _httpClient = httpClient ?? HttpClient();
+  }) : _signer = signer,
+       _uploader = uploader,
+       _accessTokenProvider = accessTokenProvider,
+       _httpClient = httpClient ?? HttpClient();
 
   final Uri signingEndpoint;
   final AzureBlobChunkSigner? _signer;
@@ -102,16 +109,20 @@ class AzureBlobChunkStorageService {
     required String fileName,
     required String contentType,
     required int chunkIndex,
+    required int mediaSize,
     required String roomId,
   }) async {
+    MediaUploadPolicy.validate(mediaSize);
     final request = AzureBlobChunkSignRequest(
       fileName: fileName,
       contentType: contentType,
       size: encryptedBytes.length,
       chunkIndex: chunkIndex,
+      mediaSize: mediaSize,
       roomId: roomId,
-      cipherSha256: base64UrlEncode(sha256.convert(encryptedBytes).bytes)
-          .replaceAll('=', ''),
+      cipherSha256: base64UrlEncode(
+        sha256.convert(encryptedBytes).bytes,
+      ).replaceAll('=', ''),
     );
     final target = await (_signer ?? _signUpload)(request);
     await (_uploader ?? _putBlob)(

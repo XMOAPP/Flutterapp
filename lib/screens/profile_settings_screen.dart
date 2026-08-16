@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/matrix_provider.dart';
+import '../config/media_upload_policy.dart';
 import '../services/matrix_service.dart';
 import '../theme.dart';
 import '../widgets/story/story_avatar.dart';
@@ -43,19 +45,40 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   Future<void> _pickAvatarFromGallery() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.image,
-      withData: true,
+      withData: false,
     );
     if (result == null || result.files.isEmpty) return;
 
     final file = result.files.first;
-    final bytes = file.bytes;
-    if (bytes == null || bytes.isEmpty) return;
+    try {
+      MediaUploadPolicy.validate(file.size);
+      final path = file.path;
+      if (path == null || path.isEmpty) {
+        throw const FileSystemException('Selected image is unavailable');
+      }
+      final bytes = await File(path).readAsBytes();
+      MediaUploadPolicy.validate(bytes.lengthInBytes);
+      if (!mounted) return;
 
-    setState(() {
-      _selectedAvatarBytes = bytes;
-      _selectedAvatarName = file.name;
-      _removeAvatar = false;
-    });
+      setState(() {
+        _selectedAvatarBytes = bytes;
+        _selectedAvatarName = file.name;
+        _removeAvatar = false;
+      });
+    } on MediaUploadPolicyException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message), backgroundColor: kDarkGrey),
+      );
+    } on FileSystemException {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('The selected image is no longer available.'),
+          backgroundColor: kDarkGrey,
+        ),
+      );
+    }
   }
 
   Future<void> _captureAvatar() async {
@@ -67,6 +90,15 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
       ),
     );
     if (!mounted || result == null || result.bytes.isEmpty) return;
+
+    try {
+      MediaUploadPolicy.validate(result.bytes.lengthInBytes);
+    } on MediaUploadPolicyException catch (error) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message), backgroundColor: kDarkGrey),
+      );
+      return;
+    }
 
     if (result.type != CameraCaptureMediaType.image) {
       ScaffoldMessenger.of(context).showSnackBar(

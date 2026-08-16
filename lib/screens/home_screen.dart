@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -160,7 +161,10 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           _searchingPublic = false;
-          _publicSearchError = e.toString();
+          _publicSearchError = userFacingError(
+            e,
+            fallback: 'Search is unavailable.',
+          );
         });
       }
     }
@@ -353,7 +357,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return ListView(
       padding: EdgeInsets.zero,
       children: [
-        // ── Local rooms ──────────────────────────────────────────────────
+        // â”€â”€ Local rooms â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if (localRooms.isNotEmpty) ...[
           _sectionHeader('Chats'),
           ...localRooms.map(
@@ -370,7 +374,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ],
-        // ── Public groups/channels ──────────────────────────────────────────
+        // â”€â”€ Public groups/channels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if (publicChannels.isNotEmpty) ...[
           _sectionHeader('Public Rooms'),
           ...publicChannels.map((chunk) => _publicChannelTile(chunk)),
@@ -553,7 +557,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final memberText = members > 0
         ? '$members members'
         : 'Tap to preview and join';
-    return topic.isNotEmpty ? '$topic  •  $memberText' : memberText;
+    return topic.isNotEmpty ? '$topic  â€¢  $memberText' : memberText;
   }
 
   PreferredSizeWidget _buildAppBar() {

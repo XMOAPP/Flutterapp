@@ -1,6 +1,6 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:hive/hive.dart';
 
@@ -62,9 +62,13 @@ class EncryptedHiveBoxStore {
       await _writeMigrationState('encrypted');
       return encrypted;
     } catch (encryptedOpenError) {
+      debugPrint(
+        '[EncryptedHiveBoxStore] Encrypted store open failed: '
+        '$encryptedOpenError',
+      );
       throw StateError(
         'The encrypted authentication store could not be opened. Existing '
-        'session data was preserved: $encryptedOpenError',
+        'session data was preserved.',
       );
     }
   }
@@ -75,7 +79,8 @@ class EncryptedHiveBoxStore {
     try {
       encodedKey = await secureValues.read(keyName);
     } catch (error) {
-      throw StateError('Could not read the local encryption key: $error');
+      debugPrint('[EncryptedHiveBoxStore] Key read failed: $error');
+      throw StateError('Could not read the local encryption key.');
     }
 
     if (encodedKey == null || encodedKey.isEmpty) {
@@ -88,7 +93,8 @@ class EncryptedHiveBoxStore {
           throw const FormatException('Encryption key verification failed');
         }
       } catch (error) {
-        throw StateError('Could not persist the local encryption key: $error');
+        debugPrint('[EncryptedHiveBoxStore] Key persistence failed: $error');
+        throw StateError('Could not persist the local encryption key.');
       }
     }
 
@@ -99,7 +105,8 @@ class EncryptedHiveBoxStore {
       }
       return _EncryptionKeyResult(key: key, created: created);
     } on FormatException catch (error) {
-      throw StateError('The local encryption key is invalid: $error');
+      debugPrint('[EncryptedHiveBoxStore] Invalid encryption key: $error');
+      throw StateError('The local encryption key is invalid.');
     }
   }
 
@@ -117,9 +124,10 @@ class EncryptedHiveBoxStore {
     try {
       plaintextBox = await Hive.openBox<dynamic>(boxName);
     } catch (error) {
+      debugPrint('[EncryptedHiveBoxStore] Plaintext migration failed: $error');
       throw StateError(
         'The plaintext authentication store could not be opened for safe '
-        'migration. Existing session data was preserved: $error',
+        'migration. Existing session data was preserved.',
       );
     }
 
@@ -208,7 +216,8 @@ class EncryptedHiveBoxStore {
     try {
       return await secureValues.read(_migrationStateKey);
     } catch (error) {
-      throw StateError('Could not read authentication migration state: $error');
+      debugPrint('[EncryptedHiveBoxStore] Migration state read failed: $error');
+      throw StateError('Could not read authentication migration state.');
     }
   }
 
@@ -219,9 +228,10 @@ class EncryptedHiveBoxStore {
         throw const FormatException('Migration state verification failed');
       }
     } catch (error) {
-      throw StateError(
-        'Could not persist authentication migration state: $error',
+      debugPrint(
+        '[EncryptedHiveBoxStore] Migration state persistence failed: $error',
       );
+      throw StateError('Could not persist authentication migration state.');
     }
   }
 }

@@ -35,6 +35,7 @@ Future<void> _signAzureBlobChunkUpload(HttpRequest request) async {
   final fileName = body['fileName']?.toString() ?? '';
   final contentType = body['contentType']?.toString() ?? '';
   final size = _intValue(body['size']);
+  final mediaSize = _intValue(body['mediaSize']);
   final chunkIndex = _intValue(body['chunkIndex']);
   final roomId = body['roomId']?.toString().trim() ?? '';
   final cipherSha256 = body['cipherSha256']?.toString().trim() ?? '';
@@ -73,6 +74,7 @@ Future<void> _signAzureBlobChunkUpload(HttpRequest request) async {
       fileName: fileName,
       contentType: contentType,
       size: size,
+      mediaSize: mediaSize,
       chunkIndex: chunkIndex,
       roomId: roomId,
       ownerUserId: userId,
@@ -209,6 +211,7 @@ class AzureBlobConfig {
     required this.uploadTtl,
     required this.downloadTtl,
     required this.maxChunkBytes,
+    required this.maxUploadBytes,
   });
 
   factory AzureBlobConfig.fromEnvironment(Map<String, String> environment) {
@@ -241,6 +244,10 @@ class AzureBlobConfig {
             environment['XMO_AZURE_BLOB_MAX_CHUNK_BYTES'] ?? '',
           ) ??
           8 * 1024 * 1024,
+      maxUploadBytes: int.tryParse(
+            environment['XMO_MAX_MEDIA_UPLOAD_BYTES'] ?? '',
+          ) ??
+          50 * 1024 * 1024,
     );
   }
 
@@ -253,6 +260,7 @@ class AzureBlobConfig {
   final Duration uploadTtl;
   final Duration downloadTtl;
   final int maxChunkBytes;
+  final int maxUploadBytes;
 
   bool get isConfigured =>
       account.isNotEmpty &&
@@ -266,6 +274,7 @@ class AzureBlobConfig {
     required String fileName,
     required String contentType,
     required int size,
+    required int mediaSize,
     required int chunkIndex,
     required String roomId,
     required String ownerUserId,
@@ -279,6 +288,11 @@ class AzureBlobConfig {
     if (size <= 0 || size > maxChunkBytes) {
       throw AzureBlobConfigException(
         'Chunk size must be between 1 and $maxChunkBytes bytes',
+      );
+    }
+    if (mediaSize <= 0 || mediaSize > maxUploadBytes) {
+      throw AzureBlobConfigException(
+        'Media size must be between 1 and $maxUploadBytes bytes',
       );
     }
     if (chunkIndex < 0) {

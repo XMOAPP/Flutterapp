@@ -11,11 +11,13 @@ import '../../theme.dart';
 class SubmitButton extends StatelessWidget {
   final bool isRegisterMode;
   final VoidCallback onPressed;
+  final bool isBusy;
 
   const SubmitButton({
     super.key,
     required this.isRegisterMode,
     required this.onPressed,
+    this.isBusy = false,
   });
 
   @override
@@ -23,15 +25,16 @@ class SubmitButton extends StatelessWidget {
     return Selector<MatrixProvider, bool>(
       selector: (_, provider) => provider.state == MatrixAuthState.loggingIn,
       builder: (context, isLoading, _) {
+        final loading = isLoading || isBusy;
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 40),
           child: SizedBox(
             width: double.infinity,
             height: 40,
             child: ElevatedButton(
-              onPressed: isLoading ? null : onPressed,
+              onPressed: loading ? null : onPressed,
               style: _buttonStyle,
-              child: isLoading
+              child: loading
                   ? const SizedBox(
                       width: 18,
                       height: 18,

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:test/test.dart';
@@ -86,6 +87,94 @@ void main() {
         username: 'other-user',
       ),
       isFalse,
+    );
+  });
+
+  test('pending proof survives a server restart', () {
+    final directory = Directory.systemTemp.createTempSync('xmo-proof-test-');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final file = File('${directory.path}/proofs.json');
+    final first = SecureLoginEnrollmentProofStore(
+      ttl: const Duration(minutes: 5),
+      storageFile: file,
+      random: Random(7),
+      now: () => now,
+    );
+    final proof = first.issue('person@example.com');
+
+    final restarted = SecureLoginEnrollmentProofStore(
+      ttl: const Duration(minutes: 5),
+      storageFile: file,
+      random: Random(8),
+      now: () => now,
+    );
+
+    expect(
+      restarted.claim(proof: proof, email: 'person@example.com'),
+      isNotNull,
+    );
+  });
+
+  test('proof can resume after process stops while claim is in flight', () {
+    final directory = Directory.systemTemp.createTempSync('xmo-proof-test-');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final file = File('${directory.path}/proofs.json');
+    final first = SecureLoginEnrollmentProofStore(
+      ttl: const Duration(minutes: 5),
+      storageFile: file,
+      random: Random(7),
+      now: () => now,
+    );
+    final proof = first.issue('person@example.com');
+    expect(
+      first.claim(proof: proof, email: 'person@example.com'),
+      isNotNull,
+    );
+
+    final restarted = SecureLoginEnrollmentProofStore(
+      ttl: const Duration(minutes: 5),
+      storageFile: file,
+      random: Random(8),
+      now: () => now,
+    );
+
+    expect(
+      restarted.claim(proof: proof, email: 'person@example.com'),
+      isNotNull,
+    );
+  });
+
+  test('completed proof survives a server restart', () {
+    final directory = Directory.systemTemp.createTempSync('xmo-proof-test-');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final file = File('${directory.path}/proofs.json');
+    final first = SecureLoginEnrollmentProofStore(
+      ttl: const Duration(minutes: 5),
+      storageFile: file,
+      random: Random(7),
+      now: () => now,
+    );
+    final proof = first.issue('person@example.com');
+    final claim = first.claim(
+      proof: proof,
+      email: 'person@example.com',
+    )!;
+    first.complete(proof: proof, claim: claim, username: 'hunter');
+
+    final restarted = SecureLoginEnrollmentProofStore(
+      ttl: const Duration(minutes: 5),
+      storageFile: file,
+      random: Random(8),
+      now: () => now,
+    );
+
+    expect(
+      restarted.wasCompleted(
+        proof: proof,
+        email: 'person@example.com',
+        username: 'hunter',
+      ),
+      isTrue,
     );
   });
 }

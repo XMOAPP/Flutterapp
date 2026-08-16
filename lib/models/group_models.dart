@@ -311,7 +311,6 @@ enum RestrictionType {
   readOnly, // Can't send messages
   noMedia, // Can't send files/images
   noLinks, // Can't send URLs
-  noStickers, // Can't send stickers
   fullBan, // Completely banned
 }
 

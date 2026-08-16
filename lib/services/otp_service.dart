@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:xmo/utils/user_facing_error.dart';
 import '../config/app_config.dart';
 
 class OtpVerificationResult {
@@ -22,14 +23,42 @@ class SecureLoginProvisionResult {
   final String? error;
 }
 
+class OidcAccountRegistrationResult {
+  const OidcAccountRegistrationResult({required this.success, this.error});
+
+  final bool success;
+  final String? error;
+}
+
+class UsernameAvailabilityResult {
+  const UsernameAvailabilityResult({
+    required this.success,
+    this.available,
+    this.error,
+  });
+
+  final bool success;
+  final bool? available;
+  final String? error;
+}
+
 /// Handles Email OTP Authentication via local SMTP server.
 class OtpService {
-  static final OtpService _instance = OtpService._internal();
+  static final OtpService _instance = OtpService._internal(http.Client());
   factory OtpService() => _instance;
-  OtpService._internal();
+  OtpService._internal(this._client, [this._otpServerUrlOverride]);
+
+  @visibleForTesting
+  factory OtpService.forTesting({
+    required http.Client client,
+    required String otpServerUrl,
+  }) => OtpService._internal(client, otpServerUrl);
+
+  final http.Client _client;
+  final String? _otpServerUrlOverride;
 
   Uri get _otpBaseUri {
-    final value = AppConfig.otpServerUrl.trim();
+    final value = (_otpServerUrlOverride ?? AppConfig.otpServerUrl).trim();
     final normalized = value.endsWith('/')
         ? value.substring(0, value.length - 1)
         : value;
@@ -48,7 +77,7 @@ class OtpService {
     required Function(String) onError,
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         _endpoint('send'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'email': email}),
@@ -58,7 +87,9 @@ class OtpService {
         onCodeSent();
       } else {
         final err = _decodeError(response.body);
-        onError('Server error: $err');
+        onError(
+          userFacingError(err, fallback: 'Could not send verification code.'),
+        );
       }
     } catch (e) {
       debugPrint("HTTP Error: $e");
@@ -72,7 +103,7 @@ class OtpService {
     required String code,
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         _endpoint('verify'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'email': email, 'otp': code}),
@@ -86,11 +117,17 @@ class OtpService {
       }
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final proof = data['secureLoginEnrollmentProof']?.toString();
+      final normalizedProof = proof == null || proof.trim().isEmpty
+          ? null
+          : proof.trim();
+      debugPrint(
+        '[OtpService] OTP verification completed: '
+        'success=${data['success'] == true}, '
+        'hasSecureLoginEnrollmentProof=${normalizedProof != null}.',
+      );
       return OtpVerificationResult(
         verified: data['success'] == true,
-        secureLoginEnrollmentProof: proof == null || proof.trim().isEmpty
-            ? null
-            : proof.trim(),
+        secureLoginEnrollmentProof: normalizedProof,
       );
     } catch (e) {
       debugPrint("HTTP Error: $e");
@@ -106,13 +143,97 @@ class OtpService {
     required String email,
   }) async {
     try {
-      await http.post(
+      await _client.post(
         _endpoint('password/link-email'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'username': username, 'email': email}),
       );
     } catch (e) {
       debugPrint("Password reset email link failed: $e");
+    }
+  }
+
+  Future<UsernameAvailabilityResult> checkUsernameAvailability(
+    String username,
+  ) async {
+    try {
+      final response = await _client.post(
+        _endpoint('accounts/username-availability'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'username': username}),
+      );
+      if (response.statusCode != 200) {
+        return UsernameAvailabilityResult(
+          success: false,
+          error: _decodeError(response.body),
+        );
+      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final available = data['available'];
+      if (data['success'] != true || available is! bool) {
+        return const UsernameAvailabilityResult(
+          success: false,
+          error: 'Could not verify username availability.',
+        );
+      }
+      return UsernameAvailabilityResult(success: true, available: available);
+    } catch (error) {
+      debugPrint('Username availability check failed: $error');
+      return const UsernameAvailabilityResult(
+        success: false,
+        error: 'Could not verify username availability. Please retry.',
+      );
+    }
+  }
+
+  Future<OidcAccountRegistrationResult> registerOidcAccount({
+    required String username,
+    required String email,
+    required String password,
+    required String secureLoginEnrollmentProof,
+    String? displayName,
+  }) async {
+    if (secureLoginEnrollmentProof.trim().isEmpty) {
+      return const OidcAccountRegistrationResult(
+        success: false,
+        error: 'Email verification expired. Please request a new code.',
+      );
+    }
+    try {
+      final response = await _client.post(
+        _endpoint('accounts/register'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'username': username,
+          'email': email,
+          'password': password,
+          'secureLoginEnrollmentProof': secureLoginEnrollmentProof,
+          if (displayName != null && displayName.trim().isNotEmpty)
+            'displayName': displayName.trim(),
+        }),
+      );
+      if (response.statusCode != 200) {
+        return OidcAccountRegistrationResult(
+          success: false,
+          error: _decodeError(response.body),
+        );
+      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return OidcAccountRegistrationResult(
+        success: data['success'] == true,
+        error: data['success'] == true
+            ? null
+            : userFacingError(
+                data['error'],
+                fallback: 'Could not create the account.',
+              ),
+      );
+    } catch (error) {
+      debugPrint('OIDC account registration failed: $error');
+      return const OidcAccountRegistrationResult(
+        success: false,
+        error: 'Could not connect to the account server. Please retry.',
+      );
     }
   }
 
@@ -132,7 +253,8 @@ class OtpService {
       );
     }
     try {
-      final response = await http.post(
+      debugPrint('[OtpService] Requesting secure sign-in provisioning.');
+      final response = await _client.post(
         _endpoint('users/provision-secure-login'),
         headers: {
           'Content-Type': 'application/json',
@@ -148,18 +270,23 @@ class OtpService {
         }),
       );
       if (response.statusCode != 200) {
-        final error = _decodeError(response.body);
-        debugPrint('Secure sign-in provisioning failed: $error');
-        return SecureLoginProvisionResult(success: false, error: error);
+        return SecureLoginProvisionResult(
+          success: false,
+          error: _decodeError(response.body),
+        );
       }
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       if (data['success'] == true) {
+        debugPrint('[OtpService] Secure sign-in provisioning completed.');
         return const SecureLoginProvisionResult(success: true);
       }
-      final error =
-          data['error']?.toString() ?? 'Secure sign-in is unavailable.';
-      debugPrint('Secure sign-in provisioning skipped: $error');
-      return SecureLoginProvisionResult(success: false, error: error);
+      return SecureLoginProvisionResult(
+        success: false,
+        error: userFacingError(
+          data['error'],
+          fallback: 'Secure sign-in is unavailable.',
+        ),
+      );
     } catch (e) {
       debugPrint('Secure sign-in provisioning failed: $e');
       return const SecureLoginProvisionResult(
@@ -174,7 +301,7 @@ class OtpService {
     required String email,
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         _endpoint('password/reset/start'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'username': username, 'email': email}),
@@ -194,7 +321,7 @@ class OtpService {
     required String newPassword,
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         _endpoint('password/reset/complete'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
@@ -215,9 +342,12 @@ class OtpService {
   String _decodeError(String body) {
     try {
       final data = jsonDecode(body) as Map<String, dynamic>;
-      return data['error']?.toString() ?? 'Unknown error';
+      return userFacingError(
+        data['error'],
+        fallback: 'The request could not be completed. Please try again.',
+      );
     } catch (_) {
-      return body.isEmpty ? 'Unknown error' : body;
+      return 'The request could not be completed. Please try again.';
     }
   }
 }

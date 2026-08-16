@@ -15,6 +15,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.provider.Settings
 import android.util.Size
+import android.view.WindowManager
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -32,6 +33,7 @@ class MainActivity : FlutterFragmentActivity() {
     private val callNotificationEventsChannel = "com.xmo.xmo/call_notification_events"
     private val notificationNavigationMethodsChannel = "com.xmo.xmo/notification_navigation"
     private val notificationNavigationEventsChannel = "com.xmo.xmo/notification_navigation_events"
+    private val sensitiveScreenChannel = "com.xmo.xmo/sensitive_screen"
 
     private var initialLink: String? = null
     private var linksReceiver: BroadcastReceiver? = null
@@ -66,6 +68,23 @@ class MainActivity : FlutterFragmentActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
+
+        MethodChannel(messenger, sensitiveScreenChannel)
+            .setMethodCallHandler { call, result ->
+                if (call.method != "setProtected") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                val protected = call.arguments as? Boolean ?: false
+                runOnUiThread {
+                    if (protected) {
+                        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    } else {
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    }
+                    result.success(null)
+                }
+            }
 
         EventChannel(messenger, walletEventsChannel)
             .setStreamHandler(

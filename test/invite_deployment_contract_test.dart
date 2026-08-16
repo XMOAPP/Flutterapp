@@ -15,6 +15,10 @@ void main() {
       expect(manifest, contains('android:pathPrefix="/auth/callback"'));
       expect(
         manifest,
+        contains('android:scheme="xmo" android:host="account"'),
+      );
+      expect(
+        manifest,
         isNot(contains('android:scheme="xmo" android:host="auth"')),
       );
     });

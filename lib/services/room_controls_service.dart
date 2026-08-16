@@ -1,10 +1,6 @@
 import 'package:matrix/matrix.dart';
 
-enum XmoJoinMode {
-  public,
-  invite,
-  request,
-}
+enum XmoJoinMode { public, invite, request }
 
 enum XmoRoomSecurityType {
   privateEncrypted,
@@ -12,32 +8,25 @@ enum XmoRoomSecurityType {
   legacyPrivateUnencrypted,
 }
 
-enum XmoRoomPermission {
-  sendMessages,
-  sendMedia,
-  startCalls,
-  sendPolls,
-  sendStickers,
-}
+enum XmoRoomPermission { sendMessages, sendMedia, startCalls, sendPolls }
 
 class XmoRoomPermissions {
   final int sendMessages;
   final int sendMedia;
   final int startCalls;
   final int sendPolls;
-  final int sendStickers;
 
   const XmoRoomPermissions({
     this.sendMessages = 0,
     this.sendMedia = 0,
     this.startCalls = 0,
     this.sendPolls = 0,
-    this.sendStickers = 0,
   });
 
   factory XmoRoomPermissions.fromRoom(Room room) {
-    final content =
-        room.getState(RoomControlsService.permissionsStateType)?.content;
+    final content = room
+        .getState(RoomControlsService.permissionsStateType)
+        ?.content;
     return XmoRoomPermissions(
       sendMessages: RoomControlsService._intFromContent(
         content,
@@ -59,11 +48,6 @@ class XmoRoomPermissions {
         RoomControlsService.sendPollsKey,
         fallback: RoomControlsService._eventsDefaultPower(room),
       ),
-      sendStickers: RoomControlsService._intFromContent(
-        content,
-        RoomControlsService.sendStickersKey,
-        fallback: RoomControlsService._eventsDefaultPower(room),
-      ),
     );
   }
 
@@ -73,7 +57,6 @@ class XmoRoomPermissions {
       RoomControlsService.sendMediaKey: sendMedia,
       RoomControlsService.startCallsKey: startCalls,
       RoomControlsService.sendPollsKey: sendPolls,
-      RoomControlsService.sendStickersKey: sendStickers,
     };
   }
 }
@@ -88,7 +71,6 @@ class RoomControlsService {
   static const sendMediaKey = 'send_media';
   static const startCallsKey = 'start_calls';
   static const sendPollsKey = 'send_polls';
-  static const sendStickersKey = 'send_stickers';
 
   static XmoJoinMode joinModeFor(Room room) {
     final content = room.getState(EventTypes.RoomJoinRules)?.content;
@@ -121,7 +103,8 @@ class RoomControlsService {
     final visibilityValue = security?['visibility']?.toString();
     final encryptionState = room.getState(EventTypes.Encryption);
 
-    final encrypted = encryptedValue == true ||
+    final encrypted =
+        encryptedValue == true ||
         encryptedValue?.toString().toLowerCase() == 'true' ||
         encryptionState != null;
     if (encrypted) return XmoRoomSecurityType.privateEncrypted;
@@ -191,8 +174,7 @@ class RoomControlsService {
   static Future<bool> setChannelDirectoryVisibility(
     Room room,
     XmoJoinMode mode,
-  ) =>
-      setRoomDirectoryVisibility(room, mode);
+  ) => setRoomDirectoryVisibility(room, mode);
 
   static Future<bool> setRoomDirectoryVisibility(
     Room room,
@@ -223,22 +205,19 @@ class RoomControlsService {
     final content = room.getState(slowModeStateType)?.content;
     final enabled = content?['enabled'];
     if (enabled == false || enabled?.toString() == 'false') return 0;
-    return _intFromContent(content, 'seconds', fallback: 0)
-        .clamp(0, 86400)
-        .toInt();
+    return _intFromContent(
+      content,
+      'seconds',
+      fallback: 0,
+    ).clamp(0, 86400).toInt();
   }
 
   static Future<void> setSlowModeSeconds(Room room, int seconds) async {
     final clampedSeconds = seconds.clamp(0, 86400);
-    await room.client.setRoomStateWithKey(
-      room.id,
-      slowModeStateType,
-      '',
-      {
-        'enabled': clampedSeconds > 0,
-        'seconds': clampedSeconds,
-      },
-    );
+    await room.client.setRoomStateWithKey(room.id, slowModeStateType, '', {
+      'enabled': clampedSeconds > 0,
+      'seconds': clampedSeconds,
+    });
   }
 
   static Future<void> setPermissions(
@@ -277,8 +256,6 @@ class RoomControlsService {
         return permissions.startCalls;
       case XmoRoomPermission.sendPolls:
         return permissions.sendPolls;
-      case XmoRoomPermission.sendStickers:
-        return permissions.sendStickers;
     }
   }
 
@@ -291,7 +268,6 @@ class RoomControlsService {
       XmoRoomPermission.sendMedia => permissions.sendMedia,
       XmoRoomPermission.startCalls => permissions.startCalls,
       XmoRoomPermission.sendPolls => permissions.sendPolls,
-      XmoRoomPermission.sendStickers => permissions.sendStickers,
     };
     return configuredPower < channelPostingPower
         ? channelPostingPower
@@ -313,15 +289,17 @@ class RoomControlsService {
       return Duration.zero;
     }
     final lastSent = events
-        .where((event) =>
-            event.senderId == userId &&
-            event.type == EventTypes.Message &&
-            event.messageType != MessageTypes.BadEncrypted)
+        .where(
+          (event) =>
+              event.senderId == userId &&
+              event.type == EventTypes.Message &&
+              event.messageType != MessageTypes.BadEncrypted,
+        )
         .map((event) => event.originServerTs)
         .fold<DateTime?>(null, (latest, current) {
-      if (latest == null || current.isAfter(latest)) return current;
-      return latest;
-    });
+          if (latest == null || current.isAfter(latest)) return current;
+          return latest;
+        });
     if (lastSent == null) return Duration.zero;
     final nextAllowedAt = lastSent.add(Duration(seconds: seconds));
     final remaining = nextAllowedAt.difference(DateTime.now());

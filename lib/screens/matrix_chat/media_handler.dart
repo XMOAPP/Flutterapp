@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -16,7 +17,8 @@ import '../../services/matrix_attachment_downloader.dart';
 import '../../services/matrix_service.dart';
 import '../../services/transfer_queue_service.dart';
 import '../web_video_view_stub.dart'
-    if (dart.library.js_interop) '../web_video_view.dart' as web_video;
+    if (dart.library.js_interop) '../web_video_view.dart'
+    as web_video;
 import '../native_thumb_stub.dart'
     if (dart.library.io) '../native_thumb_io.dart';
 import '../native_video_metadata_stub.dart'
@@ -93,10 +95,7 @@ class MediaHandler {
 
   static int get memoryCacheCount => _imageCache.length + _imageLoading.length;
 
-  MediaHandler({
-    required this.matrixProvider,
-    required this.context,
-  });
+  MediaHandler({required this.matrixProvider, required this.context});
 
   /// Creates authenticated download callback for Matrix media
   Future<Uint8List> Function(Uri) authenticatedDownload() {
@@ -106,7 +105,8 @@ class MediaHandler {
       final response = await http.get(request.uri, headers: request.headers);
       if (response.statusCode != 200) {
         throw Exception(
-            'Media download failed: ${response.statusCode} ${response.reasonPhrase}');
+          'Media download failed: ${response.statusCode} ${response.reasonPhrase}',
+        );
       }
       return response.bodyBytes;
     };
@@ -159,7 +159,9 @@ class MediaHandler {
         _throwIfDownloadCancelled(isCancelled);
         final bytes = builder.takeBytes();
         onProgress?.call(
-            bytes.length, totalBytes > 0 ? totalBytes : bytes.length);
+          bytes.length,
+          totalBytes > 0 ? totalBytes : bytes.length,
+        );
         return bytes;
       } on http.ClientException {
         _throwIfDownloadCancelled(isCancelled);
@@ -178,8 +180,10 @@ class MediaHandler {
   }
 
   /// Downloads image bytes from event with caching
-  Future<Uint8List?> loadImageBytes(Event event,
-      {bool getThumbnail = false}) async {
+  Future<Uint8List?> loadImageBytes(
+    Event event, {
+    bool getThumbnail = false,
+  }) async {
     final cacheKey = '${event.eventId}_$getThumbnail';
     if (_imageCache.containsKey(cacheKey)) return _imageCache[cacheKey];
     if (_imageLoading.containsKey(cacheKey)) return _imageLoading[cacheKey];
@@ -187,9 +191,11 @@ class MediaHandler {
     final future = () async {
       try {
         debugPrint(
-            '[ImageLoad] Loading ${getThumbnail ? "thumbnail" : "full"} for event ${event.eventId}');
+          '[ImageLoad] Loading ${getThumbnail ? "thumbnail" : "full"} for event ${event.eventId}',
+        );
         debugPrint(
-            '[ImageLoad] Event type: ${event.type}, messageType: ${event.messageType}');
+          '[ImageLoad] Event type: ${event.type}, messageType: ${event.messageType}',
+        );
         debugPrint('[ImageLoad] Has thumbnail info: ${event.hasThumbnail}');
 
         final matrixFile = await _attachmentDownloader.download(
@@ -248,7 +254,8 @@ class MediaHandler {
         );
         if (matrixFile.bytes.isEmpty) return null;
 
-        final preview = await createImagePreviewThumbnail(matrixFile.bytes) ??
+        final preview =
+            await createImagePreviewThumbnail(matrixFile.bytes) ??
             matrixFile.bytes;
         _imageCache[cacheKey] = preview;
         return preview;
@@ -265,8 +272,10 @@ class MediaHandler {
   }
 
   /// Downloads partial video bytes (first chunk) for thumbnail generation
-  Future<Uint8List?> downloadPartialVideo(Event event,
-      {int maxBytes = 2097152}) async {
+  Future<Uint8List?> downloadPartialVideo(
+    Event event, {
+    int maxBytes = 2097152,
+  }) async {
     try {
       final mxcUrl = event.content['url'] as String?;
       if (mxcUrl == null || !mxcUrl.startsWith('mxc://')) {
@@ -278,7 +287,8 @@ class MediaHandler {
       if (mediaRequest == null) return null;
 
       debugPrint(
-          '[PartialVideo] Requesting first $maxBytes bytes from: ${mediaRequest.uri}');
+        '[PartialVideo] Requesting first $maxBytes bytes from: ${mediaRequest.uri}',
+      );
 
       final client = http.Client();
       try {
@@ -291,7 +301,8 @@ class MediaHandler {
 
         if (response.statusCode != 206 && response.statusCode != 200) {
           debugPrint(
-              '[PartialVideo] Failed with status: ${response.statusCode}');
+            '[PartialVideo] Failed with status: ${response.statusCode}',
+          );
           return null;
         }
 
@@ -301,7 +312,8 @@ class MediaHandler {
             response.contentLength != null &&
             response.contentLength! > maxBytes) {
           debugPrint(
-              '[PartialVideo] Server ignored range (${response.contentLength} bytes), skipping thumbnail probe');
+            '[PartialVideo] Server ignored range (${response.contentLength} bytes), skipping thumbnail probe',
+          );
           return null;
         }
 
@@ -323,7 +335,8 @@ class MediaHandler {
 
         final bytes = builder.takeBytes();
         debugPrint(
-            '[PartialVideo] Downloaded ${bytes.length} bytes (requested $maxBytes)');
+          '[PartialVideo] Downloaded ${bytes.length} bytes (requested $maxBytes)',
+        );
         return bytes.isEmpty ? null : bytes;
       } finally {
         client.close();
@@ -341,7 +354,8 @@ class MediaHandler {
     // Return cached thumbnail immediately
     if (_imageCache.containsKey(cacheKey)) {
       debugPrint(
-          '[VideoThumb] Returning cached thumbnail for ${event.eventId}');
+        '[VideoThumb] Returning cached thumbnail for ${event.eventId}',
+      );
       return _imageCache[cacheKey];
     }
 
@@ -352,7 +366,8 @@ class MediaHandler {
     // Return ongoing loading future to prevent duplicate processing
     if (_imageLoading.containsKey(cacheKey)) {
       debugPrint(
-          '[VideoThumb] Already loading thumbnail for ${event.eventId}, reusing future');
+        '[VideoThumb] Already loading thumbnail for ${event.eventId}, reusing future',
+      );
       return _imageLoading[cacheKey];
     }
 
@@ -360,7 +375,7 @@ class MediaHandler {
       try {
         debugPrint('[VideoThumb] Loading thumbnail for video ${event.eventId}');
 
-        // ── Layer 0: Direct HTTP fetch from info.thumbnail_url (fastest, no canvas) ──
+        // â”€â”€ Layer 0: Direct HTTP fetch from info.thumbnail_url (fastest, no canvas) â”€â”€
         // Matrix events from most clients embed a pre-generated thumbnail image URL
         // directly inside info. We can fetch this tiny image with a single HTTP GET.
         final info = event.content['info'];
@@ -368,8 +383,9 @@ class MediaHandler {
           final thumbMxcUrl = info['thumbnail_url'] as String?;
           if (thumbMxcUrl != null && thumbMxcUrl.startsWith('mxc://')) {
             try {
-              final mediaRequest =
-                  matrixProvider.service.getMediaRequest(thumbMxcUrl);
+              final mediaRequest = matrixProvider.service.getMediaRequest(
+                thumbMxcUrl,
+              );
               if (mediaRequest != null) {
                 final response = await http.get(
                   mediaRequest.uri,
@@ -378,7 +394,8 @@ class MediaHandler {
                 if (response.statusCode == 200 &&
                     response.bodyBytes.isNotEmpty) {
                   debugPrint(
-                      '[VideoThumb] Layer 0: Got thumbnail via info.thumbnail_url (${response.bodyBytes.length} bytes)');
+                    '[VideoThumb] Layer 0: Got thumbnail via info.thumbnail_url (${response.bodyBytes.length} bytes)',
+                  );
                   _cacheThumbnail(cacheKey, response.bodyBytes);
                   _videoThumbnailMisses.remove(cacheKey);
                   _imageLoading.remove(cacheKey);
@@ -391,7 +408,7 @@ class MediaHandler {
           }
         }
 
-        // ── Layer 1: Matrix SDK thumbnail (handles encrypted rooms) ──
+        // â”€â”€ Layer 1: Matrix SDK thumbnail (handles encrypted rooms) â”€â”€
         if (event.hasThumbnail) {
           try {
             final matrixFile = await _attachmentDownloader.download(
@@ -402,7 +419,8 @@ class MediaHandler {
             final bytes = matrixFile.bytes;
             if (bytes.isNotEmpty) {
               debugPrint(
-                  '[VideoThumb] Layer 1: Got SDK thumbnail: ${bytes.length} bytes');
+                '[VideoThumb] Layer 1: Got SDK thumbnail: ${bytes.length} bytes',
+              );
               _cacheThumbnail(cacheKey, bytes);
               _videoThumbnailMisses.remove(cacheKey);
               _imageLoading.remove(cacheKey);
@@ -415,13 +433,17 @@ class MediaHandler {
 
         // Try to download first 2 MB of video for thumbnail generation
         debugPrint(
-            '[VideoThumb] No Matrix thumbnail, downloading partial video...');
-        final partialVideoBytes =
-            await downloadPartialVideo(event, maxBytes: 2097152); // 2 MB
+          '[VideoThumb] No Matrix thumbnail, downloading partial video...',
+        );
+        final partialVideoBytes = await downloadPartialVideo(
+          event,
+          maxBytes: 2097152,
+        ); // 2 MB
 
         if (partialVideoBytes != null && partialVideoBytes.isNotEmpty) {
           debugPrint(
-              '[VideoThumb] Got partial video: ${partialVideoBytes.length} bytes, generating thumbnail...');
+            '[VideoThumb] Got partial video: ${partialVideoBytes.length} bytes, generating thumbnail...',
+          );
 
           // Get mime type from event
           final info = event.content['info'];
@@ -436,7 +458,8 @@ class MediaHandler {
 
           if (generatedThumb != null && generatedThumb.isNotEmpty) {
             debugPrint(
-                '[VideoThumb] Generated thumbnail from partial video: ${generatedThumb.length} bytes');
+              '[VideoThumb] Generated thumbnail from partial video: ${generatedThumb.length} bytes',
+            );
             _cacheThumbnail(cacheKey, generatedThumb);
             _videoThumbnailMisses.remove(cacheKey);
             _imageLoading.remove(cacheKey);
@@ -445,7 +468,8 @@ class MediaHandler {
         }
 
         debugPrint(
-            '[VideoThumb] No lightweight thumbnail available; showing placeholder');
+          '[VideoThumb] No lightweight thumbnail available; showing placeholder',
+        );
       } catch (e) {
         debugPrint('[VideoThumb] Error loading video thumbnail: $e');
       } finally {
@@ -469,13 +493,15 @@ class MediaHandler {
     if (videoBytes.isEmpty) return null;
 
     // 1. Try web implementation first (returns null on native platforms via stub)
-    final webThumb =
-        await web_video.generateVideoThumbnail(videoBytes, mimeType);
+    final webThumb = await web_video.generateVideoThumbnail(
+      videoBytes,
+      mimeType,
+    );
     if (webThumb != null && webThumb.isNotEmpty) {
       return webThumb;
     }
 
-    // 2. Native fallback — video_thumbnail requires a file path, not raw bytes.
+    // 2. Native fallback â€” video_thumbnail requires a file path, not raw bytes.
     //    We write a temp file, extract the frame, then immediately delete it.
     if (kIsWeb) return null; // web already tried above
     return _generateNativeThumbnail(videoBytes);
@@ -492,7 +518,9 @@ class MediaHandler {
 
   /// Pick and send file
   Future<void> pickAndSendFile(
-      String roomId, Function(bool) setUploading) async {
+    String roomId,
+    Function(bool) setUploading,
+  ) async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.any,
       withData: true,
@@ -519,7 +547,7 @@ class MediaHandler {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to send file: $e'),
+            content: Text(safeUserFacingText('Failed to send file: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -561,7 +589,7 @@ class MediaHandler {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to send audio: $e'),
+            content: Text(safeUserFacingText('Failed to send audio: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -578,7 +606,8 @@ class MediaHandler {
     CameraDevice cameraDevice,
   ) async {
     final picker = ImagePicker();
-    final photo = await picker.pickImage(
+    final photo =
+        await picker.pickImage(
           source: ImageSource.camera,
           preferredCameraDevice: cameraDevice,
           maxWidth: 1440,
@@ -612,7 +641,8 @@ class MediaHandler {
     final fileName = photo.name.isNotEmpty
         ? photo.name
         : 'photo_${DateTime.now().millisecondsSinceEpoch}.jpg';
-    final mimeType = lookupMimeType(fileName, headerBytes: bytes) ??
+    final mimeType =
+        lookupMimeType(fileName, headerBytes: bytes) ??
         photo.mimeType ??
         'image/jpeg';
 
@@ -672,7 +702,7 @@ class MediaHandler {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to send photo: $e'),
+            content: Text(safeUserFacingText('Failed to send photo: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -705,19 +735,21 @@ class MediaHandler {
     setUploading(true);
 
     try {
-      final videoMetadata = precomputedVideoWidth != null ||
+      final videoMetadata =
+          precomputedVideoWidth != null ||
               precomputedVideoHeight != null ||
               precomputedDurationMs != null
           ? null
           : sourcePath != null
-              ? await readNativeVideoMetadataFromPath(sourcePath)
-              : await _readVideoMetadata(bytes);
+          ? await readNativeVideoMetadataFromPath(sourcePath)
+          : await _readVideoMetadata(bytes);
       Uint8List? thumbBytes = precomputedThumbnailBytes;
       ({int width, int height})? thumbDimensions;
       if (thumbBytes == null || thumbBytes.isEmpty) {
         try {
           debugPrint(
-              '[Send] Generating camera video thumbnail before upload...');
+            '[Send] Generating camera video thumbnail before upload...',
+          );
           thumbBytes = sourcePath != null
               ? await generateNativeThumbnailFromPath(sourcePath)
               : await _generateVideoThumbnail(bytes, mimeType);
@@ -755,7 +787,7 @@ class MediaHandler {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to send video: $e'),
+            content: Text(safeUserFacingText('Failed to send video: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -821,7 +853,7 @@ class MediaHandler {
   }
 
   Future<({int? width, int? height, int? durationMs})?>
-      readVideoPreviewMetadata(Uint8List bytes) async {
+  readVideoPreviewMetadata(Uint8List bytes) async {
     final metadata = await _readVideoMetadata(bytes);
     if (metadata == null) return null;
     return (
@@ -832,7 +864,7 @@ class MediaHandler {
   }
 
   Future<({int? width, int? height, int? durationMs})?>
-      readVideoPreviewMetadataFromPath(String path) async {
+  readVideoPreviewMetadataFromPath(String path) async {
     final metadata = await readNativeVideoMetadataFromPath(path);
     if (metadata == null) return null;
     return (
@@ -881,7 +913,9 @@ class MediaHandler {
 
   /// Pick and send image
   Future<void> pickAndSendImage(
-      String roomId, Function(bool) setUploading) async {
+    String roomId,
+    Function(bool) setUploading,
+  ) async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.image,
       withData: true,
@@ -909,7 +943,7 @@ class MediaHandler {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to send image: $e'),
+            content: Text(safeUserFacingText('Failed to send image: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -921,7 +955,9 @@ class MediaHandler {
 
   /// Pick and send from gallery (images/videos only)
   Future<void> pickAndSendGallery(
-      String roomId, Function(bool) setUploading) async {
+    String roomId,
+    Function(bool) setUploading,
+  ) async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: [
@@ -960,7 +996,7 @@ class MediaHandler {
     try {
       if (mimeType.startsWith('video/')) {
         final videoMetadata = await _readVideoMetadata(bytes);
-        // Generate thumbnail at send time — embedded in the event so
+        // Generate thumbnail at send time â€” embedded in the event so
         // every receiver loads it instantly (one HTTP GET, no canvas).
         Uint8List? thumbBytes;
         ({int width, int height})? thumbDimensions;
@@ -999,7 +1035,7 @@ class MediaHandler {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to send media: $e'),
+            content: Text(safeUserFacingText('Failed to send media: $e')),
             backgroundColor: Colors.red,
           ),
         );

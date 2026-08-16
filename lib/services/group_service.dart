@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
+import '../config/media_upload_policy.dart';
 import '../models/group_models.dart';
 import '../models/matrix_mentions.dart';
 import '../utils/matrix_identity.dart';
 import 'matrix_service.dart';
+import 'room_capacity_policy.dart';
 import 'room_controls_service.dart';
 
 /// Service for managing group-specific features
@@ -229,6 +231,7 @@ class GroupService {
           'Cannot be empty',
         );
       }
+      MediaUploadPolicy.validate(avatarBytes.lengthInBytes);
       avatarUri = await room.client.uploadContent(
         avatarBytes,
         filename: avatarFileName,
@@ -331,6 +334,8 @@ class GroupService {
     final room = _client.getRoomById(roomId);
     if (room == null) throw Exception('Room not found: $roomId');
     _ensureOwnPower(room, 50, 'invite members');
+    await room.requestParticipants();
+    RoomCapacityPolicy.ensureGroupHasSpace(room);
 
     debugPrint('[GroupService] Adding member $userId to $roomId');
     await room.invite(userId);

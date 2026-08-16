@@ -187,16 +187,18 @@ Future<void> _completePasswordReset(HttpRequest request) async {
     return;
   }
 
-  try {
-    await _synapseResetPassword(_matrixUserId(username), newPassword);
-  } catch (error, st) {
-    _logger.error('password_reset_failed', error, st);
-    await _json(
-      request,
-      HttpStatus.badGateway,
-      {'error': 'Could not reset password'},
-    );
-    return;
+  if (!_passwordResetConfig.oidcOnlyAuthentication) {
+    try {
+      await _synapseResetPassword(_matrixUserId(username), newPassword);
+    } catch (error, st) {
+      _logger.error('password_reset_failed', error, st);
+      await _json(
+        request,
+        HttpStatus.badGateway,
+        {'error': 'Could not reset password'},
+      );
+      return;
+    }
   }
 
   try {
@@ -207,9 +209,36 @@ Future<void> _completePasswordReset(HttpRequest request) async {
     );
   } catch (error, st) {
     _logger.error('authentik_password_sync_failed', error, st);
+    await _json(
+      request,
+      HttpStatus.badGateway,
+      {
+        'error': _passwordResetConfig.oidcOnlyAuthentication
+            ? 'Could not update your password. Please retry.'
+            : 'Password was updated, but secure sign-in synchronization failed. Retry with the same new password.',
+      },
+    );
+    return;
+  }
+
+  try {
+    await _authentikRevokeSessions(username);
+    await _synapseDeleteAllDevices(_matrixUserId(username));
+  } catch (error, st) {
+    _logger.error('password_reset_session_revocation_failed', error, st);
+    await _json(
+      request,
+      HttpStatus.badGateway,
+      {
+        'error':
+            'Password updated, but existing sessions could not be signed out. Retry with the same new password.',
+      },
+    );
+    return;
   }
 
   _passwordResetStore.remove(key);
+  logInfo('password_reset_completed', {'usernameHash': username.hashCode});
   await _json(request, HttpStatus.ok, {'success': true});
 }
 
@@ -309,6 +338,53 @@ Future<void> _synapseResetPassword(String userId, String newPassword) async {
   }
 }
 
+Future<void> _synapseDeleteAllDevices(String userId) async {
+  final listResponse = await _synapseRequest(
+    method: 'GET',
+    pathSegments: [
+      '_synapse',
+      'admin',
+      'v2',
+      'users',
+      userId,
+      'devices',
+    ],
+  );
+  if (listResponse.statusCode < 200 || listResponse.statusCode >= 300) {
+    throw HttpException(
+      'Synapse device lookup failed: ${listResponse.statusCode}',
+    );
+  }
+
+  final devices = _asList(_decodeJsonMap(listResponse.body)['devices']) ??
+      const <dynamic>[];
+  final deviceIds = devices
+      .map(_asMap)
+      .whereType<Map<String, dynamic>>()
+      .map((device) => device['device_id']?.toString() ?? '')
+      .where((deviceId) => deviceId.isNotEmpty)
+      .toList(growable: false);
+  if (deviceIds.isEmpty) return;
+
+  final deleteResponse = await _synapseRequest(
+    method: 'POST',
+    pathSegments: [
+      '_synapse',
+      'admin',
+      'v2',
+      'users',
+      userId,
+      'delete_devices',
+    ],
+    body: {'devices': deviceIds},
+  );
+  if (deleteResponse.statusCode < 200 || deleteResponse.statusCode >= 300) {
+    throw HttpException(
+      'Synapse device revocation failed: ${deleteResponse.statusCode}',
+    );
+  }
+}
+
 Future<_SynapseResponse> _synapseRequest({
   required String method,
   required List<String> pathSegments,
@@ -372,6 +448,11 @@ String _normalizeMatrixLocalpart(Object? value) {
 bool _isValidMatrixLocalpart(String username) =>
     RegExp(r'^[a-z0-9._=\-/]+$').hasMatch(username);
 
+/// New XMO accounts use a stricter portable subset. Keep the broader Matrix
+/// localpart validation above for recovery/deletion of older accounts.
+bool _isValidNewXmoUsername(String username) =>
+    RegExp(r'^[a-z0-9]+$').hasMatch(username);
+
 String _matrixUserId(String username) =>
     '@${_normalizeMatrixLocalpart(username)}:${_passwordResetConfig.serverName}';
 
@@ -381,6 +462,7 @@ class PasswordResetConfig {
     required this.serverName,
     required this.adminToken,
     required this.dataFile,
+    required this.oidcOnlyAuthentication,
   });
 
   factory PasswordResetConfig.fromEnvironment(Map<String, String> env) {
@@ -398,6 +480,8 @@ class PasswordResetConfig {
       adminToken:
           env['XMO_SYNAPSE_ADMIN_TOKEN'] ?? env['SYNAPSE_ADMIN_TOKEN'] ?? '',
       dataFile: dataFile,
+      oidcOnlyAuthentication:
+          (env['XMO_OIDC_ONLY_AUTHENTICATION'] ?? '').toLowerCase() == 'true',
     );
   }
 
@@ -405,6 +489,7 @@ class PasswordResetConfig {
   final String serverName;
   final String adminToken;
   final String dataFile;
+  final bool oidcOnlyAuthentication;
 
   bool get isConfigured =>
       homeserverUrl.trim().isNotEmpty &&

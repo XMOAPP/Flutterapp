@@ -28,6 +28,17 @@ class MatrixSsoService {
 
   bool get isAwaitingCallback => _pendingToken != null;
 
+  void cancelPendingSignIn({
+    String message = 'Secure sign-in was cancelled. Please try again.',
+  }) {
+    final pending = _pendingToken;
+    if (pending == null) return;
+    _clearPending();
+    if (!pending.isCompleted) {
+      pending.completeError(MatrixSsoException(message));
+    }
+  }
+
   Future<String> startSignIn() async {
     if (!AppConfig.isSsoLoginConfigured) {
       throw const MatrixSsoException('Secure sign-in is not configured yet.');

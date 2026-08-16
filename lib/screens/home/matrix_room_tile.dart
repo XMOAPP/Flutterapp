@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
 import 'package:provider/provider.dart';
 import '../../theme.dart';
+import '../../models/xmo_contact_card.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/matrix_service.dart';
 import '../../services/matrix_media_helper.dart';
@@ -322,6 +323,15 @@ class _MatrixRoomTileState extends State<MatrixRoomTile> {
       return _LastMessagePreview(
         text: _storyReplyPreviewBody(event),
         icon: Icons.auto_stories_rounded,
+        iconColor: kLightGrey,
+      );
+    }
+
+    final contact = XmoContactCard.fromEventContent(event.content);
+    if (contact != null) {
+      return _LastMessagePreview(
+        text: contact.displayLabel,
+        icon: Icons.person_rounded,
         iconColor: kLightGrey,
       );
     }

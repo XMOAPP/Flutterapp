@@ -4,7 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
 
+import '../utils/user_facing_error.dart';
 import 'matrix_service.dart';
+import 'recovery_key_acknowledgement_store.dart';
 
 class E2eeStatus {
   final bool available;
@@ -17,6 +19,9 @@ class E2eeStatus {
   final String? deviceId;
   final String identityKey;
   final String fingerprintKey;
+  final bool recoveryConfigured;
+  final bool recoveryHasPassphrase;
+  final bool recoverySavedConfirmed;
 
   const E2eeStatus({
     required this.available,
@@ -29,6 +34,9 @@ class E2eeStatus {
     required this.deviceId,
     required this.identityKey,
     required this.fingerprintKey,
+    this.recoveryConfigured = false,
+    this.recoveryHasPassphrase = false,
+    this.recoverySavedConfirmed = false,
   });
 }
 
@@ -36,32 +44,37 @@ class E2eeBootstrapResult {
   final bool success;
   final String? recoveryKey;
   final String? error;
+  final String? warning;
 
   const E2eeBootstrapResult._({
     required this.success,
     this.recoveryKey,
     this.error,
+    this.warning,
   });
 
-  factory E2eeBootstrapResult.success({String? recoveryKey}) {
+  factory E2eeBootstrapResult.success({String? recoveryKey, String? warning}) {
     return E2eeBootstrapResult._(
       success: true,
       recoveryKey: recoveryKey,
+      warning: warning,
     );
   }
 
   factory E2eeBootstrapResult.failure(String error) {
-    return E2eeBootstrapResult._(
-      success: false,
-      error: error,
-    );
+    return E2eeBootstrapResult._(success: false, error: error);
   }
 }
 
 class E2eeService {
   final MatrixService _matrixService;
+  final RecoveryKeyAcknowledgementStore _acknowledgements;
 
-  E2eeService(this._matrixService);
+  E2eeService(
+    this._matrixService, {
+    RecoveryKeyAcknowledgementStore acknowledgements =
+        const RecoveryKeyAcknowledgementStore(),
+  }) : _acknowledgements = acknowledgements;
 
   Client get _client => _matrixService.client;
 
@@ -98,6 +111,15 @@ class E2eeService {
       keyBackupCached = false;
     }
 
+    final recoveryKeyId = encryption.ssss.defaultKeyId;
+    final recoveryKeyData = recoveryKeyId == null
+        ? null
+        : encryption.ssss.getKey(recoveryKeyId);
+    final userId = _client.userID;
+    final recoverySavedConfirmed = userId != null && recoveryKeyId != null
+        ? await _acknowledgements.isSaved(userId: userId, keyId: recoveryKeyId)
+        : false;
+
     return E2eeStatus(
       available: true,
       vodozemacEngineActive: vodozemacActive,
@@ -105,16 +127,21 @@ class E2eeService {
       crossSigningCached: crossSigningCached,
       keyBackupEnabled: encryption.keyManager.enabled,
       keyBackupCached: keyBackupCached,
-      defaultRecoveryKeyId: encryption.ssss.defaultKeyId,
+      defaultRecoveryKeyId: recoveryKeyId,
       deviceId: _client.deviceID,
       identityKey: _client.identityKey,
       fingerprintKey: _client.fingerprintKey,
+      recoveryConfigured: recoveryKeyData != null,
+      recoveryHasPassphrase: recoveryKeyData?.passphrase != null,
+      recoverySavedConfirmed: recoverySavedConfirmed,
     );
   }
 
   Future<E2eeBootstrapResult> setupRecoveryAndKeyBackup({
     String? passphrase,
+    String? existingRecoveryCredential,
     Future<String?> Function()? requestAccountPassword,
+    Future<bool> Function(UiaRequest request)? requestSsoAuthentication,
   }) async {
     final encryption = _encryption;
     if (encryption == null || !encryption.enabled) {
@@ -150,6 +177,21 @@ class E2eeService {
               continue;
             }
 
+            if (request.nextStages.contains(AuthenticationTypes.sso) &&
+                requestSsoAuthentication != null) {
+              final completed = await requestSsoAuthentication(request);
+              if (!completed) {
+                authenticationError =
+                    'Secure account confirmation was cancelled.';
+                request.cancel(Exception(authenticationError));
+                return;
+              }
+              await request.completeStage(
+                AuthenticationData(session: request.session),
+              );
+              continue;
+            }
+
             if (!request.nextStages.contains(AuthenticationTypes.password)) {
               authenticationError =
                   'The XMO account server requested an unsupported authentication method.';
@@ -169,15 +211,15 @@ class E2eeService {
               AuthenticationPassword(
                 session: request.session,
                 password: password,
-                identifier: AuthenticationUserIdentifier(
-                  user: _client.userID!,
-                ),
+                identifier: AuthenticationUserIdentifier(user: _client.userID!),
               ),
             );
           }
         } catch (error, stackTrace) {
-          debugPrint('[E2EE] Interactive authentication failed: '
-              '$error\n$stackTrace');
+          debugPrint(
+            '[E2EE] Interactive authentication failed: '
+            '$error\n$stackTrace',
+          );
           authenticationError = _formatException(error);
           if (request.state != UiaRequestState.done &&
               request.state != UiaRequestState.fail) {
@@ -199,6 +241,19 @@ class E2eeService {
             continue;
           case BootstrapState.askUseExistingSsss:
             bootstrap.useExistingSsss(true);
+            final existingKey = bootstrap.newSsssKey;
+            final credential = existingRecoveryCredential?.trim();
+            if (existingKey == null ||
+                credential == null ||
+                credential.isEmpty) {
+              return E2eeBootstrapResult.failure(
+                'Enter the existing recovery key or passphrase first.',
+              );
+            }
+            await existingKey.unlock(
+              keyOrPassphrase: credential,
+              postUnlock: false,
+            );
             continue;
           case BootstrapState.askBadSsss:
             bootstrap.ignoreBadSecrets(true);
@@ -209,7 +264,8 @@ class E2eeService {
             );
           case BootstrapState.askNewSsss:
             await bootstrap.newSsss(
-                passphrase?.trim().isEmpty == true ? null : passphrase?.trim());
+              passphrase?.trim().isEmpty == true ? null : passphrase?.trim(),
+            );
             continue;
           case BootstrapState.openExistingSsss:
             if (bootstrap.newSsssKey?.isUnlocked != true) {
@@ -287,6 +343,135 @@ class E2eeService {
     }
   }
 
+  Future<E2eeBootstrapResult> verifyRecoveryCredential(
+    String keyOrPassphrase,
+  ) async {
+    final encryption = _encryption;
+    if (encryption == null || !encryption.enabled) {
+      return E2eeBootstrapResult.failure(
+        'Encryption is not available on this session.',
+      );
+    }
+    try {
+      final recovery = encryption.ssss.open();
+      await recovery.unlock(
+        keyOrPassphrase: keyOrPassphrase.trim(),
+        postUnlock: false,
+      );
+      return E2eeBootstrapResult.success();
+    } catch (e, s) {
+      debugPrint('[E2EE] Recovery credential verification failed: $e\n$s');
+      return E2eeBootstrapResult.failure(
+        'Recovery key or passphrase is invalid.',
+      );
+    }
+  }
+
+  Future<E2eeBootstrapResult> revealRecoveryKey(String passphrase) async {
+    final encryption = _encryption;
+    if (encryption == null || !encryption.enabled) {
+      return E2eeBootstrapResult.failure(
+        'Encryption is not available on this session.',
+      );
+    }
+    try {
+      final recovery = encryption.ssss.open();
+      if (!recovery.hasPassphrase) {
+        return E2eeBootstrapResult.failure(
+          'This recovery key cannot be recreated. Use your saved copy.',
+        );
+      }
+      await recovery.unlock(passphrase: passphrase.trim(), postUnlock: false);
+      return E2eeBootstrapResult.success(recoveryKey: recovery.recoveryKey);
+    } catch (e, s) {
+      debugPrint('[E2EE] Recovery key reveal failed: $e\n$s');
+      return E2eeBootstrapResult.failure('Recovery passphrase is invalid.');
+    }
+  }
+
+  Future<E2eeBootstrapResult> rotateRecoveryKey({
+    required String currentCredential,
+    String? newPassphrase,
+  }) async {
+    final encryption = _encryption;
+    if (encryption == null || !encryption.enabled) {
+      return E2eeBootstrapResult.failure(
+        'Encryption is not available on this session.',
+      );
+    }
+
+    OpenSSSS? replacement;
+    var defaultKeyChanged = false;
+    try {
+      await _prepareBootstrapSyncState();
+      final current = encryption.ssss.open();
+      await current.unlock(
+        keyOrPassphrase: currentCredential.trim(),
+        postUnlock: false,
+      );
+
+      final encryptedSecrets = encryption.ssss
+          .analyzeEncryptedSecrets()
+          .keys
+          .toSet();
+      replacement = await encryption.ssss.createKey(
+        newPassphrase?.trim().isEmpty == true ? null : newPassphrase?.trim(),
+        'XMO recovery',
+      );
+      await encryption.ssss.migrateSecretsToKey(
+        primaryUnlockedKey: current,
+        destinationKey: replacement,
+        unlockCredential: currentCredential.trim(),
+      );
+
+      final migratedSecrets = <String, String>{};
+      for (final type in encryptedSecrets) {
+        migratedSecrets[type] = await replacement.getStored(type);
+      }
+
+      await encryption.ssss.setDefaultKeyId(replacement.keyId);
+      defaultKeyChanged = true;
+
+      String? cleanupWarning;
+      try {
+        for (final entry in migratedSecrets.entries) {
+          await replacement.validateAndStripOtherKeys(entry.key, entry.value);
+        }
+        await replacement.maybeCacheAll();
+      } catch (e, s) {
+        debugPrint('[E2EE] Old recovery-key cleanup deferred: $e\n$s');
+        cleanupWarning =
+            'The new key is active, but old key cleanup will be retried later.';
+      }
+
+      final userId = _client.userID;
+      if (userId != null) await _acknowledgements.clear(userId);
+      return E2eeBootstrapResult.success(
+        recoveryKey: replacement.recoveryKey,
+        warning: cleanupWarning,
+      );
+    } catch (e, s) {
+      debugPrint('[E2EE] Recovery key rotation failed: $e\n$s');
+      if (defaultKeyChanged && replacement?.recoveryKey != null) {
+        return E2eeBootstrapResult.success(
+          recoveryKey: replacement!.recoveryKey,
+          warning:
+              'The new key is active, but recovery cleanup did not finish.',
+        );
+      }
+      return E2eeBootstrapResult.failure(
+        'Recovery key replacement failed. The current key is still active.',
+      );
+    }
+  }
+
+  Future<void> markCurrentRecoveryKeySaved() async {
+    final userId = _client.userID;
+    final keyId = _encryption?.ssss.defaultKeyId;
+    if (userId == null || keyId == null) return;
+    await _acknowledgements.markSaved(userId: userId, keyId: keyId);
+  }
+
   Future<void> requestSecretsFromVerifiedDevices() async {
     final encryption = _encryption;
     if (encryption == null || !encryption.enabled) return;
@@ -306,10 +491,7 @@ class E2eeService {
     }
   }
 
-  String _formatBootstrapError(
-    SdkError? error, {
-    String? authenticationError,
-  }) {
+  String _formatBootstrapError(SdkError? error, {String? authenticationError}) {
     if (authenticationError?.isNotEmpty == true) {
       return authenticationError!;
     }
@@ -320,13 +502,9 @@ class E2eeService {
   }
 
   String _formatException(Object? exception) {
-    if (exception is MatrixException) {
-      return '${exception.errcode}: ${exception.errorMessage}';
-    }
-    final message = exception?.toString().trim();
-    if (message == null || message.isEmpty) {
-      return 'Recovery setup failed. Try again after syncing finishes.';
-    }
-    return message;
+    return userFacingError(
+      exception,
+      fallback: 'Recovery setup failed. Try again after syncing finishes.',
+    );
   }
 }

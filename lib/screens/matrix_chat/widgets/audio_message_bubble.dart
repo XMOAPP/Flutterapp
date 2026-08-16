@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 // ignore_for_file: experimental_member_use
 
 import 'dart:async';
@@ -42,8 +43,9 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
   bool _prepared = false;
   Future<void>? _prepareFuture;
   StreamSubscription<PlayerState>? _playerStateSub;
-  final ValueNotifier<_AudioBubbleUiState> _uiState =
-      ValueNotifier(const _AudioBubbleUiState());
+  final ValueNotifier<_AudioBubbleUiState> _uiState = ValueNotifier(
+    const _AudioBubbleUiState(),
+  );
   int _seekRequestId = 0;
   String? _playbackFilePath;
 
@@ -128,7 +130,7 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Unable to play audio: $e'),
+          content: Text(safeUserFacingText('Unable to play audio: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -180,10 +182,7 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
         await _player.setFilePath(playbackPath);
       } else {
         await _player.setAudioSource(
-          _BytesAudioSource(
-            matrixFile.bytes,
-            contentType: mimeType,
-          ),
+          _BytesAudioSource(matrixFile.bytes, contentType: mimeType),
         );
       }
       _prepared = true;
@@ -200,10 +199,7 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
     try {
       await deleteAudioPlaybackFile(_playbackFilePath);
       _playbackFilePath = null;
-      await _player.setUrl(
-        request.uri.toString(),
-        headers: request.headers,
-      );
+      await _player.setUrl(request.uri.toString(), headers: request.headers);
       return true;
     } catch (_) {
       return false;
@@ -252,8 +248,9 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
   Duration get _eventDuration {
     final info = widget.event.content['info'];
     final raw = info is Map ? info['duration'] : null;
-    final millis =
-        raw is num ? raw.toInt() : int.tryParse(raw?.toString() ?? '');
+    final millis = raw is num
+        ? raw.toInt()
+        : int.tryParse(raw?.toString() ?? '');
     return Duration(milliseconds: millis ?? 0);
   }
 
@@ -270,10 +267,7 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
         ? kLimeGreen.withValues(alpha: 0.25)
         : Colors.white.withValues(alpha: 0.22);
     final screenWidth = MediaQuery.sizeOf(context).width;
-    final maxBubbleWidth = math.min(
-      330.0,
-      math.max(160.0, screenWidth * 0.78),
-    );
+    final maxBubbleWidth = math.min(330.0, math.max(160.0, screenWidth * 0.78));
     final minBubbleWidth = math.min(280.0, maxBubbleWidth);
     final textScale = MediaQuery.textScalerOf(context).scale(1);
     final bubbleHeight = 58.0 + math.max(0.0, textScale - 1.0) * 12.0;
@@ -372,8 +366,8 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
                               uiState.scrubProgress != null
                                   ? displayedPosition
                                   : (uiState.prepared || uiState.playing
-                                      ? position
-                                      : duration),
+                                        ? position
+                                        : duration),
                             ),
                             style: GoogleFonts.inter(
                               color: widget.isMe
@@ -435,8 +429,9 @@ class _AudioBubbleUiState {
       loading: loading ?? this.loading,
       prepared: prepared ?? this.prepared,
       playing: playing ?? this.playing,
-      scrubProgress:
-          clearScrubProgress ? null : scrubProgress ?? this.scrubProgress,
+      scrubProgress: clearScrubProgress
+          ? null
+          : scrubProgress ?? this.scrubProgress,
     );
   }
 }

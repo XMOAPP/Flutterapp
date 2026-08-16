@@ -88,6 +88,17 @@ class E2eeVerificationChecklist {
       ],
     ),
     E2eeVerificationItem(
+      id: 'sas_cross_device_verification',
+      title: 'SAS cross-device verification',
+      objective:
+          'Two XMO sessions complete emoji or numeric SAS verification and reject a deliberately mismatched comparison.',
+      requiredEvidence: [
+        'Matching emoji or numeric SAS shown on both devices',
+        'Both Matrix device records become verified after confirmation',
+        'A separate mismatched-SAS attempt is rejected and remains unverified',
+      ],
+    ),
+    E2eeVerificationItem(
       id: 'verified_device_key_requests',
       title: 'Verified-device key requests',
       objective:
@@ -107,6 +118,39 @@ class E2eeVerificationChecklist {
         'Vodozemac.init() executed successfully during app startup',
         'Security status screen displays Rust E2EE engine active',
         'Olm 1:1 and Megolm group ratchets operate using Vodozemac native crypto',
+      ],
+    ),
+    E2eeVerificationItem(
+      id: 'encrypted_database_migration',
+      title: 'Encrypted Matrix database migration',
+      objective:
+          'An upgrade encrypts the existing Matrix database without losing the session or encrypted history.',
+      requiredEvidence: [
+        'Upgrade performed over an installation containing encrypted rooms',
+        'SQLCipher integrity/open check succeeds after migration and restart',
+        'Existing rooms and previously decryptable events remain available',
+      ],
+    ),
+    E2eeVerificationItem(
+      id: 'destructive_logout_recovery_warning',
+      title: 'Logout recovery protection',
+      objective:
+          'Logout warns users before local E2EE material is destroyed and recovery succeeds afterward.',
+      requiredEvidence: [
+        'Warning shown when recovery or backup is not ready',
+        'Local Matrix database is cleared by logout',
+        'A new session restores and decrypts known historical event IDs',
+      ],
+    ),
+    E2eeVerificationItem(
+      id: 'recovery_without_old_device',
+      title: 'Recovery without the old device',
+      objective:
+          'A fresh installation restores encrypted history using only the saved recovery key or passphrase.',
+      requiredEvidence: [
+        'Old device is offline or unavailable',
+        'Recovery key or passphrase unlock succeeds on the new installation',
+        'Known historical text and media event IDs decrypt successfully',
       ],
     ),
   ];

@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
@@ -38,7 +39,7 @@ class _ArchivedChatsScreenState extends State<ArchivedChatsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Unable to restore chat: $error'),
+          content: Text(safeUserFacingText('Unable to restore chat: $error')),
           backgroundColor: Colors.red,
         ),
       );
@@ -67,7 +68,8 @@ class _ArchivedChatsScreenState extends State<ArchivedChatsScreen> {
       body: Consumer<MatrixProvider>(
         builder: (context, provider, _) {
           final archivedRooms = provider.rooms.where((room) {
-            final active = room.membership == Membership.join ||
+            final active =
+                room.membership == Membership.join ||
                 room.membership == Membership.invite;
             return active &&
                 ChatArchiveService.isArchived(room) &&
@@ -87,10 +89,7 @@ class _ArchivedChatsScreenState extends State<ArchivedChatsScreen> {
                   const SizedBox(height: 12),
                   Text(
                     'No archived chats',
-                    style: GoogleFonts.inter(
-                      color: kLightGrey,
-                      fontSize: 14,
-                    ),
+                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
                   ),
                 ],
               ),

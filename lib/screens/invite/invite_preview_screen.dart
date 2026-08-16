@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../models/invite_link_models.dart';
@@ -34,7 +35,10 @@ class _InvitePreviewScreenState extends State<InvitePreviewScreen> {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _error = error.toString().replaceFirst('InviteLinkException: ', '');
+        _error = userFacingError(
+          error,
+          fallback: 'Could not use this invite link.',
+        );
       });
     }
   }
@@ -123,8 +127,10 @@ class _InvitePreviewScreenState extends State<InvitePreviewScreen> {
                 Text(
                   _error!,
                   textAlign: TextAlign.center,
-                  style:
-                      GoogleFonts.inter(color: Colors.redAccent, fontSize: 12),
+                  style: GoogleFonts.inter(
+                    color: Colors.redAccent,
+                    fontSize: 12,
+                  ),
                 ),
                 const SizedBox(height: 12),
               ],
@@ -146,7 +152,9 @@ class _InvitePreviewScreenState extends State<InvitePreviewScreen> {
                           width: 20,
                           height: 20,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2, color: kBlack),
+                            strokeWidth: 2,
+                            color: kBlack,
+                          ),
                         )
                       : Text(
                           action,

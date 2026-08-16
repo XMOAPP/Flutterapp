@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -96,7 +97,10 @@ class _ReportSheetState extends State<_ReportSheet> {
       if (!mounted) return;
       setState(() => _submitting = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$error'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text(safeUserFacingText('$error')),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }
@@ -116,21 +120,21 @@ class _ReportSheetState extends State<_ReportSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(widget.title,
-                  style: GoogleFonts.inter(
-                    color: kWhite,
-                    fontSize: 19,
-                    fontWeight: FontWeight.w600,
-                  )),
+              Text(
+                widget.title,
+                style: GoogleFonts.inter(
+                  color: kWhite,
+                  fontSize: 19,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               const SizedBox(height: 6),
               Text(
                 'Choose the reason that best describes the problem.',
                 style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
               ),
               const SizedBox(height: 12),
-              ...XmoReportReason.values.map(
-                (reason) => _reasonTile(reason),
-              ),
+              ...XmoReportReason.values.map((reason) => _reasonTile(reason)),
               const SizedBox(height: 8),
               TextField(
                 controller: _details,
@@ -153,12 +157,14 @@ class _ReportSheetState extends State<_ReportSheet> {
                   contentPadding: EdgeInsets.zero,
                   activeColor: kLimeGreen,
                   value: _blockAfterReport,
-                  title: Text('Block this user after reporting',
-                      style: GoogleFonts.inter(color: kWhite, fontSize: 14)),
+                  title: Text(
+                    'Block this user after reporting',
+                    style: GoogleFonts.inter(color: kWhite, fontSize: 14),
+                  ),
                   onChanged: _submitting
                       ? null
                       : (value) =>
-                          setState(() => _blockAfterReport = value == true),
+                            setState(() => _blockAfterReport = value == true),
                 ),
               const SizedBox(height: 8),
               SizedBox(

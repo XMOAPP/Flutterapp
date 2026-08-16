@@ -5,7 +5,8 @@
       "namespace": "android_app",
       "package_name": "com.xmo.xmo",
       "sha256_cert_fingerprints": [
-        "DA:1E:B8:3A:4C:4A:0E:A1:50:5A:C2:38:F8:10:00:90:5C:98:55:63:90:6D:63:EB:B1:86:30:95:D3:C7:4F:0C"
+        "DA:1E:B8:3A:4C:4A:0E:A1:50:5A:C2:38:F8:10:00:90:5C:98:55:63:90:6D:63:EB:B1:86:30:95:D3:C7:4F:0C",
+        "07:5E:98:55:4B:3F:80:A0:CA:AC:1D:FE:A1:85:43:2E:62:6C:B7:08:7E:44:01:50:B5:9D:50:AB:CF:61:15:47"
       ]
     }
   }

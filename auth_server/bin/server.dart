@@ -9,13 +9,16 @@ import 'package:crypto/crypto.dart';
 import 'package:cryptography/cryptography.dart' as cryptography;
 import 'package:googleapis_auth/auth_io.dart';
 
+import 'package:xmo_auth_server/src/account_deletion_job_store.dart';
 import 'package:xmo_auth_server/src/email_service.dart';
 import 'package:xmo_auth_server/src/endpoint_modules.dart';
 import 'package:xmo_auth_server/src/health_status.dart';
 import 'package:xmo_auth_server/src/request_guard.dart';
+import 'package:xmo_auth_server/src/room_capacity_policy.dart';
 import 'package:xmo_auth_server/src/secure_login_enrollment_proof_store.dart';
 import 'package:xmo_auth_server/src/structured_logger.dart';
 import 'package:xmo_auth_server/src/wallet_auth_service.dart';
+import 'package:xmo_auth_server/src/wallet_account_store.dart';
 
 part '../lib/src/handlers/azure_blob_handler.dart';
 part '../lib/src/handlers/account_deletion_handler.dart';
@@ -48,6 +51,10 @@ final String _firebaseProjectId =
 final _otpStore = <String, _OtpRecord>{};
 final _secureLoginEnrollmentProofs = SecureLoginEnrollmentProofStore(
   ttl: _secureLoginEnrollmentProofTtl,
+  storageFile: File(
+    Platform.environment['XMO_SECURE_LOGIN_ENROLLMENT_STORE_FILE'] ??
+        '/app/data/secure_login_enrollment_proofs.json',
+  ),
 );
 final _passwordResetStore = <String, _PasswordResetRecord>{};
 final _random = Random.secure();
@@ -60,9 +67,19 @@ final _passwordResetConfig =
 final _walletAuthService = WalletAuthService(
   config: WalletAuthConfig.fromEnvironment(Platform.environment),
 );
+final _walletAccountStore = WalletAccountStore(
+  config: WalletAccountStoreConfig.fromEnvironment(Platform.environment),
+);
+var _walletAccountStoreReady = false;
 final _azureBlobConfig = AzureBlobConfig.fromEnvironment(Platform.environment);
 final _reportConfig = ReportConfig.fromEnvironment(Platform.environment);
 final _accountDeletionStore = <String, _AccountDeletionRecord>{};
+final _accountDeletionJobs = AccountDeletionJobStore(
+  storageFile: File(
+    Platform.environment['XMO_ACCOUNT_DELETION_STORE_FILE'] ??
+        '/app/data/account_deletion_jobs.json',
+  ),
+);
 final _inviteConfig = InviteConfig.fromEnvironment(Platform.environment);
 const _otpEndpoints = OtpEndpointModule(send: _sendOtp, verify: _verifyOtp);
 const _passwordResetEndpoints = PasswordResetEndpointModule(
@@ -80,6 +97,8 @@ const _inviteEndpoints = InviteEndpointModule(
   redeem: _redeemInviteLink,
 );
 const _walletEndpoints = WalletEndpointModule(
+  account: _getWalletAccount,
+  usernameAvailability: _checkWalletUsernameAvailability,
   nonce: _createWalletNonce,
   verify: _verifyWalletSignature,
 );
@@ -90,6 +109,9 @@ const _azureBlobEndpoints = AzureBlobEndpointModule(
 const _userDirectoryEndpoints = UserDirectoryEndpointModule(
   upsert: _upsertUserDirectoryEntry,
   search: _searchUserDirectory,
+  checkUsernameAvailability: _checkOidcUsernameAvailability,
+  registerOidcAccount: _registerOidcAccount,
+  prepareSecureRegistration: _prepareSecureRegistration,
   provisionSecureLogin: _provisionSecureLogin,
 );
 const _reportEndpoints = ReportEndpointModule(
@@ -123,8 +145,19 @@ const _firebaseMessagingScope =
     'https://www.googleapis.com/auth/firebase.messaging';
 
 Future<void> main() async {
+  if (_walletAccountStore.config.isConfigured &&
+      _walletAuthService.config.isConfigured) {
+    try {
+      await _walletAccountStore.initialize();
+      _walletAccountStoreReady = true;
+      logInfo('wallet_account_store_ready');
+    } catch (error, stackTrace) {
+      _logger.error('wallet_account_store_initialization_failed', error, stackTrace);
+    }
+  }
   final server = await HttpServer.bind(InternetAddress.anyIPv4, _port);
   stdout.writeln('XMO auth server listening on 0.0.0.0:$_port');
+  _resumePendingAccountDeletionJobs();
 
   await for (final request in server) {
     await _handleRequest(request);
@@ -171,7 +204,8 @@ Future<void> _handleRequest(HttpRequest request) async {
           emailConfigured: _emailService.isConfigured,
           donationConfigured: _thirdwebSecretKey.isNotEmpty &&
               _donationRecipientAddress.isNotEmpty,
-          walletAuthConfigured: _walletAuthService.config.isConfigured,
+          walletAuthConfigured: _walletAuthService.config.isConfigured &&
+              _walletAccountStoreReady,
           passwordResetConfigured: _passwordResetConfig.isConfigured,
           pushConfigured: _firebaseServiceAccountJson.isNotEmpty ||
               _firebaseServiceAccountBase64.isNotEmpty ||
@@ -179,8 +213,9 @@ Future<void> _handleRequest(HttpRequest request) async {
           azureBlobConfigured: _azureBlobConfig.isConfigured,
           userDirectoryConfigured: _userDirectoryConfig.isConfigured,
           reportsConfigured: _reportConfig.isConfigured,
-          accountDeletionConfigured:
-              _passwordResetConfig.isConfigured && _emailService.isConfigured,
+          accountDeletionConfigured: _passwordResetConfig.isConfigured &&
+              _authentikConfig.isConfigured &&
+              _emailService.isConfigured,
           channelAnalyticsConfigured: _channelAnalyticsConfig.isConfigured,
           inviteLinksConfigured: _inviteConfig.isConfigured,
         ),
@@ -295,6 +330,18 @@ Future<void> _handleRequest(HttpRequest request) async {
     }
 
     if (request.method == 'POST' &&
+        _walletEndpoints.handlesAccount(request.uri.path)) {
+      await _walletEndpoints.account(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _walletEndpoints.handlesUsernameAvailability(request.uri.path)) {
+      await _walletEndpoints.usernameAvailability(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
         _walletEndpoints.handlesNonce(request.uri.path)) {
       await _walletEndpoints.nonce(request);
       return;
@@ -331,7 +378,33 @@ Future<void> _handleRequest(HttpRequest request) async {
     }
 
     if (request.method == 'POST' &&
-        _userDirectoryEndpoints.handlesProvisionSecureLogin(request.uri.path)) {
+        _userDirectoryEndpoints.handlesUsernameAvailability(
+          request.uri.path,
+        )) {
+      await _userDirectoryEndpoints.checkUsernameAvailability(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _userDirectoryEndpoints.handlesRegisterOidcAccount(
+          request.uri.path,
+        )) {
+      await _userDirectoryEndpoints.registerOidcAccount(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _userDirectoryEndpoints.handlesPrepareSecureRegistration(
+          request.uri.path,
+        )) {
+      await _userDirectoryEndpoints.prepareSecureRegistration(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _userDirectoryEndpoints.handlesProvisionSecureLogin(
+          request.uri.path,
+        )) {
       await _userDirectoryEndpoints.provisionSecureLogin(request);
       return;
     }

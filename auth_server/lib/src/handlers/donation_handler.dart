@@ -43,17 +43,55 @@ Future<void> _createDonationPayment(HttpRequest request) async {
     return;
   }
 
-  final response = await _postThirdwebPayment(
-    amountUsdcSmallestUnit: amount,
-    donorUserId: donorUserId,
-    donorDisplayName: donorDisplayName,
-  );
+  late final _ThirdwebResponse response;
+  try {
+    response = await _postThirdwebPayment(
+      amountUsdcSmallestUnit: amount,
+      donorUserId: donorUserId,
+      donorDisplayName: donorDisplayName,
+    );
+  } on TimeoutException catch (error, stackTrace) {
+    _logger.error('thirdweb_payment_timeout', error, stackTrace);
+    await _json(request, HttpStatus.badGateway, {
+      'error':
+          'Donation checkout is temporarily unavailable. Please try again.',
+    });
+    return;
+  } on SocketException catch (error, stackTrace) {
+    _logger.error('thirdweb_payment_connection_failed', error, stackTrace);
+    await _json(request, HttpStatus.badGateway, {
+      'error':
+          'Donation checkout is temporarily unavailable. Please try again.',
+    });
+    return;
+  } on HttpException catch (error, stackTrace) {
+    _logger.error('thirdweb_payment_request_failed', error, stackTrace);
+    await _json(request, HttpStatus.badGateway, {
+      'error':
+          'Donation checkout is temporarily unavailable. Please try again.',
+    });
+    return;
+  } catch (error, stackTrace) {
+    _logger.error('thirdweb_payment_unexpected_failure', error, stackTrace);
+    await _json(request, HttpStatus.badGateway, {
+      'error':
+          'Donation checkout is temporarily unavailable. Please try again.',
+    });
+    return;
+  }
 
   if (response.statusCode < 200 || response.statusCode >= 300) {
+    logWarning('thirdweb_payment_rejected', {
+      'statusCode': response.statusCode,
+      'providerError': _thirdwebErrorMessage(response.body),
+    });
     await _json(
       request,
-      response.statusCode,
-      {'error': _thirdwebErrorMessage(response.body)},
+      HttpStatus.badGateway,
+      {
+        'error':
+            'Donation checkout is temporarily unavailable. Please try again.',
+      },
     );
     return;
   }
@@ -94,7 +132,7 @@ Future<_ThirdwebResponse> _postThirdwebPayment({
   required String donorUserId,
   required String donorDisplayName,
 }) async {
-  final client = HttpClient();
+  final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
   try {
     final request = await client.postUrl(
       Uri.parse('$_thirdwebBaseUrl/v1/bridge/payments'),
@@ -117,7 +155,7 @@ Future<_ThirdwebResponse> _postThirdwebPayment({
       },
     }));
 
-    final response = await request.close();
+    final response = await request.close().timeout(const Duration(seconds: 15));
     final body = await utf8.decoder.bind(response).join();
     return _ThirdwebResponse(
       statusCode: response.statusCode,

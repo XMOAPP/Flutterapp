@@ -9,7 +9,7 @@ void showChatAttachmentSheet({
   required VoidCallback onAudio,
   required VoidCallback onDocuments,
   required VoidCallback onContacts,
-  required VoidCallback onSticker,
+  required bool showPoll,
   required VoidCallback onPoll,
 }) {
   showModalBottomSheet(
@@ -94,37 +94,29 @@ void showChatAttachmentSheet({
                 ),
               ],
             ),
-            const SizedBox(height: 14),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _AttachmentOptionSlot(
-                  child: AttachOption(
-                    icon: Icons.sticky_note_2,
-                    label: 'Sticker',
-                    color: Colors.white,
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      onSticker();
-                    },
+            if (showPoll) ...[
+              const SizedBox(height: 14),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _AttachmentOptionSlot(
+                    child: AttachOption(
+                      icon: Icons.poll,
+                      label: 'Poll',
+                      color: Colors.white,
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        onPoll();
+                      },
+                    ),
                   ),
-                ),
-                _AttachmentOptionSlot(
-                  child: AttachOption(
-                    icon: Icons.poll,
-                    label: 'Poll',
-                    color: Colors.white,
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      onPoll();
-                    },
-                  ),
-                ),
-                const _AttachmentOptionSlot(child: SizedBox.shrink()),
-                const _AttachmentOptionSlot(child: SizedBox.shrink()),
-                const _AttachmentOptionSlot(child: SizedBox.shrink()),
-              ],
-            ),
+                  const _AttachmentOptionSlot(child: SizedBox.shrink()),
+                  const _AttachmentOptionSlot(child: SizedBox.shrink()),
+                  const _AttachmentOptionSlot(child: SizedBox.shrink()),
+                  const _AttachmentOptionSlot(child: SizedBox.shrink()),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -139,9 +131,6 @@ class _AttachmentOptionSlot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 68,
-      child: Center(child: child),
-    );
+    return SizedBox(width: 68, child: Center(child: child));
   }
 }

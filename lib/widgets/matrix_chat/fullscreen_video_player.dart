@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -214,7 +215,11 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
       );
       await _initLoadedVideo();
     } catch (e) {
-      if (mounted) setState(() => _error = 'Failed to load video: $e');
+      if (mounted) {
+        setState(
+          () => _error = userFacingError(e, fallback: 'Failed to load video.'),
+        );
+      }
     }
   }
 
@@ -254,7 +259,7 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to save: $e'),
+          content: Text(safeUserFacingText('Failed to save: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -274,7 +279,7 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to share: $e'),
+          content: Text(safeUserFacingText('Failed to share: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -329,7 +334,7 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Video is still loading: $e'),
+              content: Text(safeUserFacingText('Video is still loading: $e')),
               backgroundColor: kDarkerGrey,
             ),
           );
@@ -526,7 +531,10 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
               return Padding(
                 padding: const EdgeInsets.all(24),
                 child: Text(
-                  'Failed to play video: ${snapshot.error}',
+                  userFacingError(
+                    snapshot.error,
+                    fallback: 'Failed to play video.',
+                  ),
                   textAlign: TextAlign.center,
                   style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
                 ),
@@ -560,7 +568,11 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  error ?? 'Failed to play video: ${snapshot.error}',
+                  error ??
+                      userFacingError(
+                        snapshot.error,
+                        fallback: 'Failed to play video.',
+                      ),
                   textAlign: TextAlign.center,
                   style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
                 ),
@@ -683,7 +695,7 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Could not open video: $e'),
+          content: Text(safeUserFacingText('Could not open video: $e')),
           backgroundColor: Colors.red,
         ),
       );

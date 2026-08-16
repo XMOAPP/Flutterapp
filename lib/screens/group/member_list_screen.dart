@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
@@ -49,8 +50,9 @@ class _MemberListScreenState extends State<MemberListScreen> {
         _filteredMembers = widget.members;
       } else {
         _filteredMembers = widget.members
-            .where((m) =>
-                m.displayName.toLowerCase().contains(query.toLowerCase()))
+            .where(
+              (m) => m.displayName.toLowerCase().contains(query.toLowerCase()),
+            )
             .toList();
       }
     });
@@ -206,7 +208,10 @@ class _MemberListScreenState extends State<MemberListScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(safeUserFacingText('Failed: $e')),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
@@ -257,7 +262,10 @@ class _MemberListScreenState extends State<MemberListScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(safeUserFacingText('Failed: $e')),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
@@ -305,7 +313,10 @@ class _MemberListScreenState extends State<MemberListScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(safeUserFacingText('Failed: $e')),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
@@ -365,7 +376,10 @@ class _MemberListScreenState extends State<MemberListScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(safeUserFacingText('Failed: $e')),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
@@ -389,7 +403,10 @@ class _MemberListScreenState extends State<MemberListScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(safeUserFacingText('Failed: $e')),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {

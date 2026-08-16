@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
@@ -105,7 +106,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(safeUserFacingText('Failed: $e')),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -177,7 +181,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(safeUserFacingText('Failed: $e')),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -222,7 +229,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(safeUserFacingText('Failed: $e')),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -236,7 +246,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Unable to start ${video ? 'video' : 'voice'} call: $e',
+            safeUserFacingText(
+              'Unable to start ${video ? 'video' : 'voice'} call: $e',
+            ),
           ),
           backgroundColor: Colors.red,
         ),
@@ -259,6 +271,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       title: 'Share contact with',
       actionLabel: 'Share',
       emptyLabel: 'No chats available',
+      previewLabel: displayName,
+      previewIcon: Icons.person_rounded,
     );
     if (!mounted || selectedRooms == null || selectedRooms.isEmpty) return;
 

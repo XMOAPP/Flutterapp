@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -20,7 +21,8 @@ import '../../widgets/story/story_avatar.dart';
 import '../home/matrix_room_tile.dart';
 import '../matrix_chat/media_handler.dart';
 import '../matrix_chat/widgets/tappable_file_chip.dart';
-import '../native_share_stub.dart' if (dart.library.io) '../native_share.dart'
+import '../native_share_stub.dart'
+    if (dart.library.io) '../native_share.dart'
     as native_share;
 import 'saved_chat_messages_screen.dart';
 
@@ -131,11 +133,13 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
             '$ownerUserId:${widget.room.id}:${DateTime.now().microsecondsSinceEpoch}';
         _mediaIndexOwnerUserId = ownerUserId;
         _mediaIndexRunId = runId;
-        unawaited(_continueHistoryIndexing(
-          ownerUserId: ownerUserId,
-          timeline: timeline,
-          runId: runId,
-        ));
+        unawaited(
+          _continueHistoryIndexing(
+            ownerUserId: ownerUserId,
+            timeline: timeline,
+            runId: runId,
+          ),
+        );
       }
     } catch (e) {
       debugPrint('[SharedMedia] Error loading media: $e');
@@ -289,7 +293,8 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
         Expanded(
           child: _loading
               ? const Center(
-                  child: CircularProgressIndicator(color: kLimeGreen))
+                  child: CircularProgressIndicator(color: kLimeGreen),
+                )
               : TabBarView(
                   controller: _tabController,
                   children: [
@@ -312,18 +317,11 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              Icons.chat_bubble_outline,
-              color: kMediumGrey,
-              size: 48,
-            ),
+            const Icon(Icons.chat_bubble_outline, color: kMediumGrey, size: 48),
             const SizedBox(height: 12),
             Text(
               'No chats yet',
-              style: GoogleFonts.inter(
-                color: kLightGrey,
-                fontSize: 14,
-              ),
+              style: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
             ),
           ],
         ),
@@ -340,10 +338,7 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
                     savedCount: _savedCountsByRoomId[room.id] ?? 0,
                     onTap: () => _openSavedSourceRoom(room),
                   )
-                : MatrixRoomTile(
-                    room: room,
-                    showUnreadBadge: false,
-                  ),
+                : MatrixRoomTile(room: room, showUnreadBadge: false),
           )
           .toList(),
     );
@@ -375,10 +370,7 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
             const SizedBox(height: 12),
             Text(
               'No media shared yet',
-              style: GoogleFonts.inter(
-                color: kLightGrey,
-                fontSize: 14,
-              ),
+              style: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
             ),
           ],
         ),
@@ -439,11 +431,7 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
                     color: Colors.black54,
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: const Icon(
-                    Icons.play_arrow,
-                    color: kWhite,
-                    size: 16,
-                  ),
+                  child: const Icon(Icons.play_arrow, color: kWhite, size: 16),
                 ),
               ),
           ],
@@ -458,18 +446,11 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              Icons.folder_outlined,
-              color: kMediumGrey,
-              size: 48,
-            ),
+            const Icon(Icons.folder_outlined, color: kMediumGrey, size: 48),
             const SizedBox(height: 12),
             Text(
               'No files shared yet',
-              style: GoogleFonts.inter(
-                color: kLightGrey,
-                fontSize: 14,
-              ),
+              style: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
             ),
           ],
         ),
@@ -489,18 +470,11 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              Icons.audiotrack,
-              color: kMediumGrey,
-              size: 48,
-            ),
+            const Icon(Icons.audiotrack, color: kMediumGrey, size: 48),
             const SizedBox(height: 12),
             Text(
               'No audio shared yet',
-              style: GoogleFonts.inter(
-                color: kLightGrey,
-                fontSize: 14,
-              ),
+              style: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
             ),
           ],
         ),
@@ -537,11 +511,7 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
             color: kLimeGreen.withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Icon(
-            attachmentType.icon,
-            color: kLimeGreen,
-            size: 20,
-          ),
+          child: Icon(attachmentType.icon, color: kLimeGreen, size: 20),
         ),
         title: Text(
           item.filename,
@@ -557,11 +527,8 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              '$sizeStr • ',
-              style: GoogleFonts.inter(
-                color: kLightGrey,
-                fontSize: 12,
-              ),
+              '$sizeStr â€¢ ',
+              style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
             ),
             Text(
               attachmentType.label,
@@ -584,18 +551,11 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              Icons.link,
-              color: kMediumGrey,
-              size: 48,
-            ),
+            const Icon(Icons.link, color: kMediumGrey, size: 48),
             const SizedBox(height: 12),
             Text(
               'No links shared yet',
-              style: GoogleFonts.inter(
-                color: kLightGrey,
-                fontSize: 14,
-              ),
+              style: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
             ),
           ],
         ),
@@ -688,7 +648,7 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to open: $e'),
+          content: Text(safeUserFacingText('Failed to open: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -750,7 +710,7 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Could not open file: $e'),
+          content: Text(safeUserFacingText('Could not open file: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -798,7 +758,8 @@ class _SharedMediaScreenState extends State<SharedMediaScreen>
   Future<void> _openLink(String url) async {
     final uri = _uriForLink(url);
     if (uri == null) return;
-    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication) ||
+    final opened =
+        await launchUrl(uri, mode: LaunchMode.externalApplication) ||
         await launchUrl(uri, mode: LaunchMode.platformDefault);
     if (!opened) {
       if (!mounted) return;
@@ -878,8 +839,9 @@ class _SavedSourceRoomTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final matrixService = MatrixService();
     final isDirect = matrixService.isDirectRoom(room);
-    final cleanedName =
-        MatrixService.cleanName(matrixService.getResolvedDisplayName(room));
+    final cleanedName = MatrixService.cleanName(
+      matrixService.getResolvedDisplayName(room),
+    );
     final label =
         '$savedCount saved ${savedCount == 1 ? 'message' : 'messages'}';
 
@@ -892,8 +854,8 @@ class _SavedSourceRoomTile extends StatelessWidget {
         fallbackIcon: !isDirect && room.isChannel
             ? Icons.campaign
             : !isDirect && room.isGroup
-                ? Icons.group
-                : null,
+            ? Icons.group
+            : null,
       ),
       title: Row(
         children: [
@@ -918,10 +880,7 @@ class _SavedSourceRoomTile extends StatelessWidget {
         label,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: GoogleFonts.inter(
-          color: kLightGrey,
-          fontSize: 13,
-        ),
+        style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
       ),
       onTap: onTap,
     );
@@ -1007,7 +966,7 @@ class _SharedAudioTileState extends State<_SharedAudioTile> {
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Could not play audio: $e'),
+          content: Text(safeUserFacingText('Could not play audio: $e')),
           backgroundColor: Colors.red,
         ),
       );

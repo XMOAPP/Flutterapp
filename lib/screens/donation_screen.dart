@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -49,13 +50,18 @@ class _DonationScreenState extends State<DonationScreen> {
       if (!mounted) return;
       final opened =
           await launchUrl(payment.link, mode: LaunchMode.externalApplication) ||
-              await launchUrl(payment.link, mode: LaunchMode.platformDefault);
+          await launchUrl(payment.link, mode: LaunchMode.platformDefault);
       if (!opened && mounted) {
         setState(() => _error = 'Could not open donation checkout.');
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString().replaceAll('Exception: ', ''));
+      setState(
+        () => _error = userFacingError(
+          e,
+          fallback: 'Could not start the donation. Please try again.',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -117,8 +123,9 @@ class _DonationScreenState extends State<DonationScreen> {
                 const SizedBox(height: 8),
                 TextField(
                   controller: _amountCtrl,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
                   ],
@@ -136,8 +143,10 @@ class _DonationScreenState extends State<DonationScreen> {
                       fontWeight: FontWeight.w600,
                     ),
                     hintText: '5.00',
-                    hintStyle:
-                        GoogleFonts.inter(color: kLightGrey, fontSize: 18),
+                    hintStyle: GoogleFonts.inter(
+                      color: kLightGrey,
+                      fontSize: 18,
+                    ),
                     filled: true,
                     fillColor: Colors.white.withValues(alpha: 0.14),
                     border: OutlineInputBorder(
@@ -153,7 +162,9 @@ class _DonationScreenState extends State<DonationScreen> {
                       borderSide: BorderSide.none,
                     ),
                     contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 18, vertical: 14),
+                      horizontal: 18,
+                      vertical: 14,
+                    ),
                   ),
                 ),
                 if (_error != null) ...[

@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
@@ -49,9 +50,11 @@ class _SubscriberListScreenState extends State<SubscriberListScreen> {
         _filteredSubscribers = widget.subscribers;
       } else {
         _filteredSubscribers = widget.subscribers
-            .where((sub) =>
-                sub.displayName.toLowerCase().contains(query.toLowerCase()) ||
-                sub.userId.toLowerCase().contains(query.toLowerCase()))
+            .where(
+              (sub) =>
+                  sub.displayName.toLowerCase().contains(query.toLowerCase()) ||
+                  sub.userId.toLowerCase().contains(query.toLowerCase()),
+            )
             .toList();
       }
     });
@@ -100,7 +103,7 @@ class _SubscriberListScreenState extends State<SubscriberListScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to ban: $e'),
+            content: Text(safeUserFacingText('Failed to ban: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -231,5 +234,4 @@ class _SubscriberListScreenState extends State<SubscriberListScreen> {
           : null,
     );
   }
-
 }

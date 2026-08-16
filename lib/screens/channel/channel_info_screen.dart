@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
@@ -6,6 +7,7 @@ import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/channel_service.dart';
 import '../../services/matrix_service.dart';
+import '../../services/room_capacity_policy.dart';
 import '../../services/report_service.dart';
 import '../../models/report_models.dart';
 import '../../models/channel_models.dart';
@@ -163,7 +165,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
 
           // Subscriber Count
           Text(
-            '$subscriberCount subscriber${subscriberCount == 1 ? '' : 's'}',
+            RoomCapacityPolicy.channelCountLabel(subscriberCount),
             style: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
           ),
         ],
@@ -298,7 +300,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to leave channel: $e'),
+          content: Text(safeUserFacingText('Failed to leave channel: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -321,7 +323,7 @@ class _ChannelInfoScreenState extends State<ChannelInfoScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to delete channel: $e'),
+          content: Text(safeUserFacingText('Failed to delete channel: $e')),
           backgroundColor: Colors.red,
         ),
       );

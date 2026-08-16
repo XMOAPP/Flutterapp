@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -8,9 +9,9 @@ import '../theme.dart';
 import '../widgets/story/story_avatar.dart';
 import 'matrix_chat_screen.dart';
 
-// ═══════════════════════════════════════════════════════════════════════════
+// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 // GLOBAL CHANNEL SEARCH SCREEN
-// ═══════════════════════════════════════════════════════════════════════════
+// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class ChannelSearchScreen extends StatefulWidget {
   final String initialQuery;
@@ -47,8 +48,10 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
 
   void _onChanged(String query) {
     _debounce?.cancel();
-    _debounce =
-        Timer(const Duration(milliseconds: 400), () => _search(query.trim()));
+    _debounce = Timer(
+      const Duration(milliseconds: 400),
+      () => _search(query.trim()),
+    );
   }
 
   Future<void> _search(String query) async {
@@ -74,7 +77,10 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
       if (!mounted || requestId != _searchRequestId) return;
       if (mounted) {
         setState(() {
-          _error = e.toString();
+          _error = userFacingError(
+            e,
+            fallback: 'Could not complete this action.',
+          );
           _searching = false;
         });
       }
@@ -87,10 +93,7 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
 
     final provider = context.read<MatrixProvider>();
     try {
-      await provider.service.isPublicRoomChannel(
-        roomId,
-        forceRefresh: true,
-      );
+      await provider.service.isPublicRoomChannel(roomId, forceRefresh: true);
       await provider.service.joinRoom(roomId);
       await Future.delayed(const Duration(milliseconds: 600));
       await provider.service.client.oneShotSync();
@@ -114,7 +117,9 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
       setState(() => _joiningRoomIds.remove(roomId));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text('Failed to join: $e'), backgroundColor: Colors.red),
+          content: Text(safeUserFacingText('Failed to join: $e')),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }
@@ -158,15 +163,18 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
           cursorColor: kLimeGreen,
           onChanged: _onChanged,
           decoration: InputDecoration(
-            hintText: 'Search public channels…',
+            hintText: 'Search public channelsÃ¢â‚¬Â¦',
             hintStyle: GoogleFonts.inter(color: Colors.white38, fontSize: 13),
             border: InputBorder.none,
             isDense: true,
             contentPadding: const EdgeInsets.symmetric(vertical: 8),
             suffixIcon: _searchCtrl.text.isNotEmpty
                 ? IconButton(
-                    icon: const Icon(Icons.clear,
-                        color: Colors.white38, size: 18),
+                    icon: const Icon(
+                      Icons.clear,
+                      color: Colors.white38,
+                      size: 18,
+                    ),
                     onPressed: () {
                       _searchCtrl.clear();
                       _search('');
@@ -188,8 +196,10 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text(_error!,
-              style: GoogleFonts.inter(color: Colors.red, fontSize: 13)),
+          child: Text(
+            _error!,
+            style: GoogleFonts.inter(color: Colors.red, fontSize: 13),
+          ),
         ),
       );
     }
@@ -229,8 +239,10 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
         final memberCount = room.numJoinedMembers;
 
         return ListTile(
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 6,
+          ),
           leading: StoryAvatar(
             userName: name,
             avatarUrl: room.avatarUrl?.toString(),
@@ -243,7 +255,10 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
                 child: Text(
                   name,
                   style: GoogleFonts.inter(
-                      color: kWhite, fontWeight: FontWeight.w600, fontSize: 14),
+                    color: kWhite,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -291,8 +306,11 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
               const SizedBox(height: 4),
               Row(
                 children: [
-                  const Icon(Icons.people_outline,
-                      color: kMediumGrey, size: 12),
+                  const Icon(
+                    Icons.people_outline,
+                    color: kMediumGrey,
+                    size: 12,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     '$memberCount member${memberCount == 1 ? '' : 's'}',
@@ -307,52 +325,67 @@ class _ChannelSearchScreenState extends State<ChannelSearchScreen> {
                   width: 22,
                   height: 22,
                   child: CircularProgressIndicator(
-                      color: kLimeGreen, strokeWidth: 2),
+                    color: kLimeGreen,
+                    strokeWidth: 2,
+                  ),
                 )
               : isJoined
-                  ? TextButton(
-                      onPressed: () {
-                        final provider = context.read<MatrixProvider>();
-                        final joined =
-                            provider.service.getJoinedRoomById(room.roomId);
-                        if (joined != null) {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => MatrixChatScreen(
-                                  room: joined, matrixProvider: provider),
-                            ),
-                          );
-                        }
-                      },
-                      style: TextButton.styleFrom(
-                        backgroundColor: kDarkGrey,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 4),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: Text('Open',
-                          style: GoogleFonts.inter(
-                              color: kLimeGreen,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600)),
-                    )
-                  : TextButton(
-                      onPressed: () => _joinRoom(room),
-                      style: TextButton.styleFrom(
-                        backgroundColor: kLimeGreen,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 4),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: Text('Join',
-                          style: GoogleFonts.inter(
-                              color: kBlack,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700)),
+              ? TextButton(
+                  onPressed: () {
+                    final provider = context.read<MatrixProvider>();
+                    final joined = provider.service.getJoinedRoomById(
+                      room.roomId,
+                    );
+                    if (joined != null) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => MatrixChatScreen(
+                            room: joined,
+                            matrixProvider: provider,
+                          ),
+                        ),
+                      );
+                    }
+                  },
+                  style: TextButton.styleFrom(
+                    backgroundColor: kDarkGrey,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 4,
                     ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    'Open',
+                    style: GoogleFonts.inter(
+                      color: kLimeGreen,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                )
+              : TextButton(
+                  onPressed: () => _joinRoom(room),
+                  style: TextButton.styleFrom(
+                    backgroundColor: kLimeGreen,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 4,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    'Join',
+                    style: GoogleFonts.inter(
+                      color: kBlack,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
           onTap: isJoined ? null : () => _joinRoom(room),
         );
       },

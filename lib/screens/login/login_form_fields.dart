@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../theme.dart';
+import '../../utils/xmo_username.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // REUSABLE FORM FIELD WIDGETS
@@ -29,9 +30,15 @@ class UsernameField extends StatelessWidget {
           controller: controller,
           hint: 'e.g. alice',
           collapseErrorText: externalError != null,
+          autocorrect: false,
+          textCapitalization: TextCapitalization.none,
+          inputFormatters: xmoUsernameInputFormatters(),
           onChanged: (_) => onChanged?.call(),
           validator: (v) {
             if (v == null || v.trim().isEmpty) return 'Required';
+            if (!isValidXmoUsername(v.trim())) {
+              return 'Use lowercase letters and numbers only';
+            }
             return externalError == null ? null : ' ';
           },
         ),
@@ -102,10 +109,11 @@ class _PhoneFieldState extends State<PhoneField> {
   void _hydrateFromParent() {
     final value = widget.controller.text.trim();
     if (value.isEmpty) return;
-    final matched = _phoneCountries
-        .where((country) => value.startsWith(country.dialCode))
-        .toList()
-      ..sort((a, b) => b.dialCode.length.compareTo(a.dialCode.length));
+    final matched =
+        _phoneCountries
+            .where((country) => value.startsWith(country.dialCode))
+            .toList()
+          ..sort((a, b) => b.dialCode.length.compareTo(a.dialCode.length));
     if (matched.isEmpty) return;
     _country = matched.first;
     _localCtrl.text = value.substring(_country.dialCode.length);
@@ -248,7 +256,8 @@ class _PasswordFieldState extends State<PasswordField> {
             ),
             onPressed: () => setState(() => _obscure = !_obscure),
           ),
-          validator: widget.validator ??
+          validator:
+              widget.validator ??
               (v) => (v == null || v.length < 6) ? 'Min 6 characters' : null,
         ),
       ],
@@ -317,12 +326,7 @@ class _FieldLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Text(
-        text.toUpperCase(),
-        style: _labelTextStyle,
-      ),
-    );
+    return Center(child: Text(text.toUpperCase(), style: _labelTextStyle));
   }
 }
 
@@ -332,6 +336,9 @@ class _CustomTextField extends StatelessWidget {
   final bool obscure;
   final Widget? suffixIcon;
   final TextInputType? keyboardType;
+  final List<TextInputFormatter>? inputFormatters;
+  final TextCapitalization textCapitalization;
+  final bool autocorrect;
   final ValueChanged<String>? onChanged;
   final bool collapseErrorText;
   final String? Function(String?)? validator;
@@ -342,6 +349,9 @@ class _CustomTextField extends StatelessWidget {
     this.obscure = false,
     this.suffixIcon,
     this.keyboardType,
+    this.inputFormatters,
+    this.textCapitalization = TextCapitalization.sentences,
+    this.autocorrect = true,
     this.onChanged,
     this.collapseErrorText = false,
     this.validator,
@@ -353,6 +363,9 @@ class _CustomTextField extends StatelessWidget {
       controller: controller,
       obscureText: obscure,
       keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      textCapitalization: textCapitalization,
+      autocorrect: autocorrect,
       cursorColor: kWhite,
       style: _inputTextStyle,
       onChanged: onChanged,
@@ -395,10 +408,7 @@ class _CountryCodePrefix extends StatelessWidget {
   final _PhoneCountry country;
   final VoidCallback onTap;
 
-  const _CountryCodePrefix({
-    required this.country,
-    required this.onTap,
-  });
+  const _CountryCodePrefix({required this.country, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -419,11 +429,7 @@ class _CountryCodePrefix extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 4),
-            const Icon(
-              Icons.keyboard_arrow_down,
-              color: kLightGrey,
-              size: 18,
-            ),
+            const Icon(Icons.keyboard_arrow_down, color: kLightGrey, size: 18),
             const SizedBox(width: 6),
             Container(
               width: 1,
@@ -599,15 +605,9 @@ final _labelTextStyle = GoogleFonts.inter(
   letterSpacing: 0.8,
 );
 
-final _inputTextStyle = GoogleFonts.inter(
-  color: kWhite,
-  fontSize: 14,
-);
+final _inputTextStyle = GoogleFonts.inter(color: kWhite, fontSize: 14);
 
-final _hintTextStyle = GoogleFonts.inter(
-  color: kLightGrey,
-  fontSize: 14,
-);
+final _hintTextStyle = GoogleFonts.inter(color: kLightGrey, fontSize: 14);
 
 InputDecoration _inputDecoration(
   String hint, {

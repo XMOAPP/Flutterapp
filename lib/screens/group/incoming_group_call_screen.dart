@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'dart:async';
 import 'dart:math';
 
@@ -14,10 +15,7 @@ import 'group_call_screen.dart';
 class IncomingGroupCallScreen extends StatefulWidget {
   final XmoGroupCall groupCall;
 
-  const IncomingGroupCallScreen({
-    super.key,
-    required this.groupCall,
-  });
+  const IncomingGroupCallScreen({super.key, required this.groupCall});
 
   @override
   State<IncomingGroupCallScreen> createState() =>
@@ -55,10 +53,7 @@ class _IncomingGroupCallScreenState extends State<IncomingGroupCallScreen> {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      await VoipService().answerIncomingGroupCall(
-        _call,
-        openCallScreen: false,
-      );
+      await VoipService().answerIncomingGroupCall(_call, openCallScreen: false);
       if (!mounted) return;
       _closing = true;
       await Navigator.pushReplacement(
@@ -69,7 +64,7 @@ class _IncomingGroupCallScreenState extends State<IncomingGroupCallScreen> {
         ),
       );
     } catch (e) {
-      _showError('Unable to join call: $e');
+      _showError(safeUserFacingText('Unable to join call: $e'));
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -82,7 +77,7 @@ class _IncomingGroupCallScreenState extends State<IncomingGroupCallScreen> {
       _closing = true;
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      _showError('Unable to decline call: $e');
+      _showError(safeUserFacingText('Unable to decline call: $e'));
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -90,10 +85,7 @@ class _IncomingGroupCallScreenState extends State<IncomingGroupCallScreen> {
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
     );
   }
 
@@ -263,8 +255,10 @@ class _SwipeGroupCallActionButtonState
         onVerticalDragUpdate: (details) {
           if (_completed || widget.disabled) return;
           setState(() {
-            _dragProgress =
-                (_dragProgress - details.delta.dy / _maxLift).clamp(0.0, 1.0);
+            _dragProgress = (_dragProgress - details.delta.dy / _maxLift).clamp(
+              0.0,
+              1.0,
+            );
           });
         },
         onVerticalDragEnd: (_) {

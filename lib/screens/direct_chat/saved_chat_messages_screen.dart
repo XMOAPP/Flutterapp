@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -72,8 +73,7 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
       final timeline = await widget.savedRoom.getTimeline();
       final events = timeline.events.where((event) {
         if (event.redacted) return false;
-        if (event.type != EventTypes.Message &&
-            event.type != EventTypes.Sticker) {
+        if (event.type != EventTypes.Message) {
           return false;
         }
         final forwarded = event.content['xmo.forwarded'];
@@ -91,7 +91,9 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
         setState(() => _loading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Could not load saved messages: $e'),
+            content: Text(
+              safeUserFacingText('Could not load saved messages: $e'),
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -398,6 +400,7 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
       context: context,
       rooms: matrixProvider.rooms,
       currentRoom: widget.savedRoom,
+      previewEvents: <Event>[event],
     );
     if (selectedRooms == null || selectedRooms.isEmpty) return;
 
@@ -425,7 +428,7 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to forward message: $e'),
+          content: Text(safeUserFacingText('Failed to forward message: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -449,7 +452,9 @@ class _SavedChatMessagesScreenState extends State<SavedChatMessagesScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to delete saved message: $e'),
+          content: Text(
+            safeUserFacingText('Failed to delete saved message: $e'),
+          ),
           backgroundColor: Colors.red,
         ),
       );

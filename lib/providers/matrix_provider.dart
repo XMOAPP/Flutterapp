@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'dart:typed_data';
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -72,9 +73,9 @@ extension RoomXmoExtension on Room {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // OPTIMIZED MATRIX PROVIDER
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 class MatrixProvider extends ChangeNotifier {
   MatrixProvider({MatrixService? service}) : _svc = service ?? MatrixService();
@@ -127,7 +128,30 @@ class MatrixProvider extends ChangeNotifier {
 
   List<Room> get rooms => _svc.getRooms();
 
-  // ─── Init ─────────────────────────────────────────────────────────────────
+  bool _canAuthenticate() {
+    if (_state != MatrixAuthState.uninitialized &&
+        _state != MatrixAuthState.error) {
+      return true;
+    }
+    if (_state == MatrixAuthState.error &&
+        _svc.clientReadyForAuthentication) {
+      debugPrint(
+        '[MatrixProvider] Recovering authentication after a non-fatal '
+        'Matrix startup failure.',
+      );
+      _state = MatrixAuthState.loggedOut;
+      _error = null;
+      notifyListeners();
+      return true;
+    }
+    _error ??= _state == MatrixAuthState.uninitialized
+        ? 'XMO is still starting. Please wait and try again.'
+        : 'XMO secure storage could not start. Restart the app and try again.';
+    notifyListeners();
+    return false;
+  }
+
+  // â”€â”€â”€ Init â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   Future<void> init({VoidCallback? beforeStartSync}) async {
     try {
@@ -147,16 +171,19 @@ class MatrixProvider extends ChangeNotifier {
         _svc.startSync();
         await PushNotificationService().registerCurrentUser();
       }
-    } catch (e) {
+    } catch (e, stack) {
+      debugPrint('[MatrixProvider] Matrix startup failed: $e');
+      debugPrintStack(stackTrace: stack);
       _state = MatrixAuthState.error;
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
     }
     notifyListeners();
   }
 
-  // ─── Phone-based login ─────────────────────────────────────────────────────
+  // â”€â”€â”€ Phone-based login â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   Future<bool> loginWithPhone(String phone, String email) async {
+    if (!_canAuthenticate()) return false;
     if (_state == MatrixAuthState.loggingIn) {
       return false; // Prevent duplicate calls
     }
@@ -187,9 +214,10 @@ class MatrixProvider extends ChangeNotifier {
     }
   }
 
-  // ─── Direct auth ───────────────────────────────────────────────────────────
+  // â”€â”€â”€ Direct auth â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   Future<bool> login(String username, String password) async {
+    if (!_canAuthenticate()) return false;
     if (_state == MatrixAuthState.loggingIn) return false;
 
     _state = MatrixAuthState.loggingIn;
@@ -219,6 +247,7 @@ class MatrixProvider extends ChangeNotifier {
   }
 
   Future<bool> loginWithSsoToken(String token) async {
+    if (!_canAuthenticate()) return false;
     if (_state == MatrixAuthState.loggingIn) return false;
 
     _state = MatrixAuthState.loggingIn;
@@ -247,7 +276,64 @@ class MatrixProvider extends ChangeNotifier {
     }
   }
 
+  Future<bool> loginWithWalletToken(String token) async {
+    if (!_canAuthenticate()) return false;
+    if (_state == MatrixAuthState.loggingIn) {
+      _error = 'Wallet sign-in is already in progress.';
+      notifyListeners();
+      return false;
+    }
+
+    _state = MatrixAuthState.loggingIn;
+    _error = null;
+    notifyListeners();
+
+    try {
+      await _svc.loginWithWalletToken(token);
+      _state = MatrixAuthState.loggedIn;
+      _listenSync();
+      _svc.startSync();
+      notifyListeners();
+      unawaited(_completeWalletLoginSetup());
+      return true;
+    } catch (e, stack) {
+      debugPrint('[MatrixProvider] Wallet Matrix login failed: $e');
+      debugPrintStack(stackTrace: stack);
+      _state = MatrixAuthState.loggedOut;
+      _error = _friendlyError(e.toString());
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<void> _completeWalletLoginSetup() async {
+    final steps = <(String, Future<void> Function())>[
+      ('call history', () => CallHistoryService().setCurrentUser(_svc.userId)),
+      (
+        'transfer queue',
+        () => TransferQueueService.instance.setCurrentUser(_svc.userId),
+      ),
+      ('story uploads', () => _setStoryUploadOwner(_svc.userId)),
+      ('profile', _svc.refreshProfile),
+      ('public directory', _syncPublicAccountDirectory),
+      ('saved messages', _ensureSavedMessagesReady),
+      ('push notifications', PushNotificationService().registerCurrentUser),
+    ];
+    for (final step in steps) {
+      try {
+        await step.$2();
+      } catch (error, stack) {
+        debugPrint(
+          '[MatrixProvider] Wallet post-login ${step.$1} setup failed: '
+          '$error',
+        );
+        debugPrintStack(stackTrace: stack);
+      }
+    }
+  }
+
   Future<bool> register(String username, String password) async {
+    if (!_canAuthenticate()) return false;
     if (_state == MatrixAuthState.loggingIn) return false;
 
     _state = MatrixAuthState.loggingIn;
@@ -290,7 +376,7 @@ class MatrixProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<bool> deleteAccount({String? password, bool erase = true}) async {
+  Future<bool> deleteAccount() async {
     if (_state != MatrixAuthState.loggedIn) return false;
 
     _error = null;
@@ -306,7 +392,7 @@ class MatrixProvider extends ChangeNotifier {
       _syncSubscription = null;
       _connectionWatchdog?.cancel();
       _connectionWatchdog = null;
-      await _svc.deactivateAccount(password: password, erase: erase);
+      await _svc.deactivateAccount();
       await CallHistoryService().setCurrentUser(null);
       await TransferQueueService.instance.setCurrentUser(null);
       await _discardStoryUploads();
@@ -321,6 +407,46 @@ class MatrixProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  Future<bool> clearLocalSessionAfterRemoteDeletion(
+    String? deletedUserId,
+  ) async {
+    final currentUserId = _svc.userId;
+    if (currentUserId == null || currentUserId.isEmpty) return false;
+    if (deletedUserId != null &&
+        deletedUserId.isNotEmpty &&
+        currentUserId.toLowerCase() != deletedUserId.toLowerCase()) {
+      return false;
+    }
+
+    try {
+      await PushNotificationService().unregisterCurrentUser();
+    } catch (_) {
+      // The remote account may already be gone, so local cleanup still wins.
+    }
+    await _syncSubscription?.cancel();
+    _syncSubscription = null;
+    _connectionWatchdog?.cancel();
+    _connectionWatchdog = null;
+    await _svc.clearLocalSessionAfterRemoteDeletion();
+    await CallHistoryService().setCurrentUser(null);
+    await TransferQueueService.instance.setCurrentUser(null);
+    await _discardStoryUploads();
+    await _setStoryUploadOwner(null);
+    _state = MatrixAuthState.loggedOut;
+    _connectionStatus = MatrixConnectionStatus.offline;
+    _lastSyncAt = null;
+    notifyListeners();
+    return true;
+  }
+
+  /// Clears cached account state after Synapse confirms the current token was
+  /// revoked, for example after an account-deletion job completed remotely.
+  Future<bool> clearLocalSessionIfServerInvalidated() async {
+    if (_state != MatrixAuthState.loggedIn) return false;
+    if (!await _svc.isCurrentSessionInvalidated()) return false;
+    return clearLocalSessionAfterRemoteDeletion(_svc.userId);
   }
 
   Future<bool> updateProfile({
@@ -363,7 +489,7 @@ class MatrixProvider extends ChangeNotifier {
       );
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       if (updateVersion == _profileUpdateVersion) {
         _clearOptimisticProfile();
         notifyListeners();
@@ -386,7 +512,7 @@ class MatrixProvider extends ChangeNotifier {
     }
   }
 
-  // ─── Rooms ────────────────────────────────────────────────────────────────
+  // â”€â”€â”€ Rooms â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   Future<void> _ensureSavedMessagesReady() async {
     try {
@@ -403,7 +529,7 @@ class MatrixProvider extends ChangeNotifier {
       notifyListeners();
       return id;
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       notifyListeners();
       return null;
     }
@@ -438,7 +564,7 @@ class MatrixProvider extends ChangeNotifier {
     try {
       return await _svc.searchUsers(query);
     } catch (e) {
-      _error = e.toString();
+      _error = userFacingError(e, fallback: 'Could not complete this action.');
       return [];
     }
   }
@@ -596,7 +722,7 @@ class MatrixProvider extends ChangeNotifier {
     return _friendlyError(error.toString());
   }
 
-  // ─── Private ──────────────────────────────────────────────────────────────
+  // â”€â”€â”€ Private â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   Future<void> _setStoryUploadOwner(String? userId) async {
     try {
@@ -671,17 +797,9 @@ class MatrixProvider extends ChangeNotifier {
   }
 
   String _friendlyError(String raw) {
-    if (raw.contains('M_FORBIDDEN') || raw.contains('forbidden')) {
-      return 'Invalid username/password. Please try again.';
-    }
-    if (raw.contains('M_USER_IN_USE')) {
-      return 'Username already taken.';
-    }
-    if (raw.contains('SocketException') ||
-        raw.contains('Connection refused') ||
-        raw.contains('Failed host lookup')) {
-      return 'Cannot reach server. Is the backend running?';
-    }
-    return raw.length > 100 ? '${raw.substring(0, 100)}…' : raw;
+    return userFacingError(
+      raw,
+      fallback: 'Could not complete this action. Please try again.',
+    );
   }
 }

@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
@@ -39,8 +40,9 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     try {
       final allMembers = await _groupService.getGroupMembers(widget.room.id);
       final admins = allMembers.where((m) => m.powerLevel >= 50).toList();
-      final regularMembers =
-          allMembers.where((m) => m.powerLevel < 50).toList();
+      final regularMembers = allMembers
+          .where((m) => m.powerLevel < 50)
+          .toList();
 
       if (mounted) {
         setState(() {
@@ -64,8 +66,10 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: kDarkerGrey,
-        title: Text('Promote ${member.displayName}',
-            style: GoogleFonts.inter(color: kWhite)),
+        title: Text(
+          'Promote ${member.displayName}',
+          style: GoogleFonts.inter(color: kWhite),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -101,8 +105,13 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     );
   }
 
-  Widget _buildRoleOption(BuildContext ctx, String title, String description,
-      int powerLevel, GroupMember member) {
+  Widget _buildRoleOption(
+    BuildContext ctx,
+    String title,
+    String description,
+    int powerLevel,
+    GroupMember member,
+  ) {
     return InkWell(
       onTap: () {
         Navigator.pop(ctx);
@@ -129,10 +138,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
             const SizedBox(height: 4),
             Text(
               description,
-              style: GoogleFonts.inter(
-                color: kLightGrey,
-                fontSize: 12,
-              ),
+              style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
             ),
           ],
         ),
@@ -159,7 +165,10 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
       );
 
       await _groupService.promoteToAdmin(
-          widget.room.id, member.userId, permissions);
+        widget.room.id,
+        member.userId,
+        permissions,
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -174,7 +183,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to promote: $e'),
+            content: Text(safeUserFacingText('Failed to promote: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -201,8 +210,10 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child:
-                Text('Demote', style: GoogleFonts.inter(color: Colors.orange)),
+            child: Text(
+              'Demote',
+              style: GoogleFonts.inter(color: Colors.orange),
+            ),
           ),
         ],
       ),
@@ -226,7 +237,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to demote: $e'),
+            content: Text(safeUserFacingText('Failed to demote: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -366,12 +377,16 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
           ? IconButton(
               icon: Icon(
                 Icons.remove_circle_outline,
-                color: GroupService.canManageAdmins(widget.room.ownPowerLevel.level)
+                color:
+                    GroupService.canManageAdmins(
+                      widget.room.ownPowerLevel.level,
+                    )
                     ? Colors.orange
                     : kLightGrey,
                 size: 20,
               ),
-              onPressed: GroupService.canManageAdmins(widget.room.ownPowerLevel.level)
+              onPressed:
+                  GroupService.canManageAdmins(widget.room.ownPowerLevel.level)
                   ? () => _demoteAdmin(admin)
                   : null,
               padding: EdgeInsets.zero,

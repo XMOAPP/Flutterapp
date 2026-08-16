@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
@@ -38,10 +39,12 @@ class _ChannelAdminPanelScreenState extends State<ChannelAdminPanelScreen> {
     setState(() => _loading = true);
     try {
       final admins = await _channelService.getAdmins(widget.room.id);
-      final allSubscribers =
-          await _channelService.getSubscribers(widget.room.id);
-      final regularSubscribers =
-          allSubscribers.where((s) => !s.isAdmin).toList();
+      final allSubscribers = await _channelService.getSubscribers(
+        widget.room.id,
+      );
+      final regularSubscribers = allSubscribers
+          .where((s) => !s.isAdmin)
+          .toList();
 
       if (mounted) {
         setState(() {
@@ -63,8 +66,10 @@ class _ChannelAdminPanelScreenState extends State<ChannelAdminPanelScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: kDarkerGrey,
-        title: Text('Promote ${subscriber.displayName}',
-            style: GoogleFonts.inter(color: kWhite)),
+        title: Text(
+          'Promote ${subscriber.displayName}',
+          style: GoogleFonts.inter(color: kWhite),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -74,10 +79,20 @@ class _ChannelAdminPanelScreenState extends State<ChannelAdminPanelScreen> {
               style: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
             ),
             const SizedBox(height: 16),
-            _buildRoleOption(ctx, 'Moderator', 'Can post and delete messages',
-                50, subscriber),
-            _buildRoleOption(ctx, 'Admin', 'Can manage channel and edit info',
-                75, subscriber),
+            _buildRoleOption(
+              ctx,
+              'Moderator',
+              'Can post and delete messages',
+              50,
+              subscriber,
+            ),
+            _buildRoleOption(
+              ctx,
+              'Admin',
+              'Can manage channel and edit info',
+              75,
+              subscriber,
+            ),
           ],
         ),
         actions: [
@@ -90,8 +105,13 @@ class _ChannelAdminPanelScreenState extends State<ChannelAdminPanelScreen> {
     );
   }
 
-  Widget _buildRoleOption(BuildContext ctx, String title, String description,
-      int powerLevel, ChannelSubscriber subscriber) {
+  Widget _buildRoleOption(
+    BuildContext ctx,
+    String title,
+    String description,
+    int powerLevel,
+    ChannelSubscriber subscriber,
+  ) {
     return InkWell(
       onTap: () {
         Navigator.pop(ctx);
@@ -118,10 +138,7 @@ class _ChannelAdminPanelScreenState extends State<ChannelAdminPanelScreen> {
             const SizedBox(height: 4),
             Text(
               description,
-              style: GoogleFonts.inter(
-                color: kLightGrey,
-                fontSize: 12,
-              ),
+              style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
             ),
           ],
         ),
@@ -130,11 +147,16 @@ class _ChannelAdminPanelScreenState extends State<ChannelAdminPanelScreen> {
   }
 
   Future<void> _promoteToLevel(
-      ChannelSubscriber subscriber, int powerLevel) async {
+    ChannelSubscriber subscriber,
+    int powerLevel,
+  ) async {
     try {
       final permissions = ChannelAdminPermissions.fromPowerLevel(powerLevel);
       await _channelService.promoteToAdmin(
-          widget.room.id, subscriber.userId, permissions);
+        widget.room.id,
+        subscriber.userId,
+        permissions,
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -149,7 +171,7 @@ class _ChannelAdminPanelScreenState extends State<ChannelAdminPanelScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to promote: $e'),
+            content: Text(safeUserFacingText('Failed to promote: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -174,8 +196,10 @@ class _ChannelAdminPanelScreenState extends State<ChannelAdminPanelScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child:
-                Text('Demote', style: GoogleFonts.inter(color: Colors.orange)),
+            child: Text(
+              'Demote',
+              style: GoogleFonts.inter(color: Colors.orange),
+            ),
           ),
         ],
       ),
@@ -199,7 +223,7 @@ class _ChannelAdminPanelScreenState extends State<ChannelAdminPanelScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to demote: $e'),
+            content: Text(safeUserFacingText('Failed to demote: $e')),
             backgroundColor: Colors.red,
           ),
         );
@@ -291,8 +315,9 @@ class _ChannelAdminPanelScreenState extends State<ChannelAdminPanelScreen> {
                       ),
                     )
                   else
-                    ..._subscribers
-                        .map((subscriber) => _buildSubscriberTile(subscriber)),
+                    ..._subscribers.map(
+                      (subscriber) => _buildSubscriberTile(subscriber),
+                    ),
 
                   const SizedBox(height: 80),
                 ],
@@ -342,8 +367,11 @@ class _ChannelAdminPanelScreenState extends State<ChannelAdminPanelScreen> {
       ),
       trailing: !isMe && !isOwner
           ? IconButton(
-              icon: const Icon(Icons.remove_circle_outline,
-                  color: Colors.orange, size: 20),
+              icon: const Icon(
+                Icons.remove_circle_outline,
+                color: Colors.orange,
+                size: 20,
+              ),
               onPressed: () => _demoteAdmin(admin),
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),

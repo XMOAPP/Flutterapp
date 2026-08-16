@@ -40,7 +40,7 @@ class DeviceSessionService {
     final keyMap = userId == null
         ? const <String, DeviceKeys>{}
         : _client.userDeviceKeys[userId]?.deviceKeys ??
-            const <String, DeviceKeys>{};
+              const <String, DeviceKeys>{};
 
     final sessions = devices
         .map(
@@ -59,32 +59,34 @@ class DeviceSessionService {
   }
 
   Future<void> rename(String deviceId, String displayName) async {
-    await _client.updateDevice(
-      deviceId,
-      displayName: displayName.trim(),
-    );
+    await _client.updateDevice(deviceId, displayName: displayName.trim());
   }
 
   Future<void> delete(
     String deviceId, {
+    AuthenticationData? auth,
     String? password,
     String? session,
   }) async {
     try {
       await _client.deleteDevice(
         deviceId,
-        auth: password == null
-            ? null
-            : AuthenticationPassword(
-                session: session,
-                password: password,
-                identifier: AuthenticationUserIdentifier(
-                  user: _client.userID!,
-                ),
-              ),
+        auth:
+            auth ??
+            (password == null
+                ? null
+                : AuthenticationPassword(
+                    session: session,
+                    password: password,
+                    identifier: AuthenticationUserIdentifier(
+                      user: _client.userID!,
+                    ),
+                  )),
       );
     } on MatrixException catch (error) {
-      if (error.requireAdditionalAuthentication && password == null) {
+      if (error.requireAdditionalAuthentication &&
+          password == null &&
+          auth == null) {
         throw DeviceReauthenticationRequired(error.session);
       }
       rethrow;
@@ -92,6 +94,7 @@ class DeviceSessionService {
   }
 
   Future<void> deleteAllOther({
+    AuthenticationData? auth,
     String? password,
     String? session,
   }) async {
@@ -104,18 +107,22 @@ class DeviceSessionService {
     try {
       await _client.deleteDevices(
         ids,
-        auth: password == null
-            ? null
-            : AuthenticationPassword(
-                session: session,
-                password: password,
-                identifier: AuthenticationUserIdentifier(
-                  user: _client.userID!,
-                ),
-              ),
+        auth:
+            auth ??
+            (password == null
+                ? null
+                : AuthenticationPassword(
+                    session: session,
+                    password: password,
+                    identifier: AuthenticationUserIdentifier(
+                      user: _client.userID!,
+                    ),
+                  )),
       );
     } on MatrixException catch (error) {
-      if (error.requireAdditionalAuthentication && password == null) {
+      if (error.requireAdditionalAuthentication &&
+          password == null &&
+          auth == null) {
         throw DeviceReauthenticationRequired(error.session);
       }
       rethrow;

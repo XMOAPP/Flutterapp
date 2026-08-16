@@ -22,6 +22,27 @@ class WalletAuthService {
     return base.replace(path: '${base.path}/$path');
   }
 
+  Future<WalletAccountLookup> lookupAccount({
+    required String address,
+    required String walletType,
+  }) async {
+    final body = await _post('account', {
+      'address': address,
+      'walletType': walletType,
+    });
+    return WalletAccountLookup(
+      exists: body['exists'] == true,
+      username: body['username']?.toString() ?? '',
+    );
+  }
+
+  Future<bool> isUsernameAvailable(String username) async {
+    final body = await _post('username-availability', {
+      'username': username,
+    });
+    return body['available'] == true;
+  }
+
   Future<WalletAuthChallenge> createChallenge({
     required String username,
     required String address,
@@ -66,6 +87,7 @@ class WalletAuthService {
     required String walletType,
     required String message,
     required String signature,
+    required String nonce,
   }) async {
     final client = _httpClient ?? http.Client();
     try {
@@ -80,6 +102,7 @@ class WalletAuthService {
               'walletType': walletType,
               'message': message,
               'signature': signature,
+              'nonce': nonce,
             }),
           )
           .timeout(const Duration(seconds: 15));
@@ -93,6 +116,33 @@ class WalletAuthService {
       debugPrint('[WalletAuthService] verifySignature failed: $e');
       if (e is WalletAuthException) rethrow;
       throw const WalletAuthException('Could not verify wallet signature.');
+    } finally {
+      if (_httpClient == null) client.close();
+    }
+  }
+
+  Future<Map<String, dynamic>> _post(
+    String path,
+    Map<String, dynamic> payload,
+  ) async {
+    final client = _httpClient ?? http.Client();
+    try {
+      final response = await client
+          .post(
+            _endpoint(path),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(payload),
+          )
+          .timeout(const Duration(seconds: 15));
+      final body = _decode(response.body);
+      if (response.statusCode != 200) {
+        throw WalletAuthException(_errorFrom(body));
+      }
+      return body;
+    } catch (e) {
+      debugPrint('[WalletAuthService] $path failed: $e');
+      if (e is WalletAuthException) rethrow;
+      throw const WalletAuthException('Wallet service is unavailable.');
     } finally {
       if (_httpClient == null) client.close();
     }
@@ -116,11 +166,15 @@ class WalletAuthChallenge {
     required this.message,
     required this.nonce,
     required this.expiresAt,
+    required this.mode,
+    required this.username,
   });
 
   final String message;
   final String nonce;
   final DateTime expiresAt;
+  final String mode;
+  final String username;
 
   factory WalletAuthChallenge.fromJson(Map<String, dynamic> json) {
     return WalletAuthChallenge(
@@ -128,6 +182,8 @@ class WalletAuthChallenge {
       nonce: json['nonce']?.toString() ?? '',
       expiresAt: DateTime.tryParse(json['expiresAt']?.toString() ?? '') ??
           DateTime.now().toUtc(),
+      mode: json['mode']?.toString() ?? 'login',
+      username: json['username']?.toString() ?? '',
     );
   }
 }
@@ -137,22 +193,29 @@ class WalletAuthVerification {
     required this.username,
     required this.address,
     required this.walletType,
-    required this.matrixPassword,
+    required this.matrixLoginToken,
   });
 
   final String username;
   final String address;
   final String walletType;
-  final String matrixPassword;
+  final String matrixLoginToken;
 
   factory WalletAuthVerification.fromJson(Map<String, dynamic> json) {
     return WalletAuthVerification(
       username: json['username']?.toString() ?? '',
       address: json['address']?.toString() ?? '',
       walletType: json['walletType']?.toString() ?? 'evm',
-      matrixPassword: json['matrixPassword']?.toString() ?? '',
+      matrixLoginToken: json['matrixLoginToken']?.toString() ?? '',
     );
   }
+}
+
+class WalletAccountLookup {
+  const WalletAccountLookup({required this.exists, required this.username});
+
+  final bool exists;
+  final String username;
 }
 
 class WalletAuthException implements Exception {

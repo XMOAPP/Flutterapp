@@ -9,7 +9,9 @@ import 'package:web3dart/web3dart.dart';
 
 class WalletAuthConfig {
   const WalletAuthConfig({
-    required this.secret,
+    required this.jwtSecret,
+    required this.jwtIssuer,
+    required this.jwtAudience,
     required this.domain,
     required this.uri,
     required this.statement,
@@ -17,7 +19,9 @@ class WalletAuthConfig {
 
   factory WalletAuthConfig.fromEnvironment(Map<String, String> env) {
     return WalletAuthConfig(
-      secret: env['XMO_WALLET_AUTH_SECRET'] ?? '',
+      jwtSecret: env['XMO_WALLET_JWT_SECRET'] ?? '',
+      jwtIssuer: env['XMO_WALLET_JWT_ISSUER'] ?? 'xmo-wallet-auth',
+      jwtAudience: env['XMO_WALLET_JWT_AUDIENCE'] ?? 'xmo-matrix',
       domain: env['XMO_WALLET_AUTH_DOMAIN'] ??
           'xmo-matrix.centralindia.cloudapp.azure.com',
       uri: env['XMO_WALLET_AUTH_URI'] ??
@@ -27,12 +31,17 @@ class WalletAuthConfig {
     );
   }
 
-  final String secret;
+  final String jwtSecret;
+  final String jwtIssuer;
+  final String jwtAudience;
   final String domain;
   final String uri;
   final String statement;
 
-  bool get isConfigured => secret.trim().length >= 32;
+  bool get isConfigured =>
+      jwtSecret.trim().length >= 32 &&
+      jwtIssuer.trim().isNotEmpty &&
+      jwtAudience.trim().isNotEmpty;
 }
 
 class WalletAuthService {
@@ -46,16 +55,8 @@ class WalletAuthService {
   final WalletAuthConfig config;
   final DateTime Function() _now;
   final Random _random;
-  final Map<String, WalletAuthChallenge> _challenges = {};
-
   static const challengeTtl = Duration(minutes: 5);
-
-  void removeChallengesForUsername(String username) {
-    final cleanUsername = normalizeUsername(username);
-    _challenges.removeWhere(
-      (_, challenge) => challenge.username == cleanUsername,
-    );
-  }
+  static const loginTokenTtl = Duration(seconds: 60);
 
   WalletAuthChallenge createChallenge({
     required String username,
@@ -88,7 +89,7 @@ class WalletAuthService {
       issuedAt: issuedAt,
       expiresAt: expiresAt,
     );
-    final challenge = WalletAuthChallenge(
+    return WalletAuthChallenge(
       username: cleanUsername,
       address: cleanAddress,
       mode: cleanMode,
@@ -98,12 +99,10 @@ class WalletAuthService {
       message: message,
       expiresAt: expiresAt,
     );
-    _challenges[nonce] = challenge;
-    _pruneExpired();
-    return challenge;
   }
 
-  Future<WalletAuthVerification> verify({
+  Future<void> verify({
+    required WalletAuthChallenge challenge,
     required String username,
     required String address,
     required String message,
@@ -120,18 +119,8 @@ class WalletAuthService {
     final cleanWalletType = normalizeWalletType(walletType);
     final cleanAddress = normalizeAddress(address, walletType: cleanWalletType);
     final cleanMode = mode == 'create' ? 'create' : 'login';
-    final nonce = _extractField(message, 'Nonce');
-    final challenge = _challenges[nonce];
-
-    if (challenge == null) {
-      throw const WalletAuthException('Wallet challenge expired. Try again.');
-    }
     if (_now().isAfter(challenge.expiresAt)) {
-      _challenges.remove(nonce);
       throw const WalletAuthException('Wallet challenge expired. Try again.');
-    }
-    if (challenge.used) {
-      throw const WalletAuthException('Wallet challenge was already used.');
     }
     if (challenge.username != cleanUsername ||
         challenge.address != cleanAddress ||
@@ -161,39 +150,42 @@ class WalletAuthService {
             'Wallet signature verification failed.');
       }
     }
-
-    challenge.used = true;
-    return WalletAuthVerification(
-      username: cleanUsername,
-      address: cleanAddress,
-      walletType: cleanWalletType,
-      matrixPassword: matrixPasswordFor(
-        cleanUsername,
-        cleanAddress,
-        walletType: cleanWalletType,
-      ),
-    );
   }
 
-  String matrixPasswordFor(
-    String username,
-    String address, {
-    String walletType = WalletAuthTypes.evm,
-  }) {
-    final hmac = Hmac(sha256, utf8.encode(config.secret));
-    final digest = hmac.convert(
-      utf8.encode(
-        'xmo-wallet-v1:${normalizeWalletType(walletType)}:${normalizeUsername(username)}:${normalizeAddress(address, walletType: walletType)}',
-      ),
-    );
-    return 'xmo_wallet_v1_${base64UrlEncode(digest.bytes)}';
+  String issueMatrixLoginToken(String username) {
+    if (!config.isConfigured) {
+      throw const WalletAuthException(
+        'Wallet authentication is not configured',
+      );
+    }
+    final now = _now();
+    final header = {'alg': 'HS256', 'typ': 'JWT'};
+    final claims = {
+      'sub': normalizeUsername(username),
+      'iss': config.jwtIssuer,
+      'aud': config.jwtAudience,
+      'iat': now.millisecondsSinceEpoch ~/ 1000,
+      'nbf': now.subtract(const Duration(seconds: 2)).millisecondsSinceEpoch ~/
+          1000,
+      'exp': now.add(loginTokenTtl).millisecondsSinceEpoch ~/ 1000,
+      'jti': _nonce(),
+    };
+    final encodedHeader = _base64UrlJson(header);
+    final encodedClaims = _base64UrlJson(claims);
+    final signingInput = '$encodedHeader.$encodedClaims';
+    final signature = Hmac(sha256, utf8.encode(config.jwtSecret))
+        .convert(utf8.encode(signingInput));
+    return '$signingInput.${base64UrlEncode(signature.bytes).replaceAll('=', '')}';
   }
+
+  String _base64UrlJson(Map<String, Object> value) =>
+      base64UrlEncode(utf8.encode(jsonEncode(value))).replaceAll('=', '');
 
   static String normalizeUsername(String value) {
-    final clean = value.trim();
-    if (!RegExp(r'^[a-zA-Z0-9_\-]{3,32}$').hasMatch(clean)) {
+    final clean = value.trim().toLowerCase();
+    if (!RegExp(r'^[a-z0-9]{3,32}$').hasMatch(clean)) {
       throw const WalletAuthException(
-        'Username must be 3-32 characters and use only letters, numbers, _ or -',
+        'Username must be 3-32 lowercase letters or numbers',
       );
     }
     return clean;
@@ -353,19 +345,6 @@ class WalletAuthService {
     return RegExp(r'^[0-9]+$').hasMatch(value) ? value : '1';
   }
 
-  String _extractField(String message, String field) {
-    final prefix = '$field: ';
-    for (final line in const LineSplitter().convert(message)) {
-      if (line.startsWith(prefix)) return line.substring(prefix.length).trim();
-    }
-    throw WalletAuthException('Missing wallet message field: $field');
-  }
-
-  void _pruneExpired() {
-    final now = _now();
-    _challenges.removeWhere((_, challenge) => now.isAfter(challenge.expiresAt));
-  }
-
   static Uint8List _padLeft(Uint8List bytes, int length) {
     if (bytes.length == length) return bytes;
     if (bytes.length > length) return bytes.sublist(bytes.length - length);
@@ -379,7 +358,7 @@ class WalletAuthTypes {
 }
 
 class WalletAuthChallenge {
-  WalletAuthChallenge({
+  const WalletAuthChallenge({
     required this.username,
     required this.address,
     required this.mode,
@@ -398,7 +377,6 @@ class WalletAuthChallenge {
   final String nonce;
   final String message;
   final DateTime expiresAt;
-  bool used = false;
 
   Map<String, dynamic> toJson() => {
         'success': true,
@@ -410,28 +388,6 @@ class WalletAuthChallenge {
         'nonce': nonce,
         'message': message,
         'expiresAt': expiresAt.toIso8601String(),
-      };
-}
-
-class WalletAuthVerification {
-  const WalletAuthVerification({
-    required this.username,
-    required this.address,
-    required this.walletType,
-    required this.matrixPassword,
-  });
-
-  final String username;
-  final String address;
-  final String walletType;
-  final String matrixPassword;
-
-  Map<String, dynamic> toJson() => {
-        'success': true,
-        'username': username,
-        'address': address,
-        'walletType': walletType,
-        'matrixPassword': matrixPassword,
       };
 }
 

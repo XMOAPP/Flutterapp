@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'dart:async';
 import 'dart:math';
 
@@ -14,10 +15,7 @@ import '../../widgets/story/story_avatar.dart';
 class DirectCallScreen extends StatefulWidget {
   final CallSession session;
 
-  const DirectCallScreen({
-    super.key,
-    required this.session,
-  });
+  const DirectCallScreen({super.key, required this.session});
 
   @override
   State<DirectCallScreen> createState() => _DirectCallScreenState();
@@ -29,11 +27,11 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
   bool _closingWithoutPip = false;
   bool _speakerOn = false;
 
-  // ── Call duration timer ────────────────────────────────────────────────────
+  // â”€â”€ Call duration timer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   Timer? _durationTimer;
   Duration _callDuration = Duration.zero;
 
-  // ── Draggable local video position ─────────────────────────────────────────
+  // â”€â”€ Draggable local video position â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   Offset _localVideoOffset = const Offset(16, 18);
 
   CallSession get _session => widget.session;
@@ -102,7 +100,7 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
     try {
       await _session.answer();
     } catch (e) {
-      _showError('Failed to answer call: $e');
+      _showError(safeUserFacingText('Failed to answer call: $e'));
     }
   }
 
@@ -112,7 +110,7 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
       _closingWithoutPip = true;
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      _showError('Failed to reject call: $e');
+      _showError(safeUserFacingText('Failed to reject call: $e'));
     }
   }
 
@@ -122,7 +120,7 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
       _closingWithoutPip = true;
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      _showError('Failed to end call: $e');
+      _showError(safeUserFacingText('Failed to end call: $e'));
     }
   }
 
@@ -240,7 +238,7 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
           child: Stack(
             children: [
               Positioned.fill(child: _buildCallBody(title)),
-              // ── Top controls ───────────────────────────────────────────────
+              // â”€â”€ Top controls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
               if (!_canAnswer)
                 Positioned(
                   top: 8,
@@ -250,7 +248,7 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
                     onTap: _minimizeToPopup,
                   ),
                 ),
-              // ── Controls ───────────────────────────────────────────────────
+              // â”€â”€ Controls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
               Positioned(
                 left: 16,
                 right: 16,
@@ -335,20 +333,25 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
         // Clamp local video within bounds
         const localW = 110.0;
         const localH = 155.0;
-        final clampedX =
-            _localVideoOffset.dx.clamp(0.0, constraints.maxWidth - localW);
-        final clampedY =
-            _localVideoOffset.dy.clamp(0.0, constraints.maxHeight - localH);
+        final clampedX = _localVideoOffset.dx.clamp(
+          0.0,
+          constraints.maxWidth - localW,
+        );
+        final clampedY = _localVideoOffset.dy.clamp(
+          0.0,
+          constraints.maxHeight - localH,
+        );
 
         return Stack(
           children: [
-            // ── Remote video (full area) ──────────────────────────────────
+            // â”€â”€ Remote video (full area) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             Positioned.fill(
               child: remoteRenderer != null
                   ? webrtc.RTCVideoView(
                       remoteRenderer,
                       objectFit: webrtc
-                          .RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                          .RTCVideoViewObjectFit
+                          .RTCVideoViewObjectFitCover,
                     )
                   : _buildVoiceArea(
                       MatrixService().getResolvedDisplayName(_session.room),
@@ -356,7 +359,7 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
                     ),
             ),
 
-            // ── Draggable local video ─────────────────────────────────────
+            // â”€â”€ Draggable local video â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             if (localRenderer != null && !_session.isLocalVideoMuted)
               Positioned(
                 left: clampedX,
@@ -386,7 +389,8 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
                             child: webrtc.RTCVideoView(
                               localRenderer,
                               mirror: true,
-                              objectFit: webrtc.RTCVideoViewObjectFit
+                              objectFit: webrtc
+                                  .RTCVideoViewObjectFit
                                   .RTCVideoViewObjectFitCover,
                             ),
                           ),
@@ -404,16 +408,12 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
 
   Widget _buildVoiceArea(String title, String? avatarUrl) {
     return Center(
-      child: StoryAvatar(
-        userName: title,
-        avatarUrl: avatarUrl,
-        size: 132,
-      ),
+      child: StoryAvatar(userName: title, avatarUrl: avatarUrl, size: 132),
     );
   }
 
   Widget _buildControls() {
-    // ── Incoming ringing: swipe to answer + decline ──────────────────────────
+    // â”€â”€ Incoming ringing: swipe to answer + decline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (_canAnswer) {
       return Row(
         textDirection: TextDirection.ltr,
@@ -445,7 +445,7 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
       );
     }
 
-    // ── Active call controls ────────────────────────────────────────────────
+    // â”€â”€ Active call controls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     final inactiveControlColor = _isVideoCall
         ? kBlack.withValues(alpha: 0.55)
         : kWhite.withValues(alpha: 0.10);
@@ -523,9 +523,9 @@ class _DirectCallScreenState extends State<DirectCallScreen> {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // SWIPE TO ANSWER SLIDER
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 class _SwipeCallActionButton extends StatefulWidget {
   final IconData icon;
@@ -594,8 +594,10 @@ class _SwipeCallActionButtonState extends State<_SwipeCallActionButton>
       onVerticalDragUpdate: (details) {
         if (_completed) return;
         setState(() {
-          _dragProgress =
-              (_dragProgress - details.delta.dy / _maxLift).clamp(0.0, 1.0);
+          _dragProgress = (_dragProgress - details.delta.dy / _maxLift).clamp(
+            0.0,
+            1.0,
+          );
         });
       },
       onVerticalDragEnd: (_) {
@@ -736,8 +738,9 @@ class _SwipeToAnswerSliderState extends State<_SwipeToAnswerSlider>
         return Container(
           height: _thumbSize + _trackPadding * 2,
           decoration: BoxDecoration(
-            borderRadius:
-                BorderRadius.circular((_thumbSize + _trackPadding * 2) / 2),
+            borderRadius: BorderRadius.circular(
+              (_thumbSize + _trackPadding * 2) / 2,
+            ),
             gradient: const LinearGradient(
               colors: [Color(0xFF0A0A0A), Color(0xFF1A1A1A), Color(0xFF0D0D0D)],
               begin: Alignment.centerLeft,
@@ -750,7 +753,7 @@ class _SwipeToAnswerSliderState extends State<_SwipeToAnswerSlider>
           ),
           child: Stack(
             children: [
-              // ── Animated hint arrows ────────────────────────────────────
+              // â”€â”€ Animated hint arrows â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
               if (!_answered)
                 Positioned.fill(
                   child: AnimatedBuilder(
@@ -766,7 +769,7 @@ class _SwipeToAnswerSliderState extends State<_SwipeToAnswerSlider>
                   ),
                 ),
 
-              // ── Hint text ──────────────────────────────────────────────
+              // â”€â”€ Hint text â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
               if (!_answered)
                 Center(
                   child: Padding(
@@ -787,7 +790,7 @@ class _SwipeToAnswerSliderState extends State<_SwipeToAnswerSlider>
                   ),
                 ),
 
-              // ── Green trail ────────────────────────────────────────────
+              // â”€â”€ Green trail â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
               Positioned(
                 left: _trackPadding,
                 top: _trackPadding,
@@ -799,15 +802,17 @@ class _SwipeToAnswerSliderState extends State<_SwipeToAnswerSlider>
                   height: _thumbSize,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(_thumbSize / 2),
-                    gradient: LinearGradient(colors: [
-                      const Color(0xFF22C55E).withValues(alpha: 0.20),
-                      const Color(0xFF22C55E).withValues(alpha: 0.05),
-                    ]),
+                    gradient: LinearGradient(
+                      colors: [
+                        const Color(0xFF22C55E).withValues(alpha: 0.20),
+                        const Color(0xFF22C55E).withValues(alpha: 0.05),
+                      ],
+                    ),
                   ),
                 ),
               ),
 
-              // ── Draggable thumb ────────────────────────────────────────
+              // â”€â”€ Draggable thumb â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
               Positioned(
                 left: _trackPadding + thumbOffset,
                 top: _trackPadding,
@@ -816,8 +821,10 @@ class _SwipeToAnswerSliderState extends State<_SwipeToAnswerSlider>
                     if (_answered) return;
                     setState(() {
                       _dragProgress =
-                          (_dragProgress + details.delta.dx / maxDrag)
-                              .clamp(0.0, 1.0);
+                          (_dragProgress + details.delta.dx / maxDrag).clamp(
+                            0.0,
+                            1.0,
+                          );
                     });
                   },
                   onHorizontalDragEnd: (_) {
@@ -851,8 +858,9 @@ class _SwipeToAnswerSliderState extends State<_SwipeToAnswerSlider>
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color:
-                              const Color(0xFF22C55E).withValues(alpha: 0.35),
+                          color: const Color(
+                            0xFF22C55E,
+                          ).withValues(alpha: 0.35),
                           blurRadius: 14,
                           spreadRadius: 1,
                         ),
@@ -876,9 +884,9 @@ class _SwipeToAnswerSliderState extends State<_SwipeToAnswerSlider>
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // ANIMATED ARROW HINTS
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 // ignore: unused_element
 class _ArrowHintPainter extends CustomPainter {
@@ -922,9 +930,9 @@ class _ArrowHintPainter extends CustomPainter {
       old.progress != progress || old.dragProgress != dragProgress;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // CALL BUTTON
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 class _CallButton extends StatelessWidget {
   final IconData icon;

@@ -1,3 +1,4 @@
+import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:matrix/matrix.dart';
@@ -6,6 +7,7 @@ import '../../theme.dart';
 import '../../providers/matrix_provider.dart';
 import '../../services/group_service.dart';
 import '../../services/matrix_service.dart';
+import '../../services/room_capacity_policy.dart';
 import '../../services/voip_service.dart';
 import '../../services/report_service.dart';
 import '../../models/report_models.dart';
@@ -180,7 +182,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
 
           // Member Count
           Text(
-            '$memberCount members',
+            RoomCapacityPolicy.groupCountLabel(memberCount),
             style: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
           ),
         ],
@@ -293,7 +295,9 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Unable to start ${video ? 'video' : 'voice'} call: $e',
+            safeUserFacingText(
+              'Unable to start ${video ? 'video' : 'voice'} call: $e',
+            ),
           ),
           backgroundColor: Colors.red,
         ),
@@ -320,7 +324,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Unable to update mute: $e'),
+          content: Text(safeUserFacingText('Unable to update mute: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -352,7 +356,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to leave group: $e'),
+          content: Text(safeUserFacingText('Failed to leave group: $e')),
           backgroundColor: Colors.red,
         ),
       );
@@ -375,7 +379,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to delete group: $e'),
+          content: Text(safeUserFacingText('Failed to delete group: $e')),
           backgroundColor: Colors.red,
         ),
       );

@@ -22,6 +22,10 @@
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:usesCleartextTraffic="false">
+        <!-- XMO owns deep-link dispatch through WalletDeepLinkHandler. -->
+        <meta-data
+            android:name="flutter_deeplinking_enabled"
+            android:value="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -63,6 +67,12 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="xmo" android:host="join"/>
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="xmo" android:host="account" android:path="/deleted"/>
+            </intent-filter>
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
@@ -89,6 +99,24 @@
                     android:scheme="https"
                     android:host="xmo.dpdns.org"
                     android:pathPrefix="/auth/callback"/>
+            </intent-filter>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data
+                    android:scheme="https"
+                    android:host="xmo.dpdns.org"
+                    android:pathPrefix="/wallet"/>
+            </intent-filter>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data
+                    android:scheme="https"
+                    android:host="xmo.dpdns.org"
+                    android:pathPrefix="/account/deleted"/>
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.

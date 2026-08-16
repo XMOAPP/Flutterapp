@@ -1,6 +1,25 @@
 part of xmo_auth_server;
 
 const _accountDeletionTtl = Duration(minutes: 10);
+final _activeAccountDeletionJobs = <String, Future<void>>{};
+final _retryingAccountDeletionJobs = <String>{};
+
+Uri _accountDeletionCompletionUri(String userId) {
+  const fallback = 'https://xmo.dpdns.org/account/deleted';
+  final configured = Platform.environment['XMO_ACCOUNT_DELETION_COMPLETION_URL'];
+  final candidate = Uri.tryParse(
+    configured == null || configured.trim().isEmpty ? fallback : configured,
+  );
+  final base = candidate != null &&
+          candidate.scheme == 'https' &&
+          candidate.host.toLowerCase() == 'xmo.dpdns.org' &&
+          candidate.path == '/account/deleted'
+      ? candidate
+      : Uri.parse(fallback);
+  return base.replace(
+    queryParameters: {'xmo_action': 'account_deleted', 'user_id': userId},
+  );
+}
 
 Future<void> _deleteXmoAccountData(HttpRequest request) async {
   final token = _userDirectoryBearerToken(request);
@@ -13,9 +32,7 @@ Future<void> _deleteXmoAccountData(HttpRequest request) async {
   }
 
   final userId = await _userDirectoryWhoami(token);
-  await _deleteSynapseUserMedia(userId);
-  await _purgeXmoAccountRecords(userId);
-  await _json(request, HttpStatus.ok, {'success': true});
+  await _acceptAccountDeletion(request, userId);
 }
 
 Future<void> _requestExternalAccountDeletion(HttpRequest request) async {
@@ -141,11 +158,128 @@ Future<void> _confirmExternalAccountDeletion(HttpRequest request) async {
   }
 
   final userId = _matrixUserId(username);
-  await _deactivateSynapseAccount(userId);
-  await _deleteSynapseUserMedia(userId);
-  await _purgeXmoAccountRecords(userId);
   _accountDeletionStore.remove(key);
-  await _json(request, HttpStatus.ok, {'success': true});
+  await _acceptAccountDeletion(request, userId);
+}
+
+Future<void> _acceptAccountDeletion(
+  HttpRequest request,
+  String userId,
+) async {
+  if (!_passwordResetConfig.isConfigured || !_authentikConfig.isConfigured) {
+    await _json(request, HttpStatus.serviceUnavailable, {
+      'success': false,
+      'error': 'Account deletion is temporarily unavailable',
+    });
+    return;
+  }
+  final normalized = _userDirectoryNormalizeUserId(userId);
+  if (normalized == null) {
+    throw const _BadRequestException('Invalid XMO account ID');
+  }
+  final username = _userDirectoryLocalpartFromUserId(normalized);
+  final job = _accountDeletionJobs.begin(
+    userId: normalized,
+    username: username,
+  );
+  if (!job.isComplete) {
+    _scheduleAccountDeletionRetry(normalized, initialDelay: Duration.zero);
+  }
+  await _json(
+    request,
+    job.isComplete ? HttpStatus.ok : HttpStatus.accepted,
+    {
+      'success': true,
+      'status': job.isComplete ? 'complete' : 'processing',
+      'user_id': normalized,
+      'return_url': _accountDeletionCompletionUri(normalized).toString(),
+      if (!job.isComplete)
+        'message': 'Account deletion was accepted and is processing.',
+    },
+  );
+}
+
+Future<void> _runAccountDeletionJob(String userId) {
+  final active = _activeAccountDeletionJobs[userId];
+  if (active != null) return active;
+
+  late final Future<void> tracked;
+  tracked = _performAccountDeletionJob(userId).whenComplete(() {
+    if (identical(_activeAccountDeletionJobs[userId], tracked)) {
+      _activeAccountDeletionJobs.remove(userId);
+    }
+  });
+  _activeAccountDeletionJobs[userId] = tracked;
+  return tracked;
+}
+
+Future<void> _performAccountDeletionJob(String userId) async {
+  var job = _accountDeletionJobs.get(userId);
+  if (job == null || job.isComplete) return;
+
+  if (job.phase.index < AccountDeletionPhase.mediaDeleted.index) {
+    await _deleteSynapseUserMedia(job.userId);
+    job = _accountDeletionJobs.advance(
+      job.userId,
+      AccountDeletionPhase.mediaDeleted,
+    );
+  }
+  if (job.phase.index < AccountDeletionPhase.synapseDeactivated.index) {
+    await _deactivateSynapseAccount(job.userId);
+    job = _accountDeletionJobs.advance(
+      job.userId,
+      AccountDeletionPhase.synapseDeactivated,
+    );
+  }
+  if (job.phase.index < AccountDeletionPhase.authentikDeleted.index) {
+    await _authentikDeleteAccount(job.username);
+    job = _accountDeletionJobs.advance(
+      job.userId,
+      AccountDeletionPhase.authentikDeleted,
+    );
+  }
+  if (job.phase.index < AccountDeletionPhase.recordsPurged.index) {
+    await _purgeXmoAccountRecords(job.userId);
+    job = _accountDeletionJobs.advance(
+      job.userId,
+      AccountDeletionPhase.recordsPurged,
+    );
+  }
+  _accountDeletionJobs.advance(job.userId, AccountDeletionPhase.complete);
+  logInfo('account_deletion_completed', {'userId': job.userId});
+}
+
+void _resumePendingAccountDeletionJobs() {
+  for (final job in _accountDeletionJobs.pending) {
+    _scheduleAccountDeletionRetry(job.userId, initialDelay: Duration.zero);
+  }
+}
+
+void _scheduleAccountDeletionRetry(
+  String userId, {
+  Duration initialDelay = const Duration(seconds: 2),
+}) {
+  if (!_retryingAccountDeletionJobs.add(userId)) return;
+  unawaited(() async {
+    var delay = initialDelay;
+    try {
+      while (_accountDeletionJobs.get(userId)?.isComplete == false) {
+        if (delay > Duration.zero) await Future<void>.delayed(delay);
+        try {
+          await _runAccountDeletionJob(userId);
+        } catch (error, st) {
+          _accountDeletionJobs.recordFailure(userId, error);
+          _logger.error('account_deletion_retry_failed', error, st);
+          final nextSeconds =
+              (delay.inSeconds <= 0 ? 5 : (delay.inSeconds * 2).clamp(5, 300))
+                  .toInt();
+          delay = Duration(seconds: nextSeconds);
+        }
+      }
+    } finally {
+      _retryingAccountDeletionJobs.remove(userId);
+    }
+  }());
 }
 
 Future<void> _deleteSynapseUserMedia(String userId) async {
@@ -189,11 +323,6 @@ Future<void> _purgeXmoAccountRecords(String userId) async {
     throw const _BadRequestException('Invalid XMO account ID');
   }
   final localpart = _userDirectoryLocalpartFromUserId(normalized);
-  try {
-    await _authentikDeactivateUser(localpart);
-  } catch (error, st) {
-    _logger.error('authentik_user_deactivation_failed', error, st);
-  }
 
   final directory = await _readUserDirectoryEntries();
   directory.remove(localpart);
@@ -210,7 +339,9 @@ Future<void> _purgeXmoAccountRecords(String userId) async {
     (key, _) => key.startsWith('$localpart|'),
   );
   if (email != null) _otpStore.remove(email);
-  _walletAuthService.removeChallengesForUsername(localpart);
+  if (_walletAccountStoreReady) {
+    await _walletAccountStore.removeUsername(localpart);
+  }
 
   await _withReportStore((reports) {
     reports.removeWhere((_, report) =>
@@ -239,18 +370,18 @@ Future<void> _serveAccountDeletionPage(HttpRequest request) async {
 const _accountDeletionHtml = r'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Delete XMO account</title><style>
-body{margin:0;background:#080d11;color:#f7f7f7;font:16px Arial,sans-serif}main{max-width:560px;margin:0 auto;padding:48px 22px}h1{font-size:28px}p,li{color:#aeb4ba;line-height:1.55}.panel{background:#12181e;padding:22px;border-radius:8px;margin:22px 0}label{display:block;margin:16px 0 7px}input{box-sizing:border-box;width:100%;padding:13px 15px;border:1px solid #555;border-radius:8px;background:#29292c;color:#fff;font-size:16px}button{margin-top:20px;padding:13px 20px;border:0;border-radius:8px;background:#fff;color:#080d11;font-weight:700;cursor:pointer}button:disabled{opacity:.5}#confirm{display:none}.status{margin-top:16px;color:#aeb4ba}.danger{color:#ff8585}a{color:#9bea38}
+body{margin:0;background:#080d11;color:#f7f7f7;font:16px Arial,sans-serif}main{max-width:560px;margin:0 auto;padding:48px 22px}h1{font-size:28px}p,li{color:#aeb4ba;line-height:1.55}.panel{background:#12181e;padding:22px;border-radius:8px;margin:22px 0}label{display:block;margin:16px 0 7px}input{box-sizing:border-box;width:100%;padding:13px 15px;border:1px solid #555;border-radius:8px;background:#29292c;color:#fff;font-size:16px}button,.button{display:inline-block;margin-top:20px;padding:13px 20px;border:0;border-radius:8px;background:#fff;color:#080d11;font-weight:700;cursor:pointer;text-decoration:none}button:disabled{opacity:.5}#confirm,#return{display:none}.status{margin-top:16px;color:#aeb4ba}.danger{color:#ff8585}a{color:#9bea38}
 </style></head><body><main><h1>Delete your XMO account</h1>
 <p>This page lets you request account deletion without reinstalling XMO.</p>
-<div class="panel"><strong>Deletion removes:</strong><ul><li>Your XMO login, devices, security keys, notifications, profile and room memberships where the service can erase them.</li><li>Your XMO public-directory, password-recovery and report records.</li></ul>
+<div class="panel"><strong>Deletion removes:</strong><ul><li>Your secure sign-in identity, Matrix account, active sessions, devices, security keys and profile.</li><li>Your XMO public-directory, recovery, report, invite and analytics records.</li></ul>
 <p class="danger">Messages or media already delivered to other users, devices, or connected servers may remain. Uploaded media may remain under server retention rules.</p></div>
 <section id="request"><label for="username">XMO username</label><input id="username" placeholder="@username" autocomplete="username"><label for="email">Verified email</label><input id="email" type="email" placeholder="you@example.com" autocomplete="email"><button id="send">Send deletion code</button></section>
 <section id="confirm"><label for="otp">6-digit deletion code</label><input id="otp" inputmode="numeric" maxlength="6" placeholder="000000"><button id="delete">Permanently delete account</button></section>
-<div id="status" class="status" aria-live="polite"></div><p>Need help? <a href="mailto:support@xmo.dpdns.org">support@xmo.dpdns.org</a></p>
+<div id="status" class="status" aria-live="polite"></div><p id="return"><a id="returnLink" class="button" href="#">Return to XMO</a></p><p>Need help? <a href="mailto:support@xmo.dpdns.org">support@xmo.dpdns.org</a></p>
 <script>
 const $=id=>document.getElementById(id),status=$('status');async function post(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await r.json();if(!r.ok||data.success===false)throw new Error(data.error||'Request failed');return data}
 $('send').onclick=async()=>{status.textContent='Sending...';$('send').disabled=true;try{const data=await post('/account-deletion/request',{username:$('username').value,email:$('email').value});status.textContent=data.message;$('confirm').style.display='block'}catch(e){status.textContent=e.message}finally{$('send').disabled=false}};
-$('delete').onclick=async()=>{if(!confirm('Permanently delete this XMO account? This cannot be undone.'))return;status.textContent='Deleting...';$('delete').disabled=true;try{await post('/account-deletion/confirm',{username:$('username').value,email:$('email').value,otp:$('otp').value});status.textContent='Your XMO account has been deleted.';$('request').style.display='none';$('confirm').style.display='none'}catch(e){status.textContent=e.message;$('delete').disabled=false}};
+$('delete').onclick=async()=>{if(!confirm('Permanently delete this XMO account? This cannot be undone.'))return;status.textContent='Deleting...';$('delete').disabled=true;try{const data=await post('/account-deletion/confirm',{username:$('username').value,email:$('email').value,otp:$('otp').value});status.textContent=data.status==='processing'?'Deletion is processing. Returning to XMO...':'Your XMO account has been deleted. Returning to XMO...';if(data.return_url){$('returnLink').href=data.return_url;$('return').style.display='block';if(/Android/i.test(navigator.userAgent)){setTimeout(()=>{location.href=data.return_url},700)}}$('request').style.display='none';$('confirm').style.display='none'}catch(e){status.textContent=e.message;$('delete').disabled=false}};
 </script></main></body></html>''';
 
 class _AccountDeletionRecord {

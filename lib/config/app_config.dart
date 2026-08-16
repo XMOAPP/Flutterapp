@@ -64,6 +64,11 @@ class AppConfig {
     defaultValue: 'https://auth.xmo.dpdns.org/if/flow/xmo-totp-setup/',
   );
 
+  static const secureAccountRecoveryUrl = String.fromEnvironment(
+    'XMO_SECURE_ACCOUNT_RECOVERY_URL',
+    defaultValue: 'https://auth.xmo.dpdns.org/if/flow/default-recovery-flow/',
+  );
+
   static const walletAuthServerUrl = String.fromEnvironment(
     'XMO_WALLET_AUTH_SERVER_URL',
     defaultValue:
@@ -92,6 +97,14 @@ class AppConfig {
     defaultValue: false,
   );
 
+  /// Makes Authentik the credential authority and prevents the app from
+  /// submitting passwords directly to Synapse. Enable only after the backend
+  /// registration transaction and Synapse OIDC provider are deployed.
+  static const oidcOnlyAuthentication = bool.fromEnvironment(
+    'XMO_OIDC_ONLY_AUTHENTICATION',
+    defaultValue: false,
+  );
+
   /// The Synapse OIDC provider identifier, for example `authentik`.
   static const ssoIdpId = String.fromEnvironment(
     'XMO_SSO_IDP_ID',
@@ -102,6 +115,14 @@ class AppConfig {
   static const ssoCallbackUrl = String.fromEnvironment(
     'XMO_SSO_CALLBACK_URL',
     defaultValue: 'https://xmo.dpdns.org/auth/callback',
+  );
+
+  /// Verified Android App Link used after an account deletion completes in the
+  /// public web page. It is deliberately separate from the OIDC callback so a
+  /// deletion notification can never be treated as a login response.
+  static const accountDeletionCompletionUrl = String.fromEnvironment(
+    'XMO_ACCOUNT_DELETION_COMPLETION_URL',
+    defaultValue: 'https://xmo.dpdns.org/account/deleted',
   );
 
   /// Temporary rollback switch for pre-App-Link deployments only.
@@ -196,6 +217,7 @@ class AppConfig {
       'XMO_PUBLIC_WEBSITE_URL': publicWebsiteUrl,
       'XMO_SECURE_ACCOUNT_URL': secureAccountUrl,
       'XMO_MFA_SETUP_URL': mfaSetupUrl,
+      'XMO_SECURE_ACCOUNT_RECOVERY_URL': secureAccountRecoveryUrl,
     };
     for (final entry in httpsValues.entries) {
       final uri = Uri.tryParse(entry.value.trim());
