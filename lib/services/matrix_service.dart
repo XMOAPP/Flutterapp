@@ -76,8 +76,16 @@ Future<void> _ensureMatrixDatabaseEncrypted({
       await _validateEncryptedDatabase(path, cipher);
       await _deleteFileIfPresent(backupPath);
       return;
-    } catch (_) {
-      if (!await backupFile.exists()) rethrow;
+    } catch (error, stack) {
+      if (!await backupFile.exists()) {
+        final recoveryPath = await _quarantineUnreadableMatrixDatabase(path);
+        debugPrint(
+          '[MatrixService] Preserved an unreadable encrypted Matrix database '
+          'at $recoveryPath and started with fresh local storage: $error',
+        );
+        debugPrintStack(stackTrace: stack);
+        return;
+      }
       await _deleteFileIfPresent(path);
       await backupFile.rename(path);
       databaseFile = io.File(path);
@@ -167,6 +175,31 @@ Future<void> _validateEncryptedDatabase(String path, String cipher) async {
     }
   } finally {
     await database?.close();
+  }
+}
+
+Future<String> _quarantineUnreadableMatrixDatabase(String path) async {
+  final source = io.File(path);
+  final recoveryDirectory = io.Directory(
+    p.join(p.dirname(path), 'matrix_xmo_recovery'),
+  );
+  await recoveryDirectory.create(recursive: true);
+
+  final suffix = DateTime.now().toUtc().millisecondsSinceEpoch;
+  final recoveryPath = p.join(
+    recoveryDirectory.path,
+    '${p.basename(path)}.$suffix',
+  );
+  await source.rename(recoveryPath);
+  await _moveFileIfPresent('$path-wal', '$recoveryPath-wal');
+  await _moveFileIfPresent('$path-shm', '$recoveryPath-shm');
+  return recoveryPath;
+}
+
+Future<void> _moveFileIfPresent(String sourcePath, String targetPath) async {
+  final source = io.File(sourcePath);
+  if (await source.exists()) {
+    await source.rename(targetPath);
   }
 }
 

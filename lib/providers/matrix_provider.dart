@@ -93,6 +93,7 @@ class MatrixProvider extends ChangeNotifier {
   bool get isLoggedIn => _state == MatrixAuthState.loggedIn;
   bool get isLoading => _state == MatrixAuthState.loggingIn;
   String? get userId => _svc.userId;
+  String? get accessToken => _svc.accessToken;
   String? get displayName => _optimisticDisplayName ?? _svc.displayName;
   String? get avatarUrl {
     if (_optimisticDisplayName != null &&

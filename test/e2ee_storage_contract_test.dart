@@ -19,6 +19,8 @@ void main() {
       isNot(contains('execute("SELECT sqlcipher_export(\'encrypted\')")')),
     );
     expect(service, contains("'\$path.plaintext-backup'"));
+    expect(service, contains('_quarantineUnreadableMatrixDatabase(path)'));
+    expect(service, contains("'matrix_xmo_recovery'"));
     expect(service, contains("_deleteFileIfPresent('\$path-wal')"));
     expect(service, contains('openDatabase(path, password: cipher)'));
     expect(service, isNot(contains("package:sqflite/sqflite.dart")));

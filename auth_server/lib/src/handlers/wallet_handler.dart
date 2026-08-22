@@ -3,6 +3,48 @@ part of xmo_auth_server;
 bool get _walletAccountsConfigured =>
     _walletAuthService.config.isConfigured && _walletAccountStoreReady;
 
+/// Returns the authenticated account kind for Security settings.
+///
+/// A client must not be able to select its own account type, so the Matrix
+/// access token is resolved through Synapse before consulting the wallet DB.
+Future<void> _getWalletSession(HttpRequest request) async {
+  if (!_walletAccountsConfigured) {
+    await _walletUnavailable(request);
+    return;
+  }
+
+  final token = _userDirectoryBearerToken(request);
+  if (token == null) {
+    await _json(request, HttpStatus.unauthorized, {
+      'error': 'An active XMO session is required',
+    });
+    return;
+  }
+
+  try {
+    final userId = await _userDirectoryWhoami(token);
+    final account =
+        await _walletAccountStore.findActiveAccountByMatrixUserId(userId);
+    await _json(request, HttpStatus.ok, {
+      'success': true,
+      'accountType': account == null ? 'standard' : 'wallet',
+      if (account != null)
+        'wallet': {
+          'type': account.walletType,
+          'address': account.walletAddress,
+          'chainId': account.chainId,
+        },
+    });
+  } on _BadRequestException catch (error) {
+    await _json(request, HttpStatus.unauthorized, {'error': error.message});
+  } catch (error, stackTrace) {
+    _logger.error('wallet_session_lookup_failed', error, stackTrace);
+    await _json(request, HttpStatus.badGateway, {
+      'error': 'Could not check account security settings',
+    });
+  }
+}
+
 Future<void> _getWalletAccount(HttpRequest request) async {
   if (!_walletAccountsConfigured) {
     await _walletUnavailable(request);

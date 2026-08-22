@@ -43,6 +43,31 @@ class WalletAuthService {
     return body['available'] == true;
   }
 
+  Future<WalletSessionAccount> getCurrentSessionAccount({
+    required String accessToken,
+  }) async {
+    final client = _httpClient ?? http.Client();
+    try {
+      final response = await client
+          .get(
+            _endpoint('session'),
+            headers: {'Authorization': 'Bearer $accessToken'},
+          )
+          .timeout(const Duration(seconds: 12));
+      final body = _decode(response.body);
+      if (response.statusCode != 200) {
+        throw WalletAuthException(_errorFrom(body));
+      }
+      return WalletSessionAccount.fromJson(body);
+    } catch (e) {
+      debugPrint('[WalletAuthService] session lookup failed: $e');
+      if (e is WalletAuthException) rethrow;
+      throw const WalletAuthException('Could not check account security.');
+    } finally {
+      if (_httpClient == null) client.close();
+    }
+  }
+
   Future<WalletAuthChallenge> createChallenge({
     required String username,
     required String address,
@@ -216,6 +241,32 @@ class WalletAccountLookup {
 
   final bool exists;
   final String username;
+}
+
+class WalletSessionAccount {
+  const WalletSessionAccount({
+    required this.isWalletAccount,
+    this.walletType,
+    this.walletAddress,
+    this.chainId,
+  });
+
+  final bool isWalletAccount;
+  final String? walletType;
+  final String? walletAddress;
+  final String? chainId;
+
+  factory WalletSessionAccount.fromJson(Map<String, dynamic> json) {
+    final wallet = json['wallet'] is Map
+        ? Map<String, dynamic>.from(json['wallet'] as Map)
+        : const <String, dynamic>{};
+    return WalletSessionAccount(
+      isWalletAccount: json['accountType'] == 'wallet',
+      walletType: wallet['type']?.toString(),
+      walletAddress: wallet['address']?.toString(),
+      chainId: wallet['chainId']?.toString(),
+    );
+  }
 }
 
 class WalletAuthException implements Exception {

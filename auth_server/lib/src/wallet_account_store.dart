@@ -120,6 +120,31 @@ class WalletAccountStore {
     }
   }
 
+  /// Finds the active wallet-only account associated with a Matrix session.
+  /// The caller must first validate the session token with Synapse.
+  Future<WalletAccount?> findActiveAccountByMatrixUserId(
+    String matrixUserId,
+  ) async {
+    final connection = await _open();
+    try {
+      final result = await connection.execute(
+        Sql.named('''
+          SELECT wallet_type, wallet_address, username, matrix_user_id,
+                 chain_id, status, created_at
+          FROM xmo_wallet_accounts
+          WHERE matrix_user_id = @matrixUserId
+            AND status = 'active'
+          LIMIT 1
+        '''),
+        parameters: {'matrixUserId': matrixUserId},
+      );
+      if (result.isEmpty) return null;
+      return WalletAccount.fromColumns(result.first.toColumnMap());
+    } finally {
+      await connection.close();
+    }
+  }
+
   Future<void> saveChallenge(WalletStoredChallenge challenge) async {
     final connection = await _open();
     try {

@@ -4,6 +4,7 @@
         <exclude domain="root" path="app_flutter/matrix_xmo/" />
         <exclude domain="root" path="files/matrix_xmo/" />
         <exclude domain="file" path="matrix_xmo/" />
+        <exclude domain="file" path="matrix_xmo_recovery/" />
         <exclude domain="database" path="matrix_xmo" />
         <exclude domain="database" path="matrix_xmo_vodozemac_v1.db" />
         <exclude domain="database" path="matrix_xmo_vodozemac_v1.db-wal" />
@@ -39,6 +40,7 @@
         <exclude domain="root" path="app_flutter/matrix_xmo/" />
         <exclude domain="root" path="files/matrix_xmo/" />
         <exclude domain="file" path="matrix_xmo/" />
+        <exclude domain="file" path="matrix_xmo_recovery/" />
         <exclude domain="database" path="matrix_xmo" />
         <exclude domain="database" path="matrix_xmo_vodozemac_v1.db" />
         <exclude domain="database" path="matrix_xmo_vodozemac_v1.db-wal" />

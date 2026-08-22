@@ -114,18 +114,23 @@ class InviteEndpointModule {
 class WalletEndpointModule {
   const WalletEndpointModule({
     required this.account,
+    required this.session,
     required this.usernameAvailability,
     required this.nonce,
     required this.verify,
   });
 
   final EndpointHandler account;
+  final EndpointHandler session;
   final EndpointHandler usernameAvailability;
   final EndpointHandler nonce;
   final EndpointHandler verify;
 
   bool handlesAccount(String path) =>
       path == '/wallet/account' || path == '/auth/wallet/account';
+
+  bool handlesSession(String path) =>
+      path == '/wallet/session' || path == '/auth/wallet/session';
 
   bool handlesUsernameAvailability(String path) =>
       path == '/wallet/username-availability' ||

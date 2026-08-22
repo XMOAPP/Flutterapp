@@ -33,6 +33,7 @@ import '../services/privacy_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/story_service.dart';
 import '../services/sensitive_screen_service.dart';
+import '../services/wallet_auth_service.dart';
 import '../theme.dart';
 import '../utils/matrix_identity.dart';
 import '../widgets/matrix_chat/fullscreen_video_player.dart';
@@ -711,12 +712,16 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   bool _loading = true;
   bool _working = false;
   E2eeStatus? _status;
+  bool _accountKindLoading = true;
+  WalletSessionAccount? _sessionAccount;
+  String? _accountKindError;
 
   @override
   void initState() {
     super.initState();
     _e2eeService = E2eeService(context.read<MatrixProvider>().service);
     _loadStatus();
+    _loadAccountKind();
   }
 
   Future<void> _loadStatus() async {
@@ -726,6 +731,38 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
       _status = status;
       _loading = false;
     });
+  }
+
+  Future<void> _loadAccountKind() async {
+    final provider = context.read<MatrixProvider>();
+    final token = provider.accessToken;
+    if (token == null || token.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _accountKindLoading = false;
+          _accountKindError = 'Account security could not be checked.';
+        });
+      }
+      return;
+    }
+
+    try {
+      final account = await const WalletAuthService().getCurrentSessionAccount(
+        accessToken: token,
+      );
+      if (!mounted) return;
+      setState(() {
+        _sessionAccount = account;
+        _accountKindLoading = false;
+        _accountKindError = null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _accountKindLoading = false;
+        _accountKindError = 'Account security could not be checked.';
+      });
+    }
   }
 
   Future<void> _setupRecovery() async {
@@ -1152,21 +1189,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
             },
           ),
           _panelDivider(),
-          _securityNavTile(
-            icon: Icons.verified_user,
-            title: 'Two-step verification',
-            subtitle: AppConfig.isSsoLoginConfigured
-                ? 'Managed by secure sign-in'
-                : 'Requires account-server login support',
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const TwoFactorStatusScreen(),
-                ),
-              );
-            },
-          ),
+          _accountSecurityTile(),
         ],
       ),
       const SizedBox(height: 18),
@@ -1244,6 +1267,80 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
         const Center(child: CircularProgressIndicator(color: kLimeGreen)),
       ],
     ];
+  }
+
+  Widget _accountSecurityTile() {
+    if (_accountKindLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 18),
+        child: Center(child: CircularProgressIndicator(color: kLimeGreen)),
+      );
+    }
+
+    if (_sessionAccount?.isWalletAccount == true) {
+      return _securityNavTile(
+        icon: Icons.account_balance_wallet_outlined,
+        title: 'Wallet security',
+        subtitle: 'Your connected wallet is your sign-in key',
+        onTap: _showWalletSecurityInfo,
+      );
+    }
+
+    if (_accountKindError != null) {
+      return _securityNavTile(
+        icon: Icons.refresh,
+        title: 'Account security',
+        subtitle: 'Tap to retry security check',
+        onTap: () {
+          setState(() {
+            _accountKindLoading = true;
+            _accountKindError = null;
+          });
+          _loadAccountKind();
+        },
+      );
+    }
+
+    return _securityNavTile(
+      icon: Icons.verified_user,
+      title: 'Two-step verification',
+      subtitle: AppConfig.isSsoLoginConfigured
+          ? 'Managed by secure sign-in'
+          : 'Requires account-server login support',
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const TwoFactorStatusScreen()),
+        );
+      },
+    );
+  }
+
+  Future<void> _showWalletSecurityInfo() async {
+    final account = _sessionAccount;
+    final address = account?.walletAddress ?? '';
+    final shortAddress = address.length > 12
+        ? '${address.substring(0, 6)}...${address.substring(address.length - 4)}'
+        : address;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: kDarkerGrey,
+        title: Text('Wallet security', style: GoogleFonts.inter(color: kWhite)),
+        content: Text(
+          shortAddress.isEmpty
+              ? 'Your connected wallet is your sign-in key.'
+              : 'Your connected wallet ($shortAddress) is your sign-in key.',
+          style: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _roundBackButton() {

@@ -98,6 +98,7 @@ const _inviteEndpoints = InviteEndpointModule(
 );
 const _walletEndpoints = WalletEndpointModule(
   account: _getWalletAccount,
+  session: _getWalletSession,
   usernameAvailability: _checkWalletUsernameAvailability,
   nonce: _createWalletNonce,
   verify: _verifyWalletSignature,
@@ -332,6 +333,12 @@ Future<void> _handleRequest(HttpRequest request) async {
     if (request.method == 'POST' &&
         _walletEndpoints.handlesAccount(request.uri.path)) {
       await _walletEndpoints.account(request);
+      return;
+    }
+
+    if (request.method == 'GET' &&
+        _walletEndpoints.handlesSession(request.uri.path)) {
+      await _walletEndpoints.session(request);
       return;
     }
 
