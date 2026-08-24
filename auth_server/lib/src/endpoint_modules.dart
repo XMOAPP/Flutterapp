@@ -391,6 +391,7 @@ class EndpointAuthorizationRegistry {
         recoveryEmail.handlesCompleteLocalEnrollment(path) ||
         recoveryEmail.handlesStartChange(path) ||
         recoveryEmail.handlesConfirmChange(path) ||
+        donation.handles(path) ||
         invite.handlesCreate(path) ||
         invite.handlesList(path) ||
         invite.handlesRevoke(path) ||
@@ -421,8 +422,7 @@ class EndpointAuthorizationRegistry {
       return EndpointAuthorizationPolicy.proofBased;
     }
 
-    if (donation.handles(path) ||
-        wallet.handlesAccount(path) ||
+    if (wallet.handlesAccount(path) ||
         wallet.handlesUsernameAvailability(path) ||
         wallet.handlesNonce(path) ||
         wallet.handlesVerify(path) ||

@@ -12,42 +12,52 @@ class ThirdwebDonationPayment {
 }
 
 class ThirdwebDonationService {
-  const ThirdwebDonationService();
+  const ThirdwebDonationService({http.Client? client}) : _client = client;
+
+  final http.Client? _client;
 
   Future<ThirdwebDonationPayment> createDonationPayment({
     required BigInt amountUsdcSmallestUnit,
-    required String donorUserId,
-    String? donorDisplayName,
+    required String accessToken,
   }) async {
-    final response = await http.post(
-      _endpoint(),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'amountUsdcSmallestUnit': amountUsdcSmallestUnit.toString(),
-        'donorUserId': donorUserId,
-        if (donorDisplayName != null && donorDisplayName.trim().isNotEmpty)
-          'donorDisplayName': donorDisplayName.trim(),
-      }),
-    );
-
-    final decoded = _decodeJson(response.body);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception(_errorMessage(decoded));
+    final token = accessToken.trim();
+    if (token.isEmpty) {
+      throw StateError('Your XMO session is unavailable. Sign in again.');
     }
+    final client = _client ?? http.Client();
+    try {
+      final response = await client.post(
+        _endpoint(),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'amountUsdcSmallestUnit': amountUsdcSmallestUnit.toString(),
+        }),
+      );
 
-    final payment = decoded['payment'];
-    if (payment is! Map<String, dynamic>) {
-      throw Exception('Donation server did not return payment details.');
+      final decoded = _decodeJson(response.body);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception(_errorMessage(decoded));
+      }
+
+      final payment = decoded['payment'];
+      if (payment is! Map<String, dynamic>) {
+        throw Exception('Donation server did not return payment details.');
+      }
+
+      final id = payment['id']?.toString();
+      final linkRaw = payment['link']?.toString();
+      final link = linkRaw == null ? null : Uri.tryParse(linkRaw);
+      if (id == null || id.isEmpty || link == null) {
+        throw Exception('Donation server did not return a checkout link.');
+      }
+
+      return ThirdwebDonationPayment(id: id, link: link);
+    } finally {
+      if (_client == null) client.close();
     }
-
-    final id = payment['id']?.toString();
-    final linkRaw = payment['link']?.toString();
-    final link = linkRaw == null ? null : Uri.tryParse(linkRaw);
-    if (id == null || id.isEmpty || link == null) {
-      throw Exception('Donation server did not return a checkout link.');
-    }
-
-    return ThirdwebDonationPayment(id: id, link: link);
   }
 
   Uri _endpoint() {

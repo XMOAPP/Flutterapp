@@ -1,10 +1,19 @@
 part of xmo_auth_server;
 
 Future<void> _createDonationPayment(HttpRequest request) async {
+  // The authorization boundary resolves this from a Matrix access token before
+  // this handler is reached. Never accept donor identity from the request
+  // body: Thirdweb preserves purchaseData in payment history and webhooks.
+  final principal = _matrixRequestPrincipals[request];
+  if (principal == null) {
+    await _json(request, HttpStatus.unauthorized, {
+      'error': 'Valid XMO session required',
+    });
+    return;
+  }
+
   final body = await _readJson(request);
   final amount = _parseAmount(body['amountUsdcSmallestUnit']);
-  final donorUserId = body['donorUserId']?.toString().trim() ?? '';
-  final donorDisplayName = body['donorDisplayName']?.toString().trim() ?? '';
 
   if (_thirdwebSecretKey.isEmpty) {
     await _json(request, HttpStatus.internalServerError, {
@@ -39,8 +48,7 @@ Future<void> _createDonationPayment(HttpRequest request) async {
   try {
     response = await _postThirdwebPayment(
       amountUsdcSmallestUnit: amount,
-      donorUserId: donorUserId,
-      donorDisplayName: donorDisplayName,
+      donorUserId: principal.userId,
     );
   } on TimeoutException catch (error, stackTrace) {
     _logger.error('thirdweb_payment_timeout', error, stackTrace);
@@ -111,7 +119,6 @@ Future<void> _createDonationPayment(HttpRequest request) async {
 Future<_ThirdwebResponse> _postThirdwebPayment({
   required BigInt amountUsdcSmallestUnit,
   required String donorUserId,
-  required String donorDisplayName,
 }) async {
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
   try {
@@ -130,11 +137,7 @@ Future<_ThirdwebResponse> _postThirdwebPayment({
           'amount': amountUsdcSmallestUnit.toString(),
         },
         'recipient': _donationRecipientAddress,
-        'purchaseData': {
-          'source': 'xmo_app',
-          if (donorUserId.isNotEmpty) 'donorUserId': donorUserId,
-          if (donorDisplayName.isNotEmpty) 'donorDisplayName': donorDisplayName,
-        },
+        'purchaseData': {'source': 'xmo_app', 'donorUserId': donorUserId},
       }),
     );
 

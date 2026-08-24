@@ -77,6 +77,9 @@ void main() {
   test('requires a Matrix user for every user-owned endpoint family', () {
     for (final path in [
       '/auth/account/delete-data',
+      '/donations/create',
+      '/auth/donations/create',
+      '/auth/otp/donations/create',
       '/auth/invites/create',
       '/auth/otp/invites/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/redeem',
       '/auth/channel/analytics/view',
