@@ -608,6 +608,8 @@ Future<void> _authentikSyncPassword({
   await _authentikSetPassword(user.pk, password);
 }
 
+// Retained for the administrative deactivation flow.
+// ignore: unused_element
 Future<void> _authentikDeactivateUser(String username) async {
   if (!_authentikConfig.isConfigured) return;
   final user = await _authentikFindUser(username);

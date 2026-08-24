@@ -424,7 +424,7 @@ bool _inviteHasCapacity(_InviteRoom room, String userId) {
 
 bool _inviteCanCreateLink(_InviteRoom room) {
   final limit = RoomCapacityPolicy.limitForRoomType(room.roomType);
-  return limit == null || room.memberCount < limit;
+  return room.memberCount < limit;
 }
 
 Future<void> _inviteRoomAtCapacity(HttpRequest request, _InviteRoom room) {

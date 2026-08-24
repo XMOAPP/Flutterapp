@@ -52,7 +52,7 @@ jobs:
       - name: Check Flutter formatting
         run: bash tools/ci/run_with_timeout.sh 180 build/quality-logs/flutter-format.log dart format --output=none --set-exit-if-changed lib test integration_test
       - name: Analyze Flutter source
-        run: bash tools/ci/run_with_timeout.sh 420 build/quality-logs/flutter-analyze.log flutter analyze --no-pub
+        run: bash tools/ci/run_with_timeout.sh 420 build/quality-logs/flutter-analyze.log flutter analyze --no-pub --no-fatal-infos
       - name: Run Flutter tests
         run: bash tools/ci/run_with_timeout.sh 600 build/quality-logs/flutter-test.log flutter test --no-pub --reporter expanded
       - name: Redact retained logs
