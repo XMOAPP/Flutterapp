@@ -543,6 +543,11 @@ username availability, donation creation, invite operations, account deletion,
 and Azure chunk-signing authorization. Review logs for token, password, OTP,
 wallet signature, and media-secret leakage.
 
+Set `XMO_ALLOWED_CORS_ORIGINS` to the comma-separated exact browser origins
+that may access the auth server (production: `https://xmo.dpdns.org`). Do not
+use `*`. The legacy loopback email helper permits browser access only when its
+separate `XMO_LOCAL_EMAIL_ALLOWED_CORS_ORIGINS` setting is explicitly set.
+
 #### Synapse
 
 Deploy homeserver configuration, OIDC integration, templates, and the room

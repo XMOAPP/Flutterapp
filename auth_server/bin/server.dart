@@ -11,6 +11,7 @@ import 'package:cryptography/cryptography.dart' as cryptography;
 import 'package:googleapis_auth/auth_io.dart';
 
 import 'package:xmo_auth_server/src/account_deletion_job_store.dart';
+import 'package:xmo_auth_server/src/cors_policy.dart';
 import 'package:xmo_auth_server/src/email_service.dart';
 import 'package:xmo_auth_server/src/endpoint_modules.dart';
 import 'package:xmo_auth_server/src/health_status.dart';
@@ -66,6 +67,7 @@ final _random = Random.secure();
 final _trustedProxyConfig = TrustedProxyConfig.fromEnvironment(
   Platform.environment,
 );
+final _corsPolicy = CorsPolicy.fromEnvironment(Platform.environment);
 final _rateLimiter = RequestRateLimiter(trustedProxies: _trustedProxyConfig);
 const _logger = StructuredLogger();
 final _emailConfig = EmailConfig.fromEnvironment(Platform.environment);
@@ -203,13 +205,40 @@ Future<void> main() async {
 
 Future<void> _handleRequest(HttpRequest request) async {
   final stopwatch = Stopwatch()..start();
-  _setCorsHeaders(request.response);
 
   try {
+    final origin = request.headers.value('origin');
+    if (origin != null && !_corsPolicy.allowsOrigin(origin)) {
+      await _json(request, HttpStatus.forbidden, {
+        'error': 'Cross-origin request is not allowed',
+      });
+      return;
+    }
+
     if (request.method == 'OPTIONS') {
+      if (origin != null &&
+          !_corsPolicy.allowsPreflight(
+            requestMethod: request.headers.value(
+              'access-control-request-method',
+            ),
+            requestHeaders: request.headers.value(
+              'access-control-request-headers',
+            ),
+          )) {
+        request.response.statusCode = HttpStatus.forbidden;
+        await request.response.close();
+        return;
+      }
+      if (origin != null) {
+        _corsPolicy.applyHeaders(request.response, origin);
+      }
       request.response.statusCode = HttpStatus.noContent;
       await request.response.close();
       return;
+    }
+
+    if (origin != null) {
+      _corsPolicy.applyHeaders(request.response, origin);
     }
 
     final invitePreview =
@@ -558,15 +587,6 @@ Map<String, dynamic>? _asMap(Object? value) {
 }
 
 List<dynamic>? _asList(Object? value) => value is List ? value : null;
-
-void _setCorsHeaders(HttpResponse response) {
-  response.headers.add('Access-Control-Allow-Origin', '*');
-  response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  response.headers.add(
-    'Access-Control-Allow-Headers',
-    'Content-Type, Authorization',
-  );
-}
 
 Future<void> _json(
   HttpRequest request,
