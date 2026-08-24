@@ -33,7 +33,7 @@ Future<void> _deleteXmoAccountData(HttpRequest request) async {
     return;
   }
 
-  final userId = await _userDirectoryWhoami(token);
+  final userId = await _userDirectoryWhoamiForRequest(request, token);
   await _acceptAccountDeletion(request, userId);
 }
 

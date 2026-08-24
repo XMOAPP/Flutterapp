@@ -88,7 +88,7 @@ Future<void> _completeLocalRecoveryEmailEnrollment(HttpRequest request) async {
     );
   }
 
-  final userId = await _userDirectoryWhoami(token);
+  final userId = await _userDirectoryWhoamiForRequest(request, token);
   final username = _normalizeMatrixLocalpart(userId);
   final enrollment = _recoveryEmailStore.claimLocalEnrollment(
     ticket: ticket,
@@ -157,7 +157,7 @@ Future<void> _startRecoveryEmailChange(HttpRequest request) async {
     return;
   }
 
-  final userId = await _userDirectoryWhoami(token);
+  final userId = await _userDirectoryWhoamiForRequest(request, token);
   final username = _normalizeMatrixLocalpart(userId);
   final currentPassword = body['currentPassword']?.toString() ?? '';
   var currentPasswordVerified = false;
@@ -278,7 +278,7 @@ Future<void> _confirmRecoveryEmailChange(HttpRequest request) async {
     throw const _BadRequestException('Invalid recovery email confirmation');
   }
 
-  final userId = await _userDirectoryWhoami(token);
+  final userId = await _userDirectoryWhoamiForRequest(request, token);
   final username = _normalizeMatrixLocalpart(userId);
   final newEmail = _recoveryEmailStore.claimChange(
     transactionId: transactionId,

@@ -358,7 +358,10 @@ Future<_InviteSession?> _inviteSession(HttpRequest request) async {
     return null;
   }
   try {
-    return _InviteSession(token, await _userDirectoryWhoami(token));
+    return _InviteSession(
+      token,
+      await _userDirectoryWhoamiForRequest(request, token),
+    );
   } on _BadRequestException {
     await _json(request, HttpStatus.unauthorized, {
       'success': false,

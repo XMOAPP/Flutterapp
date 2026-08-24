@@ -282,7 +282,7 @@ Future<void> _provisionSecureLogin(HttpRequest request) async {
     return;
   }
 
-  final whoamiUserId = await _userDirectoryWhoami(token);
+  final whoamiUserId = await _userDirectoryWhoamiForRequest(request, token);
   if (_userDirectoryLocalpartFromUserId(whoamiUserId) != username) {
     await _json(request, HttpStatus.forbidden, {
       'success': false,

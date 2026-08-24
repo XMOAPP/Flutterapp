@@ -36,6 +36,7 @@ part '../lib/src/handlers/report_handler.dart';
 part '../lib/src/handlers/recovery_email_handler.dart';
 part '../lib/src/handlers/user_directory_handler.dart';
 part '../lib/src/handlers/wallet_handler.dart';
+part '../lib/src/request_authorization.dart';
 
 final int _port = int.tryParse(Platform.environment['PORT'] ?? '') ?? 3000;
 final String _thirdwebSecretKey =
@@ -148,6 +149,20 @@ const _channelAnalyticsEndpoints = ChannelAnalyticsEndpointModule(
   stats: _getChannelAnalytics,
 );
 const _pushEndpoints = PushGatewayEndpointModule(_handleMatrixPush);
+const _endpointAuthorization = EndpointAuthorizationRegistry(
+  otp: _otpEndpoints,
+  passwordReset: _passwordResetEndpoints,
+  recoveryEmail: _recoveryEmailEndpoints,
+  donation: _donationEndpoints,
+  invite: _inviteEndpoints,
+  wallet: _walletEndpoints,
+  azureBlob: _azureBlobEndpoints,
+  userDirectory: _userDirectoryEndpoints,
+  reports: _reportEndpoints,
+  accountDeletion: _accountDeletionEndpoints,
+  channelAnalytics: _channelAnalyticsEndpoints,
+  push: _pushEndpoints,
+);
 
 const _otpTtl = Duration(minutes: 1);
 const _secureLoginEnrollmentProofTtl = Duration(minutes: 5);
@@ -220,6 +235,16 @@ Future<void> _handleRequest(HttpRequest request) async {
       });
       return;
     }
+
+    final authorizationPolicy = _endpointAuthorization.policyFor(
+      method: request.method,
+      path: request.uri.path,
+    );
+    if (authorizationPolicy == null) {
+      await _json(request, HttpStatus.notFound, {'error': 'Not found'});
+      return;
+    }
+    if (!await _authorizeEndpoint(request, authorizationPolicy)) return;
 
     if (request.method == 'GET' && request.uri.path == '/health') {
       await _json(

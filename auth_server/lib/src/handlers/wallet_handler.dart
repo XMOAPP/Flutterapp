@@ -22,7 +22,7 @@ Future<void> _getWalletSession(HttpRequest request) async {
   }
 
   try {
-    final userId = await _userDirectoryWhoami(token);
+    final userId = await _userDirectoryWhoamiForRequest(request, token);
     final account = await _walletAccountStore.findActiveAccountByMatrixUserId(
       userId,
     );
