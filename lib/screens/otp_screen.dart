@@ -244,7 +244,7 @@ class _OtpScreenState extends State<OtpScreen>
             ? recoveryEnrollmentSetupError
             : await OtpService().completeLocalRecoveryEmailEnrollment(
                 accessToken: provider.service.accessToken ?? '',
-                ticket: localRecoveryEnrollmentTicket!,
+                ticket: localRecoveryEnrollmentTicket,
               );
         if (recoveryEnrollmentError != null && mounted) {
           ScaffoldMessenger.of(

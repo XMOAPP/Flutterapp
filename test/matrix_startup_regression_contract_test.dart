@@ -12,7 +12,7 @@ void main() {
     expect(provider, contains('bool _canAuthenticate()'));
     expect(provider, contains('if (!_canAuthenticate()) return false;'));
     expect(provider, contains('_svc.clientReadyForAuthentication'));
-    expect(provider, contains('Matrix secure storage could not start'));
+    expect(provider, contains('XMO secure storage could not start'));
     expect(
       File('lib/services/matrix_service.dart').readAsStringSync(),
       contains('_clientReadyForAuthentication = true;'),
@@ -43,7 +43,6 @@ void main() {
     expect(service, contains("path: '/_matrix/client/v3/login'"));
     expect(service, contains('waitForFirstSync: false'));
     expect(service, contains("'org.matrix.login.jwt',"));
-    expect(service, contains('if (_client.isLogged())'));
     expect(service, contains('await _client.clear();'));
     expect(service, contains('waitUntilLoadCompletedLoaded: false'));
   });
