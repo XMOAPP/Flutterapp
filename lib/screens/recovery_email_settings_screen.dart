@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/matrix_provider.dart';
@@ -92,7 +93,17 @@ class _RecoveryEmailSettingsScreenState
 
   InputDecoration _decoration(String label) => InputDecoration(
     labelText: label,
-    labelStyle: const TextStyle(color: kLightGrey),
+    labelStyle: GoogleFonts.inter(
+      color: kLightGrey,
+      fontSize: 16,
+      fontWeight: FontWeight.w400,
+    ),
+    floatingLabelStyle: GoogleFonts.inter(
+      color: kLightGrey,
+      fontSize: 16,
+      fontWeight: FontWeight.w400,
+    ),
+    contentPadding: const EdgeInsets.only(top: 10, bottom: 13),
     enabledBorder: const UnderlineInputBorder(
       borderSide: BorderSide(color: kDarkGrey),
     ),
@@ -105,68 +116,116 @@ class _RecoveryEmailSettingsScreenState
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: kBlack,
     appBar: AppBar(
-      title: const Text('Recovery email'),
+      title: Text(
+        'Recovery email',
+        style: GoogleFonts.inter(
+          color: kWhite,
+          fontSize: 22,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
       backgroundColor: kBlack,
     ),
     body: ListView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.fromLTRB(34, 28, 34, 28),
       children: [
-        const Text(
+        Text(
           'A recovery email can reset your password and delete your account. '
           'You must confirm both the existing and new email addresses.',
-          style: TextStyle(color: kLightGrey, height: 1.4),
+          style: GoogleFonts.inter(
+            color: kLightGrey,
+            fontSize: 16,
+            height: 1.45,
+          ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 34),
         TextField(
           controller: _email,
           keyboardType: TextInputType.emailAddress,
           autocorrect: false,
-          style: const TextStyle(color: kWhite),
+          style: GoogleFonts.inter(color: kWhite, fontSize: 20),
           decoration: _decoration('New recovery email'),
           enabled: _transactionId == null && !_busy,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 18),
         TextField(
           controller: _password,
           obscureText: true,
-          style: const TextStyle(color: kWhite),
+          style: GoogleFonts.inter(color: kWhite, fontSize: 20),
           decoration: _decoration(
             'Current password (required for legacy accounts)',
           ),
           enabled: _transactionId == null && !_busy,
         ),
         if (_transactionId == null) ...[
-          const SizedBox(height: 24),
-          ElevatedButton(
+          const SizedBox(height: 28),
+          _primaryButton(
             onPressed: _busy ? null : _start,
-            child: Text(_busy ? 'Sending…' : 'Send confirmation codes'),
+            label: _busy ? 'Sending…' : 'Send confirmation codes',
           ),
         ] else ...[
-          const SizedBox(height: 18),
+          const SizedBox(height: 28),
           TextField(
             controller: _currentCode,
             keyboardType: TextInputType.number,
-            style: const TextStyle(color: kWhite),
+            style: GoogleFonts.inter(color: kWhite, fontSize: 20),
             decoration: _decoration('Code sent to existing email'),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 18),
           TextField(
             controller: _newCode,
             keyboardType: TextInputType.number,
-            style: const TextStyle(color: kWhite),
+            style: GoogleFonts.inter(color: kWhite, fontSize: 20),
             decoration: _decoration('Code sent to new email'),
           ),
-          const SizedBox(height: 24),
-          ElevatedButton(
+          const SizedBox(height: 28),
+          _primaryButton(
             onPressed: _busy ? null : _confirm,
-            child: Text(_busy ? 'Verifying…' : 'Confirm recovery email'),
+            label: _busy ? 'Verifying…' : 'Confirm recovery email',
           ),
         ],
         if (_error != null) ...[
-          const SizedBox(height: 16),
-          Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+          const SizedBox(height: 24),
+          Text(
+            _error!,
+            style: GoogleFonts.inter(
+              color: const Color(0xFFFF646E),
+              fontSize: 16,
+              height: 1.35,
+            ),
+          ),
         ],
       ],
     ),
   );
+
+  Widget _primaryButton({
+    required VoidCallback? onPressed,
+    required String label,
+  }) {
+    return SizedBox(
+      height: 56,
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: kWhite,
+          foregroundColor: kBlack,
+          disabledBackgroundColor: const Color(0xFF252525),
+          disabledForegroundColor: kLightGrey,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+          ),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
 }
