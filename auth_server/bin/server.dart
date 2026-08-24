@@ -13,6 +13,7 @@ import 'package:xmo_auth_server/src/account_deletion_job_store.dart';
 import 'package:xmo_auth_server/src/email_service.dart';
 import 'package:xmo_auth_server/src/endpoint_modules.dart';
 import 'package:xmo_auth_server/src/health_status.dart';
+import 'package:xmo_auth_server/src/request_body.dart';
 import 'package:xmo_auth_server/src/request_guard.dart';
 import 'package:xmo_auth_server/src/recovery_email_store.dart';
 import 'package:xmo_auth_server/src/room_capacity_policy.dart';
@@ -482,6 +483,8 @@ Future<void> _handleRequest(HttpRequest request) async {
     }
 
     await _json(request, HttpStatus.notFound, {'error': 'Not found'});
+  } on _PayloadTooLargeException catch (error) {
+    await _json(request, 413, {'error': error.message});
   } on _BadRequestException catch (error) {
     await _json(request, HttpStatus.badRequest, {'error': error.message});
   } catch (e, st) {
@@ -500,21 +503,17 @@ Future<void> _handleRequest(HttpRequest request) async {
 }
 
 Future<Map<String, dynamic>> _readJson(HttpRequest request) async {
-  const maxRequestBytes = 1024 * 1024;
-  final contentLength = request.contentLength;
-  if (contentLength > maxRequestBytes) {
-    throw const _BadRequestException('Request body is too large');
-  }
-  final content = await utf8.decoder.bind(request).join();
-  if (content.trim().isEmpty) return {};
   try {
-    final decoded = jsonDecode(content);
-    if (decoded is! Map) {
-      throw const _BadRequestException('JSON object expected');
-    }
-    return decoded.map((key, value) => MapEntry(key.toString(), value));
-  } on FormatException {
-    throw const _BadRequestException('Invalid JSON request body');
+    return await readBoundedJsonObject(
+      request,
+      declaredContentLength: request.contentLength < 0
+          ? null
+          : request.contentLength,
+    );
+  } on RequestBodyTooLargeException {
+    throw const _PayloadTooLargeException('Request body is too large');
+  } on JsonRequestBodyException catch (error) {
+    throw _BadRequestException(error.message);
   }
 }
 
@@ -556,5 +555,10 @@ Future<void> _json(
 
 class _BadRequestException implements Exception {
   const _BadRequestException(this.message);
+  final String message;
+}
+
+class _PayloadTooLargeException implements Exception {
+  const _PayloadTooLargeException(this.message);
   final String message;
 }
