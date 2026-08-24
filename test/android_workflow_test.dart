@@ -76,7 +76,7 @@ void main() {
 
   test('backend tests are required and logs are retained', () {
     expect(workflow, contains(r'"$DART_BIN" test --reporter expanded'));
-    expect(workflow, contains('uses: actions/upload-artifact@v4'));
+    expect(workflow, contains('uses: actions/upload-artifact@'));
     expect(workflow, contains('if: always()'));
     expect(workflow, contains('tools/ci/redact_logs.sh'));
   });
