@@ -107,6 +107,9 @@ class _RecoveryEmailSettingsScreenState
     enabledBorder: const UnderlineInputBorder(
       borderSide: BorderSide(color: kDarkGrey),
     ),
+    disabledBorder: const UnderlineInputBorder(
+      borderSide: BorderSide(color: kDarkGrey),
+    ),
     focusedBorder: const UnderlineInputBorder(
       borderSide: BorderSide(color: kWhite),
     ),
