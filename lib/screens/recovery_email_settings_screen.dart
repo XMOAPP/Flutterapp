@@ -91,29 +91,66 @@ class _RecoveryEmailSettingsScreenState
     }
   }
 
-  InputDecoration _decoration(String label) => InputDecoration(
-    labelText: label,
-    labelStyle: GoogleFonts.inter(
-      color: kLightGrey,
-      fontSize: 13,
-      fontWeight: FontWeight.w400,
-    ),
-    floatingLabelStyle: GoogleFonts.inter(
-      color: kLightGrey,
-      fontSize: 13,
-      fontWeight: FontWeight.w400,
-    ),
-    contentPadding: const EdgeInsets.only(top: 10, bottom: 13),
-    enabledBorder: const UnderlineInputBorder(
-      borderSide: BorderSide(color: kDarkGrey),
-    ),
-    disabledBorder: const UnderlineInputBorder(
-      borderSide: BorderSide(color: kDarkGrey),
-    ),
-    focusedBorder: const UnderlineInputBorder(
-      borderSide: BorderSide(color: kWhite),
-    ),
+  InputDecoration _decoration(String hint) => InputDecoration(
+    hintText: hint,
+    hintStyle: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
+    filled: true,
+    fillColor: const Color(0xFF2C2C2E),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+    border: _pillBorder,
+    enabledBorder: _pillBorder,
+    disabledBorder: _pillBorder,
+    focusedBorder: _pillFocusedBorder,
   );
+
+  static final _pillBorder = OutlineInputBorder(
+    borderRadius: BorderRadius.circular(25),
+    borderSide: BorderSide.none,
+  );
+
+  static final _pillFocusedBorder = OutlineInputBorder(
+    borderRadius: BorderRadius.circular(25),
+    borderSide: const BorderSide(color: kWhite),
+  );
+
+  Widget _fieldLabel(String label) {
+    return Text(
+      label.toUpperCase(),
+      style: GoogleFonts.inter(
+        color: kLightGrey,
+        fontSize: 9,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.8,
+      ),
+    );
+  }
+
+  Widget _field({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    bool obscureText = false,
+    TextInputType? keyboardType,
+    bool autocorrect = true,
+    bool enabled = true,
+  }) {
+    return Column(
+      children: [
+        _fieldLabel(label),
+        const SizedBox(height: 6),
+        TextField(
+          controller: controller,
+          obscureText: obscureText,
+          keyboardType: keyboardType,
+          autocorrect: autocorrect,
+          cursorColor: kWhite,
+          enabled: enabled,
+          style: GoogleFonts.inter(color: kWhite, fontSize: 14),
+          decoration: _decoration(hint),
+        ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -130,7 +167,7 @@ class _RecoveryEmailSettingsScreenState
       backgroundColor: kBlack,
     ),
     body: ListView(
-      padding: const EdgeInsets.fromLTRB(22, 24, 22, 28),
+      padding: const EdgeInsets.fromLTRB(28, 24, 28, 28),
       children: [
         Text(
           'A recovery email can reset your password and delete your account. '
@@ -142,49 +179,47 @@ class _RecoveryEmailSettingsScreenState
           ),
         ),
         const SizedBox(height: 26),
-        TextField(
+        _field(
           controller: _email,
+          label: 'New recovery email',
+          hint: 'you@example.com',
           keyboardType: TextInputType.emailAddress,
           autocorrect: false,
-          style: GoogleFonts.inter(color: kWhite, fontSize: 15),
-          decoration: _decoration('New recovery email'),
           enabled: _transactionId == null && !_busy,
         ),
         const SizedBox(height: 18),
-        TextField(
+        _field(
           controller: _password,
+          label: 'Current password (required for legacy accounts)',
+          hint: '********',
           obscureText: true,
-          style: GoogleFonts.inter(color: kWhite, fontSize: 15),
-          decoration: _decoration(
-            'Current password (required for legacy accounts)',
-          ),
           enabled: _transactionId == null && !_busy,
         ),
         if (_transactionId == null) ...[
           const SizedBox(height: 28),
           _primaryButton(
             onPressed: _busy ? null : _start,
-            label: _busy ? 'Sending…' : 'Send confirmation codes',
+            label: _busy ? 'Sending...' : 'Send confirmation codes',
           ),
         ] else ...[
           const SizedBox(height: 28),
-          TextField(
+          _field(
             controller: _currentCode,
+            label: 'Code sent to existing email',
+            hint: '000000',
             keyboardType: TextInputType.number,
-            style: GoogleFonts.inter(color: kWhite, fontSize: 15),
-            decoration: _decoration('Code sent to existing email'),
           ),
           const SizedBox(height: 18),
-          TextField(
+          _field(
             controller: _newCode,
+            label: 'Code sent to new email',
+            hint: '000000',
             keyboardType: TextInputType.number,
-            style: GoogleFonts.inter(color: kWhite, fontSize: 15),
-            decoration: _decoration('Code sent to new email'),
           ),
           const SizedBox(height: 28),
           _primaryButton(
             onPressed: _busy ? null : _confirm,
-            label: _busy ? 'Verifying…' : 'Confirm recovery email',
+            label: _busy ? 'Verifying...' : 'Confirm recovery email',
           ),
         ],
         if (_error != null) ...[
