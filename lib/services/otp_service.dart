@@ -30,6 +30,30 @@ class OidcAccountRegistrationResult {
   final String? error;
 }
 
+class LocalRecoveryEmailEnrollmentResult {
+  const LocalRecoveryEmailEnrollmentResult({
+    required this.success,
+    this.ticket,
+    this.error,
+  });
+
+  final bool success;
+  final String? ticket;
+  final String? error;
+}
+
+class RecoveryEmailChangeStartResult {
+  const RecoveryEmailChangeStartResult({
+    required this.success,
+    this.transactionId,
+    this.error,
+  });
+
+  final bool success;
+  final String? transactionId;
+  final String? error;
+}
+
 class UsernameAvailabilityResult {
   const UsernameAvailabilityResult({
     required this.success,
@@ -138,18 +162,156 @@ class OtpService {
     }
   }
 
-  Future<void> linkPasswordResetEmail({
+  Future<LocalRecoveryEmailEnrollmentResult>
+  prepareLocalRecoveryEmailEnrollment({
     required String username,
     required String email,
+    required String secureLoginEnrollmentProof,
   }) async {
-    try {
-      await _client.post(
-        _endpoint('password/link-email'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'username': username, 'email': email}),
+    if (secureLoginEnrollmentProof.trim().isEmpty) {
+      return const LocalRecoveryEmailEnrollmentResult(
+        success: false,
+        error: 'Email verification expired. Please request a new code.',
       );
+    }
+    try {
+      final response = await _client.post(
+        _endpoint('accounts/recovery-email/local-enrollment/prepare'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'username': username,
+          'email': email,
+          'secureLoginEnrollmentProof': secureLoginEnrollmentProof,
+        }),
+      );
+      if (response.statusCode != 200) {
+        return LocalRecoveryEmailEnrollmentResult(
+          success: false,
+          error: _decodeError(response.body),
+        );
+      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final ticket = data['localEnrollmentTicket']?.toString().trim() ?? '';
+      if (data['success'] != true || ticket.isEmpty) {
+        return const LocalRecoveryEmailEnrollmentResult(
+          success: false,
+          error: 'Could not prepare password recovery. Please retry.',
+        );
+      }
+      return LocalRecoveryEmailEnrollmentResult(success: true, ticket: ticket);
     } catch (e) {
-      debugPrint("Password reset email link failed: $e");
+      debugPrint('Recovery email enrollment preparation failed: $e');
+      return const LocalRecoveryEmailEnrollmentResult(
+        success: false,
+        error: 'Could not prepare password recovery. Please retry.',
+      );
+    }
+  }
+
+  Future<String?> completeLocalRecoveryEmailEnrollment({
+    required String accessToken,
+    required String ticket,
+  }) async {
+    if (accessToken.trim().isEmpty || ticket.trim().isEmpty) {
+      return 'Sign in is required to finish password recovery setup.';
+    }
+    try {
+      final response = await _client.post(
+        _endpoint('accounts/recovery-email/local-enrollment/complete'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $accessToken',
+        },
+        body: jsonEncode({'localEnrollmentTicket': ticket}),
+      );
+      if (response.statusCode == 200) return null;
+      return _decodeError(response.body);
+    } catch (e) {
+      debugPrint('Recovery email enrollment completion failed: $e');
+      return 'Could not finish password recovery setup. Please retry.';
+    }
+  }
+
+  Future<RecoveryEmailChangeStartResult> startRecoveryEmailChange({
+    required String accessToken,
+    required String email,
+    String currentPassword = '',
+  }) async {
+    if (accessToken.trim().isEmpty) {
+      return const RecoveryEmailChangeStartResult(
+        success: false,
+        error: 'Sign in is required to change your recovery email.',
+      );
+    }
+    try {
+      final response = await _client.post(
+        _endpoint('account/recovery-email/change/start'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $accessToken',
+        },
+        body: jsonEncode({
+          'email': email,
+          if (currentPassword.isNotEmpty) 'currentPassword': currentPassword,
+        }),
+      );
+      if (response.statusCode != 200) {
+        return RecoveryEmailChangeStartResult(
+          success: false,
+          error: _decodeError(response.body),
+        );
+      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (data['unchanged'] == true) {
+        return const RecoveryEmailChangeStartResult(success: true);
+      }
+      final transactionId = data['transactionId']?.toString().trim() ?? '';
+      if (data['success'] != true || transactionId.isEmpty) {
+        return const RecoveryEmailChangeStartResult(
+          success: false,
+          error: 'Could not start the recovery email change.',
+        );
+      }
+      return RecoveryEmailChangeStartResult(
+        success: true,
+        transactionId: transactionId,
+      );
+    } catch (error) {
+      debugPrint('Recovery email change start failed: $error');
+      return const RecoveryEmailChangeStartResult(
+        success: false,
+        error: 'Could not start the recovery email change. Please retry.',
+      );
+    }
+  }
+
+  Future<String?> confirmRecoveryEmailChange({
+    required String accessToken,
+    required String transactionId,
+    required String currentEmailCode,
+    required String newEmailCode,
+  }) async {
+    if (accessToken.trim().isEmpty || transactionId.trim().isEmpty) {
+      return 'Sign in is required to change your recovery email.';
+    }
+    try {
+      final response = await _client.post(
+        _endpoint('account/recovery-email/change/confirm'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $accessToken',
+        },
+        body: jsonEncode({
+          'transactionId': transactionId,
+          'currentEmailCode': currentEmailCode,
+          'newEmailCode': newEmailCode,
+        }),
+      );
+      if (response.statusCode == 200) return null;
+      return _decodeError(response.body);
+    } catch (error) {
+      debugPrint('Recovery email change confirmation failed: $error');
+      return 'Could not change your recovery email. Please retry.';
     }
   }
 

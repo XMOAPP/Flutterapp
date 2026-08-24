@@ -1,7 +1,8 @@
 part of xmo_auth_server;
 
-final _authentikConfig =
-    AuthentikProvisioningConfig.fromEnvironment(Platform.environment);
+final _authentikConfig = AuthentikProvisioningConfig.fromEnvironment(
+  Platform.environment,
+);
 
 /// Performs an early registration check so an unavailable username is
 /// rejected before an email OTP is sent. Registration repeats these checks
@@ -22,17 +23,12 @@ Future<void> _checkOidcUsernameAvailability(HttpRequest request) async {
   }
 
   final authentikUser = await _authentikFindUser(username);
-  final walletUsernameTaken = _walletAccountStoreReady &&
+  final walletUsernameTaken =
+      _walletAccountStoreReady &&
       await _walletAccountStore.usernameExists(username);
   final matrixResponse = await _synapseRequest(
     method: 'GET',
-    pathSegments: [
-      '_synapse',
-      'admin',
-      'v2',
-      'users',
-      _matrixUserId(username),
-    ],
+    pathSegments: ['_synapse', 'admin', 'v2', 'users', _matrixUserId(username)],
   );
   if (matrixResponse.statusCode != HttpStatus.ok &&
       matrixResponse.statusCode != HttpStatus.notFound) {
@@ -43,7 +39,8 @@ Future<void> _checkOidcUsernameAvailability(HttpRequest request) async {
 
   await _json(request, HttpStatus.ok, {
     'success': true,
-    'available': !walletUsernameTaken &&
+    'available':
+        !walletUsernameTaken &&
         authentikUser == null &&
         matrixResponse.statusCode == HttpStatus.notFound,
   });
@@ -146,16 +143,16 @@ Future<void> _registerOidcAccount(HttpRequest request) async {
       );
     }
 
-    // Persist recovery ownership before creating the Matrix identity. Once the
-    // passwordless Matrix user exists, no fallible local write should be able
-    // to leave it linked to an Authentik user that is then rolled back.
-    await _rememberPasswordResetEmail(username: username, email: email);
     await _ensureOidcMatrixUser(
       username: username,
       email: email,
       displayName: displayName,
       externalId: authentikUser.uuid,
     );
+    // The email proof was verified before registration. Record it only after
+    // both account identities exist; unlike the former public endpoint this
+    // cannot bind an address to an arbitrary pre-existing account.
+    _recoveryEmailStore.setVerified(username: username, email: email);
     _completeEnrollmentProof(
       proof: enrollmentProof,
       record: claimedProof,
@@ -195,13 +192,7 @@ Future<void> _ensureOidcMatrixUser({
   final userId = _matrixUserId(username);
   final getResponse = await _synapseRequest(
     method: 'GET',
-    pathSegments: [
-      '_synapse',
-      'admin',
-      'v2',
-      'users',
-      userId,
-    ],
+    pathSegments: ['_synapse', 'admin', 'v2', 'users', userId],
   );
   Map<String, dynamic>? existing;
   if (getResponse.statusCode == HttpStatus.ok) {
@@ -233,7 +224,10 @@ Future<void> _ensureOidcMatrixUser({
     'displayname': displayName,
     'admin': false,
     'deactivated': false,
-    'threepids': _mergedThreepids(existing?['threepids'], email),
+    'threepids': _replacePasswordRecoveryEmailThreepids(
+      existing?['threepids'],
+      email,
+    ),
     'external_ids': externalIds,
   });
 }
@@ -444,9 +438,7 @@ Future<void> _prepareSecureRegistration(HttpRequest request) async {
         record: claimedProof,
         username: username,
       );
-      logInfo('authentik_secure_registration_resumed', {
-        'username': username,
-      });
+      logInfo('authentik_secure_registration_resumed', {'username': username});
       await _json(request, HttpStatus.ok, {
         'success': true,
         'configured': true,
@@ -466,9 +458,7 @@ Future<void> _prepareSecureRegistration(HttpRequest request) async {
       record: claimedProof,
       username: username,
     );
-    logInfo('authentik_secure_registration_prepared', {
-      'username': username,
-    });
+    logInfo('authentik_secure_registration_prepared', {'username': username});
     await _json(request, HttpStatus.ok, {
       'success': true,
       'configured': true,
@@ -539,11 +529,7 @@ Future<void> _authentikProvisionLocalUser({
     await _authentikRequest(
       method: 'PATCH',
       pathSegments: ['api', 'v3', 'core', 'users', existing.pk.toString()],
-      body: {
-        'name': displayName,
-        'email': email,
-        'is_active': true,
-      },
+      body: {'name': displayName, 'email': email, 'is_active': true},
     );
     await _authentikSetPassword(existing.pk, password);
     return;
@@ -698,9 +684,7 @@ Future<void> _authentikUpdateXmoUser({
     },
   );
   if (response.statusCode < 200 || response.statusCode >= 300) {
-    throw HttpException(
-      'Authentik user update failed: ${response.statusCode}',
-    );
+    throw HttpException('Authentik user update failed: ${response.statusCode}');
   }
 }
 
@@ -719,9 +703,7 @@ Map<String, dynamic> _authentikCreateUserBody({
     // External users cannot browse Authentik's dashboard. Authentik remains
     // the credential provider, but XMO is the only end-user interface.
     'type': 'external',
-    'attributes': <String, dynamic>{
-      'xmo_matrix_localpart': username,
-    },
+    'attributes': <String, dynamic>{'xmo_matrix_localpart': username},
   };
 }
 
@@ -736,9 +718,7 @@ Future<_AuthentikUser?> _authentikFindUser(String username) async {
     },
   );
   if (response.statusCode < 200 || response.statusCode >= 300) {
-    throw HttpException(
-      'Authentik user lookup failed: ${response.statusCode}',
-    );
+    throw HttpException('Authentik user lookup failed: ${response.statusCode}');
   }
   final body = _decodeJsonMap(response.body);
   final results = _asList(body['results']) ?? const [];
@@ -810,10 +790,8 @@ Future<void> _authentikRevokeSessions(String username) async {
     }
 
     final pagination = _asMap(body['pagination']);
-    final totalPages = int.tryParse(
-          pagination?['total_pages']?.toString() ?? '',
-        ) ??
-        page;
+    final totalPages =
+        int.tryParse(pagination?['total_pages']?.toString() ?? '') ?? page;
     if (results.isEmpty || page >= totalPages) break;
     page += 1;
   }
@@ -821,13 +799,7 @@ Future<void> _authentikRevokeSessions(String username) async {
   for (final sessionId in sessionIds) {
     final deleteResponse = await _authentikRequest(
       method: 'DELETE',
-      pathSegments: [
-        'api',
-        'v3',
-        'core',
-        'authenticated_sessions',
-        sessionId,
-      ],
+      pathSegments: ['api', 'v3', 'core', 'authenticated_sessions', sessionId],
     );
     if (deleteResponse.statusCode != HttpStatus.noContent &&
         deleteResponse.statusCode != HttpStatus.notFound) {
@@ -845,8 +817,9 @@ Future<_AuthentikResponse> _authentikRequest({
   Map<String, dynamic>? body,
 }) async {
   final base = Uri.parse(_authentikConfig.baseUrl);
-  final normalizedPathSegments =
-      pathSegments.last.isEmpty ? pathSegments : <String>[...pathSegments, ''];
+  final normalizedPathSegments = pathSegments.last.isEmpty
+      ? pathSegments
+      : <String>[...pathSegments, ''];
   final uri = base.replace(
     pathSegments: normalizedPathSegments,
     queryParameters: queryParameters,
@@ -889,9 +862,7 @@ class AuthentikProvisioningConfig {
     required this.oidcProviderId,
   });
 
-  factory AuthentikProvisioningConfig.fromEnvironment(
-    Map<String, String> env,
-  ) {
+  factory AuthentikProvisioningConfig.fromEnvironment(Map<String, String> env) {
     final rawBaseUrl =
         env['XMO_AUTHENTIK_BASE_URL'] ?? env['AUTHENTIK_BASE_URL'] ?? '';
     final baseUrl = rawBaseUrl.endsWith('/')

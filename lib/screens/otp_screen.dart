@@ -204,6 +204,27 @@ class _OtpScreenState extends State<OtpScreen>
       return;
     }
 
+    String? localRecoveryEnrollmentTicket;
+    String? recoveryEnrollmentSetupError;
+    if (widget.isRegister) {
+      final proof = verification.secureLoginEnrollmentProof;
+      final enrollment = await OtpService().prepareLocalRecoveryEmailEnrollment(
+        username: widget.username!,
+        email: widget.email,
+        secureLoginEnrollmentProof: proof ?? '',
+      );
+      if (!enrollment.success) {
+        // Registration remains available if the optional recovery service is
+        // temporarily unavailable. Unlike the removed legacy route, this
+        // failure never silently binds an unverified email.
+        recoveryEnrollmentSetupError =
+            enrollment.error ??
+            'Password recovery setup is temporarily unavailable.';
+      } else {
+        localRecoveryEnrollmentTicket = enrollment.ticket;
+      }
+    }
+
     final bool ok;
     if (widget.isRegister) {
       ok = await provider.register(widget.username!, widget.password!);
@@ -216,12 +237,19 @@ class _OtpScreenState extends State<OtpScreen>
 
     if (ok) {
       if (widget.isRegister && widget.username != null) {
-        await OtpService().linkPasswordResetEmail(
-          username: widget.username!,
-          email: widget.email,
-        );
         if ((provider.service.accessToken ?? '').isEmpty) {
           await provider.login(widget.username!, widget.password!);
+        }
+        final recoveryEnrollmentError = localRecoveryEnrollmentTicket == null
+            ? recoveryEnrollmentSetupError
+            : await OtpService().completeLocalRecoveryEmailEnrollment(
+                accessToken: provider.service.accessToken ?? '',
+                ticket: localRecoveryEnrollmentTicket!,
+              );
+        if (recoveryEnrollmentError != null && mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(recoveryEnrollmentError)));
         }
         final proof = verification.secureLoginEnrollmentProof;
         if (proof != null && proof.isNotEmpty) {

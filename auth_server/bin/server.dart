@@ -14,6 +14,7 @@ import 'package:xmo_auth_server/src/email_service.dart';
 import 'package:xmo_auth_server/src/endpoint_modules.dart';
 import 'package:xmo_auth_server/src/health_status.dart';
 import 'package:xmo_auth_server/src/request_guard.dart';
+import 'package:xmo_auth_server/src/recovery_email_store.dart';
 import 'package:xmo_auth_server/src/room_capacity_policy.dart';
 import 'package:xmo_auth_server/src/secure_login_enrollment_proof_store.dart';
 import 'package:xmo_auth_server/src/structured_logger.dart';
@@ -30,6 +31,7 @@ part '../lib/src/handlers/otp_handler.dart';
 part '../lib/src/handlers/password_reset_handler.dart';
 part '../lib/src/handlers/push_handler.dart';
 part '../lib/src/handlers/report_handler.dart';
+part '../lib/src/handlers/recovery_email_handler.dart';
 part '../lib/src/handlers/user_directory_handler.dart';
 part '../lib/src/handlers/wallet_handler.dart';
 
@@ -38,7 +40,7 @@ final String _thirdwebSecretKey =
     Platform.environment['XMO_THIRDWEB_SECRET_KEY'] ?? '';
 final String _donationRecipientAddress =
     Platform.environment['XMO_DONATION_RECIPIENT_ADDRESS'] ??
-        _defaultDonationRecipientAddress;
+    _defaultDonationRecipientAddress;
 final String _firebaseServiceAccountJson =
     Platform.environment['XMO_FIREBASE_SERVICE_ACCOUNT_JSON'] ?? '';
 final String _firebaseServiceAccountBase64 =
@@ -62,8 +64,13 @@ final _rateLimiter = RequestRateLimiter();
 const _logger = StructuredLogger();
 final _emailConfig = EmailConfig.fromEnvironment(Platform.environment);
 final _emailService = EmailService(config: _emailConfig, logger: _logger);
-final _passwordResetConfig =
-    PasswordResetConfig.fromEnvironment(Platform.environment);
+final _passwordResetConfig = PasswordResetConfig.fromEnvironment(
+  Platform.environment,
+);
+final _recoveryEmailStore = RecoveryEmailStore(
+  ttl: _secureLoginEnrollmentProofTtl,
+  storageFile: _passwordResetConfig.recoveryEmailStorageFile,
+);
 final _walletAuthService = WalletAuthService(
   config: WalletAuthConfig.fromEnvironment(Platform.environment),
 );
@@ -83,9 +90,14 @@ final _accountDeletionJobs = AccountDeletionJobStore(
 final _inviteConfig = InviteConfig.fromEnvironment(Platform.environment);
 const _otpEndpoints = OtpEndpointModule(send: _sendOtp, verify: _verifyOtp);
 const _passwordResetEndpoints = PasswordResetEndpointModule(
-  linkEmail: _linkPasswordResetEmail,
   start: _startPasswordReset,
   complete: _completePasswordReset,
+);
+const _recoveryEmailEndpoints = RecoveryEmailEndpointModule(
+  prepareLocalEnrollment: _prepareLocalRecoveryEmailEnrollment,
+  completeLocalEnrollment: _completeLocalRecoveryEmailEnrollment,
+  startChange: _startRecoveryEmailChange,
+  confirmChange: _confirmRecoveryEmailChange,
 );
 const _donationEndpoints = DonationEndpointModule(_createDonationPayment);
 const _inviteEndpoints = InviteEndpointModule(
@@ -153,7 +165,11 @@ Future<void> main() async {
       _walletAccountStoreReady = true;
       logInfo('wallet_account_store_ready');
     } catch (error, stackTrace) {
-      _logger.error('wallet_account_store_initialization_failed', error, stackTrace);
+      _logger.error(
+        'wallet_account_store_initialization_failed',
+        error,
+        stackTrace,
+      );
     }
   }
   final server = await HttpServer.bind(InternetAddress.anyIPv4, _port);
@@ -176,19 +192,22 @@ Future<void> _handleRequest(HttpRequest request) async {
       return;
     }
 
-    final invitePreview = request.method == 'GET' &&
+    final invitePreview =
+        request.method == 'GET' &&
         _inviteEndpoints.handlesPreview(request.uri.path);
-    final inviteAvatar = request.method == 'GET' &&
+    final inviteAvatar =
+        request.method == 'GET' &&
         _inviteEndpoints.handlesAvatar(request.uri.path);
-    final inviteRedeem = request.method == 'POST' &&
+    final inviteRedeem =
+        request.method == 'POST' &&
         _inviteEndpoints.handlesRedeem(request.uri.path);
     final rateLimitRoute = invitePreview
         ? '/invites/:token/preview'
         : inviteAvatar
-            ? '/invites/:token/avatar'
-            : inviteRedeem
-                ? '/invites/:token/redeem'
-                : null;
+        ? '/invites/:token/avatar'
+        : inviteRedeem
+        ? '/invites/:token/redeem'
+        : null;
     if ((request.method == 'POST' || invitePreview || inviteAvatar) &&
         !_rateLimiter.allow(request, routeKey: rateLimitRoute)) {
       await _json(request, HttpStatus.tooManyRequests, {
@@ -203,18 +222,22 @@ Future<void> _handleRequest(HttpRequest request) async {
         HttpStatus.ok,
         buildHealthStatus(
           emailConfigured: _emailService.isConfigured,
-          donationConfigured: _thirdwebSecretKey.isNotEmpty &&
+          donationConfigured:
+              _thirdwebSecretKey.isNotEmpty &&
               _donationRecipientAddress.isNotEmpty,
-          walletAuthConfigured: _walletAuthService.config.isConfigured &&
+          walletAuthConfigured:
+              _walletAuthService.config.isConfigured &&
               _walletAccountStoreReady,
           passwordResetConfigured: _passwordResetConfig.isConfigured,
-          pushConfigured: _firebaseServiceAccountJson.isNotEmpty ||
+          pushConfigured:
+              _firebaseServiceAccountJson.isNotEmpty ||
               _firebaseServiceAccountBase64.isNotEmpty ||
               _firebaseServiceAccountFile.isNotEmpty,
           azureBlobConfigured: _azureBlobConfig.isConfigured,
           userDirectoryConfigured: _userDirectoryConfig.isConfigured,
           reportsConfigured: _reportConfig.isConfigured,
-          accountDeletionConfigured: _passwordResetConfig.isConfigured &&
+          accountDeletionConfigured:
+              _passwordResetConfig.isConfigured &&
               _authentikConfig.isConfigured &&
               _emailService.isConfigured,
           channelAnalyticsConfigured: _channelAnalyticsConfig.isConfigured,
@@ -307,8 +330,30 @@ Future<void> _handleRequest(HttpRequest request) async {
     }
 
     if (request.method == 'POST' &&
-        _passwordResetEndpoints.handlesLinkEmail(request.uri.path)) {
-      await _passwordResetEndpoints.linkEmail(request);
+        _recoveryEmailEndpoints.handlesPrepareLocalEnrollment(
+          request.uri.path,
+        )) {
+      await _recoveryEmailEndpoints.prepareLocalEnrollment(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _recoveryEmailEndpoints.handlesCompleteLocalEnrollment(
+          request.uri.path,
+        )) {
+      await _recoveryEmailEndpoints.completeLocalEnrollment(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _recoveryEmailEndpoints.handlesStartChange(request.uri.path)) {
+      await _recoveryEmailEndpoints.startChange(request);
+      return;
+    }
+
+    if (request.method == 'POST' &&
+        _recoveryEmailEndpoints.handlesConfirmChange(request.uri.path)) {
+      await _recoveryEmailEndpoints.confirmChange(request);
       return;
     }
 
@@ -385,17 +430,13 @@ Future<void> _handleRequest(HttpRequest request) async {
     }
 
     if (request.method == 'POST' &&
-        _userDirectoryEndpoints.handlesUsernameAvailability(
-          request.uri.path,
-        )) {
+        _userDirectoryEndpoints.handlesUsernameAvailability(request.uri.path)) {
       await _userDirectoryEndpoints.checkUsernameAvailability(request);
       return;
     }
 
     if (request.method == 'POST' &&
-        _userDirectoryEndpoints.handlesRegisterOidcAccount(
-          request.uri.path,
-        )) {
+        _userDirectoryEndpoints.handlesRegisterOidcAccount(request.uri.path)) {
       await _userDirectoryEndpoints.registerOidcAccount(request);
       return;
     }
@@ -409,9 +450,7 @@ Future<void> _handleRequest(HttpRequest request) async {
     }
 
     if (request.method == 'POST' &&
-        _userDirectoryEndpoints.handlesProvisionSecureLogin(
-          request.uri.path,
-        )) {
+        _userDirectoryEndpoints.handlesProvisionSecureLogin(request.uri.path)) {
       await _userDirectoryEndpoints.provisionSecureLogin(request);
       return;
     }
@@ -444,11 +483,9 @@ Future<void> _handleRequest(HttpRequest request) async {
     await _json(request, HttpStatus.badRequest, {'error': error.message});
   } catch (e, st) {
     _logger.error('request_failed', e, st);
-    await _json(
-      request,
-      HttpStatus.internalServerError,
-      {'error': 'Internal server error'},
-    );
+    await _json(request, HttpStatus.internalServerError, {
+      'error': 'Internal server error',
+    });
   } finally {
     stopwatch.stop();
     _logger.request(

@@ -6,11 +6,13 @@ final _retryingAccountDeletionJobs = <String>{};
 
 Uri _accountDeletionCompletionUri(String userId) {
   const fallback = 'https://xmo.dpdns.org/account/deleted';
-  final configured = Platform.environment['XMO_ACCOUNT_DELETION_COMPLETION_URL'];
+  final configured =
+      Platform.environment['XMO_ACCOUNT_DELETION_COMPLETION_URL'];
   final candidate = Uri.tryParse(
     configured == null || configured.trim().isEmpty ? fallback : configured,
   );
-  final base = candidate != null &&
+  final base =
+      candidate != null &&
           candidate.scheme == 'https' &&
           candidate.host.toLowerCase() == 'xmo.dpdns.org' &&
           candidate.path == '/account/deleted'
@@ -66,8 +68,10 @@ Future<void> _requestExternalAccountDeletion(HttpRequest request) async {
   }
 
   final otp = (_random.nextInt(900000) + 100000).toString();
-  _accountDeletionStore[_passwordResetKey(username, email)] =
-      _AccountDeletionRecord(
+  _accountDeletionStore[_passwordResetKey(
+    username,
+    email,
+  )] = _AccountDeletionRecord(
     code: otp,
     expiresAt: DateTime.now().toUtc().add(_accountDeletionTtl),
   );
@@ -75,7 +79,8 @@ Future<void> _requestExternalAccountDeletion(HttpRequest request) async {
     await _emailService.sendGenericEmail(
       to: email,
       subject: 'Confirm deletion of your XMO account',
-      htmlContent: '''
+      htmlContent:
+          '''
         <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;text-align:center">
           <h2>Delete your XMO account</h2>
           <p>Enter this code on the XMO account deletion page.</p>
@@ -84,7 +89,8 @@ Future<void> _requestExternalAccountDeletion(HttpRequest request) async {
           <p style="color:#666;font-size:13px">If you did not request deletion, ignore this email and your account will remain active.</p>
         </div>
       ''',
-      textContent: 'Delete your XMO account\n\n'
+      textContent:
+          'Delete your XMO account\n\n'
           'Your deletion code is: $otp\n\n'
           'This code expires in 10 minutes. If you did not request deletion, '
           'ignore this email.',
@@ -162,10 +168,7 @@ Future<void> _confirmExternalAccountDeletion(HttpRequest request) async {
   await _acceptAccountDeletion(request, userId);
 }
 
-Future<void> _acceptAccountDeletion(
-  HttpRequest request,
-  String userId,
-) async {
+Future<void> _acceptAccountDeletion(HttpRequest request, String userId) async {
   if (!_passwordResetConfig.isConfigured || !_authentikConfig.isConfigured) {
     await _json(request, HttpStatus.serviceUnavailable, {
       'success': false,
@@ -185,18 +188,14 @@ Future<void> _acceptAccountDeletion(
   if (!job.isComplete) {
     _scheduleAccountDeletionRetry(normalized, initialDelay: Duration.zero);
   }
-  await _json(
-    request,
-    job.isComplete ? HttpStatus.ok : HttpStatus.accepted,
-    {
-      'success': true,
-      'status': job.isComplete ? 'complete' : 'processing',
-      'user_id': normalized,
-      'return_url': _accountDeletionCompletionUri(normalized).toString(),
-      if (!job.isComplete)
-        'message': 'Account deletion was accepted and is processing.',
-    },
-  );
+  await _json(request, job.isComplete ? HttpStatus.ok : HttpStatus.accepted, {
+    'success': true,
+    'status': job.isComplete ? 'complete' : 'processing',
+    'user_id': normalized,
+    'return_url': _accountDeletionCompletionUri(normalized).toString(),
+    if (!job.isComplete)
+      'message': 'Account deletion was accepted and is processing.',
+  });
 }
 
 Future<void> _runAccountDeletionJob(String userId) {
@@ -328,26 +327,22 @@ Future<void> _purgeXmoAccountRecords(String userId) async {
   directory.remove(localpart);
   await _writeUserDirectoryEntries(directory);
 
-  final remembered = await _readRememberedPasswordResetEmails();
-  final email = remembered.remove(localpart);
-  await _writeRememberedPasswordResetEmails(remembered);
+  final email = _recoveryEmailStore.removeVerified(localpart);
 
-  _passwordResetStore.removeWhere(
-    (key, _) => key.startsWith('$localpart|'),
-  );
-  _accountDeletionStore.removeWhere(
-    (key, _) => key.startsWith('$localpart|'),
-  );
+  _passwordResetStore.removeWhere((key, _) => key.startsWith('$localpart|'));
+  _accountDeletionStore.removeWhere((key, _) => key.startsWith('$localpart|'));
   if (email != null) _otpStore.remove(email);
   if (_walletAccountStoreReady) {
     await _walletAccountStore.removeUsername(localpart);
   }
 
   await _withReportStore((reports) {
-    reports.removeWhere((_, report) =>
-        report.reporterUserId == normalized ||
-        report.reportedUserId == normalized ||
-        report.reviewedBy == normalized);
+    reports.removeWhere(
+      (_, report) =>
+          report.reporterUserId == normalized ||
+          report.reportedUserId == normalized ||
+          report.reviewedBy == normalized,
+    );
     return null;
   });
   await _deleteChannelAnalyticsForUser(normalized);

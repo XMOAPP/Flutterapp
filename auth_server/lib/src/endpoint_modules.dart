@@ -22,19 +22,12 @@ class OtpEndpointModule {
 
 class PasswordResetEndpointModule {
   const PasswordResetEndpointModule({
-    required this.linkEmail,
     required this.start,
     required this.complete,
   });
 
-  final EndpointHandler linkEmail;
   final EndpointHandler start;
   final EndpointHandler complete;
-
-  bool handlesLinkEmail(String path) =>
-      path == '/password/link-email' ||
-      path == '/auth/otp/password/link-email' ||
-      path == '/auth/password/link-email';
 
   bool handlesStart(String path) =>
       path == '/password/reset/start' ||
@@ -46,6 +39,42 @@ class PasswordResetEndpointModule {
       path == '/password/reset/complete' ||
       path == '/auth/otp/password/reset/complete' ||
       path == '/auth/password/reset/complete';
+}
+
+/// Safe recovery-email enrollment for a newly-created local Matrix account.
+/// The old public `password/link-email` route is intentionally absent.
+class RecoveryEmailEndpointModule {
+  const RecoveryEmailEndpointModule({
+    required this.prepareLocalEnrollment,
+    required this.completeLocalEnrollment,
+    required this.startChange,
+    required this.confirmChange,
+  });
+
+  final EndpointHandler prepareLocalEnrollment;
+  final EndpointHandler completeLocalEnrollment;
+  final EndpointHandler startChange;
+  final EndpointHandler confirmChange;
+
+  bool handlesPrepareLocalEnrollment(String path) =>
+      path == '/accounts/recovery-email/local-enrollment/prepare' ||
+      path == '/auth/accounts/recovery-email/local-enrollment/prepare' ||
+      path == '/auth/otp/accounts/recovery-email/local-enrollment/prepare';
+
+  bool handlesCompleteLocalEnrollment(String path) =>
+      path == '/accounts/recovery-email/local-enrollment/complete' ||
+      path == '/auth/accounts/recovery-email/local-enrollment/complete' ||
+      path == '/auth/otp/accounts/recovery-email/local-enrollment/complete';
+
+  bool handlesStartChange(String path) =>
+      path == '/account/recovery-email/change/start' ||
+      path == '/auth/account/recovery-email/change/start' ||
+      path == '/auth/otp/account/recovery-email/change/start';
+
+  bool handlesConfirmChange(String path) =>
+      path == '/account/recovery-email/change/confirm' ||
+      path == '/auth/account/recovery-email/change/confirm' ||
+      path == '/auth/otp/account/recovery-email/change/confirm';
 }
 
 class DonationEndpointModule {
@@ -101,7 +130,7 @@ class InviteEndpointModule {
     for (final prefix in const [
       '/invites/',
       '/auth/invites/',
-      '/auth/otp/invites/'
+      '/auth/otp/invites/',
     ]) {
       if (!path.startsWith(prefix) || !path.endsWith(suffix)) continue;
       final token = path.substring(prefix.length, path.length - suffix.length);

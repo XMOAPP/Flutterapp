@@ -67,10 +67,7 @@ void main() {
       ),
       isTrue,
     );
-    expect(
-      module.handlesPrepareSecureRegistration('/users/search'),
-      isFalse,
-    );
+    expect(module.handlesPrepareSecureRegistration('/users/search'), isFalse);
   });
 
   test('matches post-registration secure-login route aliases', () {
@@ -79,9 +76,7 @@ void main() {
       isTrue,
     );
     expect(
-      module.handlesProvisionSecureLogin(
-        '/auth/users/provision-secure-login',
-      ),
+      module.handlesProvisionSecureLogin('/auth/users/provision-secure-login'),
       isTrue,
     );
     expect(
@@ -91,5 +86,35 @@ void main() {
       isTrue,
     );
     expect(module.handlesProvisionSecureLogin('/users/search'), isFalse);
+  });
+
+  const recoveryModule = RecoveryEmailEndpointModule(
+    prepareLocalEnrollment: _noop,
+    completeLocalEnrollment: _noop,
+    startChange: _noop,
+    confirmChange: _noop,
+  );
+
+  test('does not expose the legacy public recovery email linking route', () {
+    expect(
+      recoveryModule.handlesPrepareLocalEnrollment('/password/link-email'),
+      isFalse,
+    );
+    expect(
+      recoveryModule.handlesPrepareLocalEnrollment(
+        '/accounts/recovery-email/local-enrollment/prepare',
+      ),
+      isTrue,
+    );
+    expect(
+      recoveryModule.handlesCompleteLocalEnrollment(
+        '/accounts/recovery-email/local-enrollment/complete',
+      ),
+      isTrue,
+    );
+    expect(
+      recoveryModule.handlesStartChange('/account/recovery-email/change/start'),
+      isTrue,
+    );
   });
 }

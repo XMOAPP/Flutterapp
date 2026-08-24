@@ -47,6 +47,7 @@ import 'native_share_stub.dart'
     if (dart.library.io) 'native_share.dart'
     as native_share;
 import 'profile_settings_screen.dart';
+import 'recovery_email_settings_screen.dart';
 
 class AppSettingsScreen extends StatefulWidget {
   const AppSettingsScreen({super.key});
@@ -215,6 +216,19 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                       context,
                       MaterialPageRoute(
                         builder: (_) => const SecuritySettingsScreen(),
+                      ),
+                    );
+                  },
+                ),
+                _navTile(
+                  icon: Icons.mark_email_read,
+                  title: 'Recovery email',
+                  subtitle: 'Enroll or change your password recovery email',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const RecoveryEmailSettingsScreen(),
                       ),
                     );
                   },

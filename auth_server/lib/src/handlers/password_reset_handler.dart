@@ -1,36 +1,5 @@
 part of xmo_auth_server;
 
-Future<void> _linkPasswordResetEmail(HttpRequest request) async {
-  final body = await _readJson(request);
-  final username = _normalizeMatrixLocalpart(body['username']);
-  final email = _normalizeEmail(body['email']);
-
-  if (username.isEmpty || !_isValidMatrixLocalpart(username)) {
-    await _json(request, HttpStatus.badRequest, {'error': 'Invalid username'});
-    return;
-  }
-  if (!_isValidEmail(email)) {
-    await _json(request, HttpStatus.badRequest, {'error': 'Invalid email'});
-    return;
-  }
-  if (!_passwordResetConfig.isConfigured) {
-    await _json(request, HttpStatus.ok, {'success': false});
-    return;
-  }
-
-  final userId = _matrixUserId(username);
-  try {
-    final profile = await _synapseGetUser(userId);
-    final threepids = _mergedThreepids(profile['threepids'], email);
-    await _synapseUpdateUser(userId, {'threepids': threepids});
-    await _rememberPasswordResetEmail(username: username, email: email);
-    await _json(request, HttpStatus.ok, {'success': true});
-  } catch (error, st) {
-    _logger.error('password_reset_link_email_failed', error, st);
-    await _json(request, HttpStatus.ok, {'success': false});
-  }
-}
-
 Future<void> _startPasswordReset(HttpRequest request) async {
   final body = await _readJson(request);
   final username = _normalizeMatrixLocalpart(body['username']);
@@ -45,19 +14,15 @@ Future<void> _startPasswordReset(HttpRequest request) async {
     return;
   }
   if (!_emailService.isConfigured) {
-    await _json(
-      request,
-      HttpStatus.internalServerError,
-      {'error': 'Email provider is not configured'},
-    );
+    await _json(request, HttpStatus.internalServerError, {
+      'error': 'Email provider is not configured',
+    });
     return;
   }
   if (!_passwordResetConfig.isConfigured) {
-    await _json(
-      request,
-      HttpStatus.internalServerError,
-      {'error': 'Password reset is not configured'},
-    );
+    await _json(request, HttpStatus.internalServerError, {
+      'error': 'Password reset is not configured',
+    });
     return;
   }
 
@@ -71,8 +36,10 @@ Future<void> _startPasswordReset(HttpRequest request) async {
   }
 
   final otp = (_random.nextInt(900000) + 100000).toString();
-  _passwordResetStore[_passwordResetKey(username, email)] =
-      _PasswordResetRecord(
+  _passwordResetStore[_passwordResetKey(
+    username,
+    email,
+  )] = _PasswordResetRecord(
     code: otp,
     expiresAt: DateTime.now().toUtc().add(_passwordResetTtl),
   );
@@ -81,7 +48,8 @@ Future<void> _startPasswordReset(HttpRequest request) async {
     await _emailService.sendGenericEmail(
       to: email,
       subject: 'Reset your XMO password',
-      htmlContent: '''
+      htmlContent:
+          '''
         <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; text-align: center;">
           <h2 style="margin: 0 0 16px;">Reset your XMO password</h2>
           <p style="margin: 0 0 14px;">Enter this code in XMO to reset your password.</p>
@@ -91,7 +59,8 @@ Future<void> _startPasswordReset(HttpRequest request) async {
           <p style="color: #666; font-size: 13px;">Need help? Contact support@xmo.dpdns.org.</p>
         </div>
       ''',
-      textContent: 'Reset your XMO password\n\n'
+      textContent:
+          'Reset your XMO password\n\n'
           'Your reset code is: $otp\n\n'
           'This code expires in 5 minutes.\n\n'
           'If you did not request this, ignore this email.\n\n'
@@ -126,53 +95,51 @@ Future<void> _completePasswordReset(HttpRequest request) async {
     return;
   }
   if (otp.length != 6) {
-    await _json(
-        request, HttpStatus.badRequest, {'error': 'Invalid reset code'});
+    await _json(request, HttpStatus.badRequest, {
+      'error': 'Invalid reset code',
+    });
     return;
   }
   if (newPassword.length < 6) {
-    await _json(
-      request,
-      HttpStatus.badRequest,
-      {'error': 'Password must be at least 6 characters'},
-    );
+    await _json(request, HttpStatus.badRequest, {
+      'error': 'Password must be at least 6 characters',
+    });
     return;
   }
   if (!_passwordResetConfig.isConfigured) {
-    await _json(
-      request,
-      HttpStatus.internalServerError,
-      {'error': 'Password reset is not configured'},
-    );
+    await _json(request, HttpStatus.internalServerError, {
+      'error': 'Password reset is not configured',
+    });
     return;
   }
 
   final key = _passwordResetKey(username, email);
   final record = _passwordResetStore[key];
   if (record == null) {
-    await _json(
-        request, HttpStatus.badRequest, {'error': 'Reset not requested'});
+    await _json(request, HttpStatus.badRequest, {
+      'error': 'Reset not requested',
+    });
     return;
   }
   if (DateTime.now().toUtc().isAfter(record.expiresAt)) {
     _passwordResetStore.remove(key);
-    await _json(
-        request, HttpStatus.badRequest, {'error': 'Reset code expired'});
+    await _json(request, HttpStatus.badRequest, {
+      'error': 'Reset code expired',
+    });
     return;
   }
   record.attempts += 1;
   if (record.attempts > _maxAttempts) {
     _passwordResetStore.remove(key);
-    await _json(
-      request,
-      HttpStatus.tooManyRequests,
-      {'error': 'Too many reset attempts'},
-    );
+    await _json(request, HttpStatus.tooManyRequests, {
+      'error': 'Too many reset attempts',
+    });
     return;
   }
   if (record.code != otp) {
-    await _json(
-        request, HttpStatus.badRequest, {'error': 'Incorrect reset code'});
+    await _json(request, HttpStatus.badRequest, {
+      'error': 'Incorrect reset code',
+    });
     return;
   }
 
@@ -182,8 +149,9 @@ Future<void> _completePasswordReset(HttpRequest request) async {
   );
   if (!verified) {
     _passwordResetStore.remove(key);
-    await _json(
-        request, HttpStatus.forbidden, {'error': 'Email is not verified'});
+    await _json(request, HttpStatus.forbidden, {
+      'error': 'Email is not verified',
+    });
     return;
   }
 
@@ -192,11 +160,9 @@ Future<void> _completePasswordReset(HttpRequest request) async {
       await _synapseResetPassword(_matrixUserId(username), newPassword);
     } catch (error, st) {
       _logger.error('password_reset_failed', error, st);
-      await _json(
-        request,
-        HttpStatus.badGateway,
-        {'error': 'Could not reset password'},
-      );
+      await _json(request, HttpStatus.badGateway, {
+        'error': 'Could not reset password',
+      });
       return;
     }
   }
@@ -209,15 +175,11 @@ Future<void> _completePasswordReset(HttpRequest request) async {
     );
   } catch (error, st) {
     _logger.error('authentik_password_sync_failed', error, st);
-    await _json(
-      request,
-      HttpStatus.badGateway,
-      {
-        'error': _passwordResetConfig.oidcOnlyAuthentication
-            ? 'Could not update your password. Please retry.'
-            : 'Password was updated, but secure sign-in synchronization failed. Retry with the same new password.',
-      },
-    );
+    await _json(request, HttpStatus.badGateway, {
+      'error': _passwordResetConfig.oidcOnlyAuthentication
+          ? 'Could not update your password. Please retry.'
+          : 'Password was updated, but secure sign-in synchronization failed. Retry with the same new password.',
+    });
     return;
   }
 
@@ -226,14 +188,10 @@ Future<void> _completePasswordReset(HttpRequest request) async {
     await _synapseDeleteAllDevices(_matrixUserId(username));
   } catch (error, st) {
     _logger.error('password_reset_session_revocation_failed', error, st);
-    await _json(
-      request,
-      HttpStatus.badGateway,
-      {
-        'error':
-            'Password updated, but existing sessions could not be signed out. Retry with the same new password.',
-      },
-    );
+    await _json(request, HttpStatus.badGateway, {
+      'error':
+          'Password updated, but existing sessions could not be signed out. Retry with the same new password.',
+    });
     return;
   }
 
@@ -245,59 +203,7 @@ Future<void> _completePasswordReset(HttpRequest request) async {
 Future<bool> _isPasswordResetEmailVerified({
   required String username,
   required String email,
-}) async {
-  final remembered = await _readRememberedPasswordResetEmails();
-  if (remembered[username] == email) return true;
-
-  try {
-    final profile = await _synapseGetUser(_matrixUserId(username));
-    final threepids = _asList(profile['threepids']) ?? const [];
-    return threepids.any((item) {
-      final data = _asMap(item);
-      return data?['medium']?.toString() == 'email' &&
-          _normalizeEmail(data?['address']) == email;
-    });
-  } catch (_) {
-    return false;
-  }
-}
-
-Future<void> _rememberPasswordResetEmail({
-  required String username,
-  required String email,
-}) async {
-  if (_passwordResetConfig.dataFile.isEmpty) return;
-  final entries = await _readRememberedPasswordResetEmails();
-  entries[username] = email;
-  await _writeRememberedPasswordResetEmails(entries);
-}
-
-Future<void> _writeRememberedPasswordResetEmails(
-  Map<String, String> entries,
-) async {
-  if (_passwordResetConfig.dataFile.isEmpty) return;
-  final file = File(_passwordResetConfig.dataFile);
-  await file.parent.create(recursive: true);
-  await file.writeAsString(jsonEncode(entries));
-}
-
-Future<Map<String, String>> _readRememberedPasswordResetEmails() async {
-  if (_passwordResetConfig.dataFile.isEmpty) return {};
-  final file = File(_passwordResetConfig.dataFile);
-  if (!await file.exists()) return {};
-  try {
-    final decoded = jsonDecode(await file.readAsString());
-    if (decoded is! Map) return {};
-    return decoded.map(
-      (key, value) => MapEntry(
-        _normalizeMatrixLocalpart(key),
-        _normalizeEmail(value),
-      ),
-    )..removeWhere((key, value) => key.isEmpty || value.isEmpty);
-  } catch (_) {
-    return {};
-  }
-}
+}) async => _recoveryEmailStore.hasVerifiedEmail(username, email);
 
 Future<Map<String, dynamic>> _synapseGetUser(String userId) async {
   final response = await _synapseRequest(
@@ -324,14 +230,54 @@ Future<void> _synapseUpdateUser(
   }
 }
 
+Future<bool> _isRecoveryEmailAvailable({
+  required String userId,
+  required String email,
+}) async {
+  final response = await _synapseRequest(
+    method: 'GET',
+    pathSegments: [
+      '_synapse',
+      'admin',
+      'v1',
+      'threepid',
+      'email',
+      'users',
+      email,
+    ],
+  );
+  if (response.statusCode == HttpStatus.notFound) return true;
+  if (response.statusCode != HttpStatus.ok) {
+    throw HttpException(
+      'Synapse recovery email lookup failed: ${response.statusCode}',
+    );
+  }
+  final owner = _decodeJsonMap(response.body)['user_id']?.toString() ?? '';
+  return owner == userId;
+}
+
+Future<bool> _verifyCurrentMatrixPassword({
+  required String userId,
+  required String password,
+}) async {
+  final response = await _synapseRequest(
+    method: 'POST',
+    pathSegments: ['_matrix', 'client', 'v3', 'login'],
+    includeAdminToken: false,
+    body: {
+      'type': 'm.login.password',
+      'identifier': {'type': 'm.id.user', 'user': userId},
+      'password': password,
+    },
+  );
+  return response.statusCode >= 200 && response.statusCode < 300;
+}
+
 Future<void> _synapseResetPassword(String userId, String newPassword) async {
   final response = await _synapseRequest(
     method: 'POST',
     pathSegments: ['_synapse', 'admin', 'v1', 'reset_password', userId],
-    body: {
-      'new_password': newPassword,
-      'logout_devices': true,
-    },
+    body: {'new_password': newPassword, 'logout_devices': true},
   );
   if (response.statusCode < 200 || response.statusCode >= 300) {
     throw HttpException('Synapse reset failed: ${response.statusCode}');
@@ -341,14 +287,7 @@ Future<void> _synapseResetPassword(String userId, String newPassword) async {
 Future<void> _synapseDeleteAllDevices(String userId) async {
   final listResponse = await _synapseRequest(
     method: 'GET',
-    pathSegments: [
-      '_synapse',
-      'admin',
-      'v2',
-      'users',
-      userId,
-      'devices',
-    ],
+    pathSegments: ['_synapse', 'admin', 'v2', 'users', userId, 'devices'],
   );
   if (listResponse.statusCode < 200 || listResponse.statusCode >= 300) {
     throw HttpException(
@@ -356,7 +295,8 @@ Future<void> _synapseDeleteAllDevices(String userId) async {
     );
   }
 
-  final devices = _asList(_decodeJsonMap(listResponse.body)['devices']) ??
+  final devices =
+      _asList(_decodeJsonMap(listResponse.body)['devices']) ??
       const <dynamic>[];
   final deviceIds = devices
       .map(_asMap)
@@ -390,6 +330,7 @@ Future<_SynapseResponse> _synapseRequest({
   required List<String> pathSegments,
   Map<String, String>? queryParameters,
   Map<String, dynamic>? body,
+  bool includeAdminToken = true,
 }) async {
   final base = Uri.parse(_passwordResetConfig.homeserverUrl);
   final uri = base.replace(
@@ -400,10 +341,12 @@ Future<_SynapseResponse> _synapseRequest({
   client.connectionTimeout = const Duration(seconds: 10);
   try {
     final request = await client.openUrl(method, uri);
-    request.headers.set(
-      HttpHeaders.authorizationHeader,
-      'Bearer ${_passwordResetConfig.adminToken}',
-    );
+    if (includeAdminToken) {
+      request.headers.set(
+        HttpHeaders.authorizationHeader,
+        'Bearer ${_passwordResetConfig.adminToken}',
+      );
+    }
     request.headers.contentType = ContentType.json;
     if (body != null) {
       request.write(jsonEncode(body));
@@ -416,21 +359,23 @@ Future<_SynapseResponse> _synapseRequest({
   }
 }
 
-List<Map<String, String>> _mergedThreepids(Object? current, String email) {
-  final existing = <Map<String, String>>[];
+/// XMO supports one recovery email. Replacing the email entries prevents a
+/// superseded or legacy 3PID from remaining an alternate password-reset path
+/// in a Synapse deployment that has its own email reset feature enabled.
+List<Map<String, String>> _replacePasswordRecoveryEmailThreepids(
+  Object? current,
+  String email,
+) {
+  final remaining = <Map<String, String>>[];
   for (final item in _asList(current) ?? const []) {
     final data = _asMap(item);
-    if (data == null) continue;
-    final medium = data['medium']?.toString();
-    final address = data['address']?.toString();
-    if (medium == null || address == null) continue;
-    if (medium == 'email' && _normalizeEmail(address) == email) {
-      continue;
-    }
-    existing.add({'medium': medium, 'address': address});
+    final medium = data?['medium']?.toString();
+    final address = data?['address']?.toString();
+    if (medium == null || address == null || medium == 'email') continue;
+    remaining.add({'medium': medium, 'address': address});
   }
-  existing.add({'medium': 'email', 'address': email});
-  return existing;
+  remaining.add({'medium': 'email', 'address': email});
+  return remaining;
 }
 
 String _passwordResetKey(String username, String email) => '$username|$email';
@@ -466,10 +411,12 @@ class PasswordResetConfig {
   });
 
   factory PasswordResetConfig.fromEnvironment(Map<String, String> env) {
-    final homeserverUrl = env['XMO_HOMESERVER_URL'] ??
+    final homeserverUrl =
+        env['XMO_HOMESERVER_URL'] ??
         env['MATRIX_HOMESERVER_URL'] ??
         'http://synapse:8008';
-    final serverName = env['XMO_MATRIX_SERVER_NAME'] ??
+    final serverName =
+        env['XMO_MATRIX_SERVER_NAME'] ??
         env['MATRIX_SERVER_NAME'] ??
         'localhost';
     final dataFile =
@@ -495,13 +442,21 @@ class PasswordResetConfig {
       homeserverUrl.trim().isNotEmpty &&
       serverName.trim().isNotEmpty &&
       adminToken.trim().isNotEmpty;
+
+  File? get recoveryEmailStorageFile {
+    final configured = Platform.environment['XMO_RECOVERY_EMAIL_STORE_FILE'];
+    if (configured != null && configured.trim().isNotEmpty) {
+      return File(configured.trim());
+    }
+    if (dataFile.trim().isNotEmpty) {
+      return File('$dataFile.recovery-email');
+    }
+    return File('/app/data/recovery_emails.json');
+  }
 }
 
 class _PasswordResetRecord {
-  _PasswordResetRecord({
-    required this.code,
-    required this.expiresAt,
-  });
+  _PasswordResetRecord({required this.code, required this.expiresAt});
 
   final String code;
   final DateTime expiresAt;

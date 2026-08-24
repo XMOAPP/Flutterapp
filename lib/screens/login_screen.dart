@@ -160,10 +160,6 @@ class _LoginScreenState extends State<LoginScreen>
         Navigator.pop(context);
 
         if (ok) {
-          await OtpService().linkPasswordResetEmail(
-            username: username,
-            email: email,
-          );
           if ((provider.service.accessToken ?? '').isEmpty) {
             await provider.login(username, password);
           }

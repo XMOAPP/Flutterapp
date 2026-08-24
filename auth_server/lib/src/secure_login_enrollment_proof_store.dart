@@ -35,9 +35,9 @@ class SecureLoginEnrollmentProofStore {
     File? storageFile,
     Random? random,
     DateTime Function()? now,
-  })  : _random = random ?? Random.secure(),
-        _now = now ?? (() => DateTime.now().toUtc()),
-        _storageFile = storageFile {
+  }) : _random = random ?? Random.secure(),
+       _now = now ?? (() => DateTime.now().toUtc()),
+       _storageFile = storageFile {
     _load();
     prune();
   }
@@ -79,6 +79,16 @@ class SecureLoginEnrollmentProofStore {
     return record;
   }
 
+  /// Checks a pending proof without consuming it. This is deliberately used
+  /// only to create a ticket for a not-yet-created local Matrix account; the
+  /// ticket is later bound to that newly authenticated account.
+  bool isPendingForEmail({required String proof, required String email}) {
+    prune();
+    if (proof.isEmpty) return false;
+    final record = _records[_digest(proof)];
+    return record != null && record.emailDigest == _digest(email);
+  }
+
   void restore(String proof, SecureLoginEnrollmentProofClaim claim) {
     if (proof.isNotEmpty && _now().isBefore(claim.expiresAt)) {
       _records[_digest(proof)] = claim;
@@ -117,9 +127,7 @@ class SecureLoginEnrollmentProofStore {
     final recordsBefore = _records.length;
     final completedBefore = _completed.length;
     _records.removeWhere((_, record) => !current.isBefore(record.expiresAt));
-    _completed.removeWhere(
-      (_, record) => !current.isBefore(record.expiresAt),
-    );
+    _completed.removeWhere((_, record) => !current.isBefore(record.expiresAt));
     if (recordsBefore != _records.length ||
         completedBefore != _completed.length) {
       _persist();
