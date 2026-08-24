@@ -14,6 +14,17 @@ void main() {
       sanitizeRequestPath('/auth/invites/$token/redeem'),
       '/auth/invites/<redacted>/redeem',
     );
+
+    for (final prefix in const <String>[
+      '/invites',
+      '/auth/invites',
+      '/auth/otp/invites',
+    ]) {
+      expect(
+        sanitizeRequestPath('$prefix/$token/avatar'),
+        '$prefix/<redacted>/avatar',
+      );
+    }
   });
 
   test('unrelated request paths are unchanged', () {

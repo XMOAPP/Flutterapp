@@ -25,7 +25,7 @@ class StructuredLogger {
 String sanitizeRequestPath(String path) {
   return path.replaceAllMapped(
     RegExp(
-      r'(^|/)(invites)/[A-Za-z0-9_-]{40,64}/(preview|redeem)(?=/|$)',
+      r'(^|/)(invites)/[A-Za-z0-9_-]{40,64}/(preview|avatar|redeem)(?=/|$)',
     ),
     (match) =>
         '${match.group(1)}${match.group(2)}/<redacted>/${match.group(3)}',
