@@ -60,7 +60,10 @@ final _secureLoginEnrollmentProofs = SecureLoginEnrollmentProofStore(
 );
 final _passwordResetStore = <String, _PasswordResetRecord>{};
 final _random = Random.secure();
-final _rateLimiter = RequestRateLimiter();
+final _trustedProxyConfig = TrustedProxyConfig.fromEnvironment(
+  Platform.environment,
+);
+final _rateLimiter = RequestRateLimiter(trustedProxies: _trustedProxyConfig);
 const _logger = StructuredLogger();
 final _emailConfig = EmailConfig.fromEnvironment(Platform.environment);
 final _emailService = EmailService(config: _emailConfig, logger: _logger);

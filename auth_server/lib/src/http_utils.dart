@@ -34,11 +34,3 @@ void sendJson(
     ..headers.contentType = ContentType.json
     ..write(jsonEncode(body));
 }
-
-String clientIp(HttpRequest request) {
-  final forwardedFor = request.headers.value('x-forwarded-for');
-  if (forwardedFor != null && forwardedFor.trim().isNotEmpty) {
-    return forwardedFor.split(',').first.trim();
-  }
-  return request.connectionInfo?.remoteAddress.address ?? 'unknown';
-}
