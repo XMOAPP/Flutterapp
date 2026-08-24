@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../config/app_config.dart';
+import '../security/callback_uri_validation.dart';
 
 /// Handles the verified App Link sent after Authentik completes TOTP setup.
 ///
@@ -32,13 +33,12 @@ class MfaSetupCompletionService {
   static bool isCompletionUri(Uri uri) {
     final callback = Uri.tryParse(AppConfig.ssoCallbackUrl.trim());
     if (callback == null ||
-        uri.userInfo.isNotEmpty ||
-        uri.fragment.isNotEmpty ||
         uri.scheme.toLowerCase() != callback.scheme.toLowerCase() ||
         uri.host.toLowerCase() != callback.host.toLowerCase() ||
         uri.port != callback.port ||
         uri.path != callback.path ||
-        uri.queryParameters.length != 1) {
+        uri.queryParameters.length != 1 ||
+        !hasOnlySingleAllowedQueryParameters(uri, {actionParameter})) {
       return false;
     }
     return uri.queryParameters[actionParameter] == completionAction;

@@ -31,6 +31,12 @@ void main() {
       );
       expect(
         InviteLinkService.extractSecureToken(
+          'https://xmo.dpdns.org/join/$token?next=unexpected',
+        ),
+        isNull,
+      );
+      expect(
+        InviteLinkService.extractSecureToken(
           'https://xmo.dpdns.org/join/${token}extra/path',
         ),
         isNull,

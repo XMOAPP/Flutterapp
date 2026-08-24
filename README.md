@@ -543,6 +543,11 @@ username availability, donation creation, invite operations, account deletion,
 and Azure chunk-signing authorization. Review logs for token, password, OTP,
 wallet signature, and media-secret leakage.
 
+New and reset passwords must be 15-256 characters. Existing passwords remain
+valid until changed. Mirror this policy in every Authentik enrollment,
+password-change, and recovery prompt; its API-created users are still checked
+by the auth server.
+
 Set `XMO_ALLOWED_CORS_ORIGINS` to the comma-separated exact browser origins
 that may access the auth server (production: `https://xmo.dpdns.org`). Do not
 use `*`. The legacy loopback email helper permits browser access only when its

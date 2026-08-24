@@ -21,6 +21,12 @@ void main() {
       );
       expect(
         MatrixSsoService.isSupportedCallbackUri(
+          Uri.parse('https://xmo.dpdns.org/auth/callback?state=one&state=two'),
+        ),
+        isFalse,
+      );
+      expect(
+        MatrixSsoService.isSupportedCallbackUri(
           Uri.parse('xmo://auth/callback?loginToken=token'),
         ),
         isFalse,

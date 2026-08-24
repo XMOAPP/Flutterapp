@@ -76,8 +76,9 @@ Future<void> _registerOidcAccount(HttpRequest request) async {
   if (!_isValidEmail(email)) {
     throw const _BadRequestException('Invalid email');
   }
-  if (password.length < 6) {
-    throw const _BadRequestException('Password must be at least 6 characters');
+  final passwordError = PasswordPolicy.validationError(password);
+  if (passwordError != null) {
+    throw _BadRequestException(passwordError);
   }
   if (enrollmentProof.isEmpty) {
     await _json(request, HttpStatus.forbidden, {
@@ -271,8 +272,9 @@ Future<void> _provisionSecureLogin(HttpRequest request) async {
   if (!_isValidEmail(email)) {
     throw const _BadRequestException('Invalid email');
   }
-  if (password.length < 6) {
-    throw const _BadRequestException('Password must be at least 6 characters');
+  final passwordError = PasswordPolicy.validationError(password);
+  if (passwordError != null) {
+    throw _BadRequestException(passwordError);
   }
   if (enrollmentProof.isEmpty) {
     await _json(request, HttpStatus.forbidden, {
@@ -382,8 +384,9 @@ Future<void> _prepareSecureRegistration(HttpRequest request) async {
   if (!_isValidEmail(email)) {
     throw const _BadRequestException('Invalid email');
   }
-  if (password.length < 6) {
-    throw const _BadRequestException('Password must be at least 6 characters');
+  final passwordError = PasswordPolicy.validationError(password);
+  if (passwordError != null) {
+    throw _BadRequestException(passwordError);
   }
   if (enrollmentProof.isEmpty) {
     await _json(request, HttpStatus.forbidden, {

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../config/app_config.dart';
+import '../security/password_policy.dart';
 import '../providers/matrix_provider.dart';
 import '../services/matrix_sso_service.dart';
 import '../services/otp_service.dart';
@@ -397,10 +398,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             ),
             onPressed: () => setState(() => _showPassword = !_showPassword),
           ),
-          validator: (value) {
-            if ((value ?? '').length < 6) return 'Min 6 characters';
-            return null;
-          },
+          validator: (value) => PasswordPolicy.validationError(value ?? ''),
         ),
         const SizedBox(height: 14),
         _ResetTextField(

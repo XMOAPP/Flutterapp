@@ -15,6 +15,7 @@ import 'package:xmo_auth_server/src/cors_policy.dart';
 import 'package:xmo_auth_server/src/email_service.dart';
 import 'package:xmo_auth_server/src/endpoint_modules.dart';
 import 'package:xmo_auth_server/src/health_status.dart';
+import 'package:xmo_auth_server/src/password_policy.dart';
 import 'package:xmo_auth_server/src/request_body.dart';
 import 'package:xmo_auth_server/src/request_guard.dart';
 import 'package:xmo_auth_server/src/recovery_email_store.dart';
@@ -276,33 +277,7 @@ Future<void> _handleRequest(HttpRequest request) async {
     if (!await _authorizeEndpoint(request, authorizationPolicy)) return;
 
     if (request.method == 'GET' && request.uri.path == '/health') {
-      await _json(
-        request,
-        HttpStatus.ok,
-        buildHealthStatus(
-          emailConfigured: _emailService.isConfigured,
-          donationConfigured:
-              _thirdwebSecretKey.isNotEmpty &&
-              _donationRecipientAddress.isNotEmpty,
-          walletAuthConfigured:
-              _walletAuthService.config.isConfigured &&
-              _walletAccountStoreReady,
-          passwordResetConfigured: _passwordResetConfig.isConfigured,
-          pushConfigured:
-              _firebaseServiceAccountJson.isNotEmpty ||
-              _firebaseServiceAccountBase64.isNotEmpty ||
-              _firebaseServiceAccountFile.isNotEmpty,
-          azureBlobConfigured: _azureBlobConfig.isConfigured,
-          userDirectoryConfigured: _userDirectoryConfig.isConfigured,
-          reportsConfigured: _reportConfig.isConfigured,
-          accountDeletionConfigured:
-              _passwordResetConfig.isConfigured &&
-              _authentikConfig.isConfigured &&
-              _emailService.isConfigured,
-          channelAnalyticsConfigured: _channelAnalyticsConfig.isConfigured,
-          inviteLinksConfigured: _inviteConfig.isConfigured,
-        ),
-      );
+      await _json(request, HttpStatus.ok, buildHealthStatus());
       return;
     }
 

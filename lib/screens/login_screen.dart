@@ -73,7 +73,7 @@ class _LoginScreenState extends State<LoginScreen>
 
     final provider = context.read<MatrixProvider>();
     final username = _usernameCtrl.text.trim();
-    final password = _passwordCtrl.text.trim();
+    final password = _passwordCtrl.text;
 
     if (_isRegisterMode) {
       final fullPhone = _phoneCtrl.text.trim();

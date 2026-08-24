@@ -100,10 +100,9 @@ Future<void> _completePasswordReset(HttpRequest request) async {
     });
     return;
   }
-  if (newPassword.length < 6) {
-    await _json(request, HttpStatus.badRequest, {
-      'error': 'Password must be at least 6 characters',
-    });
+  final passwordError = PasswordPolicy.validationError(newPassword);
+  if (passwordError != null) {
+    await _json(request, HttpStatus.badRequest, {'error': passwordError});
     return;
   }
   if (!_passwordResetConfig.isConfigured) {
