@@ -41,46 +41,46 @@ class XmoInviteLink {
     int? maxUses,
     String? createdBy,
     bool? isActive,
-  }) =>
-      XmoInviteLink(
-        linkId: linkId ?? this.linkId,
-        url: url ?? this.url,
-        roomId: roomId ?? this.roomId,
-        roomName: roomName ?? this.roomName,
-        roomType: roomType ?? this.roomType,
-        createdAt: createdAt ?? this.createdAt,
-        expiresAt: expiresAt ?? this.expiresAt,
-        usedCount: usedCount ?? this.usedCount,
-        maxUses: maxUses ?? this.maxUses,
-        createdBy: createdBy ?? this.createdBy,
-        isActive: isActive ?? this.isActive,
-      );
+  }) => XmoInviteLink(
+    linkId: linkId ?? this.linkId,
+    url: url ?? this.url,
+    roomId: roomId ?? this.roomId,
+    roomName: roomName ?? this.roomName,
+    roomType: roomType ?? this.roomType,
+    createdAt: createdAt ?? this.createdAt,
+    expiresAt: expiresAt ?? this.expiresAt,
+    usedCount: usedCount ?? this.usedCount,
+    maxUses: maxUses ?? this.maxUses,
+    createdBy: createdBy ?? this.createdBy,
+    isActive: isActive ?? this.isActive,
+  );
 
   Map<String, dynamic> toJson() => {
-        'link_id': linkId,
-        'url': url,
-        'room_id': roomId,
-        'created_at': createdAt.toIso8601String(),
-        if (expiresAt != null) 'expires_at': expiresAt!.toIso8601String(),
-        'used_count': usedCount,
-        'created_by': createdBy,
-        'is_active': isActive,
-      };
+    'link_id': linkId,
+    'url': url,
+    'room_id': roomId,
+    'created_at': createdAt.toIso8601String(),
+    if (expiresAt != null) 'expires_at': expiresAt!.toIso8601String(),
+    'used_count': usedCount,
+    'created_by': createdBy,
+    'is_active': isActive,
+  };
 
   factory XmoInviteLink.fromJson(Map<dynamic, dynamic> json) => XmoInviteLink(
-        linkId: _string(json, 'linkId', 'link_id'),
-        url: _string(json, 'url'),
-        roomId: _string(json, 'roomId', 'room_id'),
-        roomName: _nullableString(json, 'name', 'roomName'),
-        roomType: _nullableString(json, 'type', 'roomType'),
-        createdAt: _date(json, 'createdAt', 'created_at') ??
-            DateTime.fromMillisecondsSinceEpoch(0),
-        expiresAt: _date(json, 'expiresAt', 'expires_at'),
-        usedCount: _int(json, 'usedCount', 'used_count') ?? 0,
-        maxUses: _int(json, 'maxUses', 'max_uses'),
-        createdBy: _string(json, 'createdBy', 'created_by'),
-        isActive: _bool(json, 'active', 'is_active') ?? true,
-      );
+    linkId: _string(json, 'linkId', 'link_id'),
+    url: _string(json, 'url'),
+    roomId: _string(json, 'roomId', 'room_id'),
+    roomName: _nullableString(json, 'name', 'roomName'),
+    roomType: _nullableString(json, 'type', 'roomType'),
+    createdAt:
+        _date(json, 'createdAt', 'created_at') ??
+        DateTime.fromMillisecondsSinceEpoch(0),
+    expiresAt: _date(json, 'expiresAt', 'expires_at'),
+    usedCount: _int(json, 'usedCount', 'used_count') ?? 0,
+    maxUses: _int(json, 'maxUses', 'max_uses'),
+    createdBy: _string(json, 'createdBy', 'created_by'),
+    isActive: _bool(json, 'active', 'is_active') ?? true,
+  );
 }
 
 class XmoInvitePreview {

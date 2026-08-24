@@ -51,10 +51,7 @@ void main() {
       final story = Story.tryFromJson(
         _validTextStory()
           ..['privacy'] = StoryPrivacy.custom.name
-          ..['viewed_by'] = [
-            '@viewer:xmo.test',
-            '@viewer:xmo.test',
-          ]
+          ..['viewed_by'] = ['@viewer:xmo.test', '@viewer:xmo.test']
           ..['custom_privacy_list'] = [
             '@contact:xmo.test',
             '@contact:xmo.test',

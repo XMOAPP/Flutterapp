@@ -58,48 +58,53 @@ class MessageReactions extends StatelessWidget {
           alignment: isMyMessage ? WrapAlignment.end : WrapAlignment.start,
           spacing: 3,
           runSpacing: 3,
-          children: reactions.map((reaction) {
-            final showsCount = reaction.count > 1;
-            return InkWell(
-              onTap: () => onTap(reaction),
-              customBorder: const StadiumBorder(),
-              child: Container(
-                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                padding: EdgeInsets.symmetric(
-                  horizontal: showsCount ? 6 : 0,
-                  vertical: 0,
-                ),
-                decoration: BoxDecoration(
-                  color: reaction.reactedByMe
-                      ? const Color(0xFF242426)
-                      : kDarkerGrey,
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: Colors.black, width: 0.7),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      reaction.emoji,
-                      style: const TextStyle(fontSize: 16, height: 1),
+          children: reactions
+              .map((reaction) {
+                final showsCount = reaction.count > 1;
+                return InkWell(
+                  onTap: () => onTap(reaction),
+                  customBorder: const StadiumBorder(),
+                  child: Container(
+                    constraints: const BoxConstraints(
+                      minWidth: 28,
+                      minHeight: 28,
                     ),
-                    if (showsCount) ...[
-                      const SizedBox(width: 3),
-                      Text(
-                        '${reaction.count}',
-                        style: GoogleFonts.inter(
-                          color: reaction.reactedByMe ? kLimeGreen : kWhite,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: showsCount ? 6 : 0,
+                      vertical: 0,
+                    ),
+                    decoration: BoxDecoration(
+                      color: reaction.reactedByMe
+                          ? const Color(0xFF242426)
+                          : kDarkerGrey,
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: Colors.black, width: 0.7),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          reaction.emoji,
+                          style: const TextStyle(fontSize: 16, height: 1),
                         ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            );
-          }).toList(growable: false),
+                        if (showsCount) ...[
+                          const SizedBox(width: 3),
+                          Text(
+                            '${reaction.count}',
+                            style: GoogleFonts.inter(
+                              color: reaction.reactedByMe ? kLimeGreen : kWhite,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              })
+              .toList(growable: false),
         ),
       ),
     );
@@ -139,9 +144,7 @@ class ReactionPicker extends StatefulWidget {
       _ReactionCategory(
         label: 'Smileys and people',
         icon: Icons.sentiment_satisfied_alt_rounded,
-        emojis: _baseEmojis(
-          _packageEntries(emoji_picker.Category.SMILEYS),
-        ),
+        emojis: _baseEmojis(_packageEntries(emoji_picker.Category.SMILEYS)),
       ),
       _packageCategory(
         label: 'Animals and nature',
@@ -211,9 +214,7 @@ class ReactionPicker extends StatefulWidget {
   }
 
   static bool _containsSkinToneModifier(String emoji) {
-    return emoji.runes.any(
-      (rune) => rune >= 0x1F3FB && rune <= 0x1F3FF,
-    );
+    return emoji.runes.any((rune) => rune >= 0x1F3FB && rune <= 0x1F3FF);
   }
 
   static final List<String> quickReactions = List.unmodifiable(
@@ -283,11 +284,7 @@ class _ReactionPickerState extends State<ReactionPicker>
           children: [
             if (hasComposer) ...[
               widget.composer!,
-              const Divider(
-                height: 1,
-                thickness: 1,
-                color: Color(0xFF2C2C2E),
-              ),
+              const Divider(height: 1, thickness: 1, color: Color(0xFF2C2C2E)),
             ],
             Expanded(
               child: Container(
@@ -318,9 +315,7 @@ class _ReactionPickerState extends State<ReactionPicker>
                       child: TabBarView(
                         controller: _tabController,
                         children: ReactionPicker._categories
-                            .map(
-                              (category) => _buildEmojiGrid(category.emojis),
-                            )
+                            .map((category) => _buildEmojiGrid(category.emojis))
                             .toList(growable: false),
                       ),
                     ),
@@ -384,10 +379,7 @@ class _ReactionPickerState extends State<ReactionPicker>
               borderRadius: BorderRadius.circular(14),
             ),
             alignment: Alignment.center,
-            child: Text(
-              emoji,
-              style: const TextStyle(fontSize: 24),
-            ),
+            child: Text(emoji, style: const TextStyle(fontSize: 24)),
           ),
         );
       },

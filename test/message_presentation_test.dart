@@ -2,11 +2,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:xmo/utils/message_presentation.dart';
 
 Map<String, dynamic> _replyContent(String body) => {
-      'body': body,
-      'm.relates_to': {
-        'm.in_reply_to': {'event_id': r'$original'},
-      },
-    };
+  'body': body,
+  'm.relates_to': {
+    'm.in_reply_to': {'event_id': r'$original'},
+  },
+};
 
 void main() {
   group('Matrix reply presentation', () {
@@ -29,10 +29,7 @@ void main() {
     test('preserves quoted text without a reply relation', () {
       const body = '> this is intentionally quoted\n\nMy note';
 
-      expect(
-        matrixVisibleBodyFromContent({'body': body}),
-        body,
-      );
+      expect(matrixVisibleBodyFromContent({'body': body}), body);
     });
 
     test('preserves malformed reply fallbacks without a separator', () {
@@ -54,20 +51,14 @@ void main() {
         stripMatrixFormattedReplyFallback(html, isReply: true),
         '<b>Reply</b>',
       );
-      expect(
-        stripMatrixFormattedReplyFallback(html, isReply: false),
-        html,
-      );
+      expect(stripMatrixFormattedReplyFallback(html, isReply: false), html);
     });
 
     test('uses edited reply content instead of the replacement fallback', () {
       final content = {
         'msgtype': 'm.text',
         'body': '* > <@varunn:example.org> Original message\n\nOld reply',
-        'm.relates_to': {
-          'rel_type': 'm.replace',
-          'event_id': r'$reply',
-        },
+        'm.relates_to': {'rel_type': 'm.replace', 'event_id': r'$reply'},
         'm.new_content': {
           'msgtype': 'm.text',
           'body': '> <@varunn:example.org> Original message\n\nEdited reply',
@@ -93,14 +84,10 @@ void main() {
 
   group('Matrix attachment names', () {
     test('prefers the protocol filename over body and reply fallback', () {
-      final content = _replyContent(
-        '> <@six:example.org> Original\n\nCaption',
-      )..['filename'] = 'report.pdf';
+      final content = _replyContent('> <@six:example.org> Original\n\nCaption')
+        ..['filename'] = 'report.pdf';
 
-      expect(
-        matrixAttachmentFileNameFromContent(content),
-        'report.pdf',
-      );
+      expect(matrixAttachmentFileNameFromContent(content), 'report.pdf');
     });
 
     test('uses the visible reply body when filename is absent', () {
@@ -108,10 +95,7 @@ void main() {
         '> <@six:example.org> Original\n\nreport.pdf',
       );
 
-      expect(
-        matrixAttachmentFileNameFromContent(content),
-        'report.pdf',
-      );
+      expect(matrixAttachmentFileNameFromContent(content), 'report.pdf');
     });
 
     test('sanitizes paths and unsafe filename characters', () {

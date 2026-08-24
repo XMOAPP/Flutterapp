@@ -3,8 +3,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:xmo/screens/matrix_chat/chat_input_bar.dart';
 
 void main() {
-  testWidgets('chat input switches from recording to send when text is typed',
-      (tester) async {
+  testWidgets('chat input switches from recording to send when text is typed', (
+    tester,
+  ) async {
     final controller = TextEditingController();
     var didSend = false;
     await tester.binding.setSurfaceSize(const Size(390, 844));
@@ -41,8 +42,9 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('disabled chat input explains why it cannot send',
-      (tester) async {
+  testWidgets('disabled chat input explains why it cannot send', (
+    tester,
+  ) async {
     final controller = TextEditingController();
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -70,8 +72,9 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('edit mode reuses composer without attachment or recording',
-      (tester) async {
+  testWidgets('edit mode reuses composer without attachment or recording', (
+    tester,
+  ) async {
     final controller = TextEditingController(text: 'original');
     var confirmed = false;
     await tester.binding.setSurfaceSize(const Size(390, 844));
@@ -112,8 +115,9 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('chat input expands vertically and caps at six lines',
-      (tester) async {
+  testWidgets('chat input expands vertically and caps at six lines', (
+    tester,
+  ) async {
     final controller = TextEditingController();
     addTearDown(controller.dispose);
     await tester.binding.setSurfaceSize(const Size(390, 844));

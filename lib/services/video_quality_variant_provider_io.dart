@@ -156,10 +156,9 @@ class NativeVideoCompressionQualityVariantProvider {
   Future<Directory> _createWorkDir() async {
     final tempRoot = await getTemporaryDirectory();
     final millis = DateTime.now().millisecondsSinceEpoch;
-    return Directory(_joinPath(
-      _joinPath(tempRoot.path, 'xmo_video_compress'),
-      '$millis',
-    )).create(recursive: true);
+    return Directory(
+      _joinPath(_joinPath(tempRoot.path, 'xmo_video_compress'), '$millis'),
+    ).create(recursive: true);
   }
 
   Future<MediaInfo?> _compressWithCancellation(
@@ -170,17 +169,19 @@ class NativeVideoCompressionQualityVariantProvider {
     final completer = Completer<MediaInfo?>();
     unawaited(
       VideoCompress.compressVideo(
-        sourcePath,
-        quality: quality,
-        deleteOrigin: false,
-        includeAudio: true,
-      ).then((value) {
-        if (!completer.isCompleted) completer.complete(value);
-      }).catchError((Object error, StackTrace stackTrace) {
-        if (!completer.isCompleted) {
-          completer.completeError(error, stackTrace);
-        }
-      }),
+            sourcePath,
+            quality: quality,
+            deleteOrigin: false,
+            includeAudio: true,
+          )
+          .then((value) {
+            if (!completer.isCompleted) completer.complete(value);
+          })
+          .catchError((Object error, StackTrace stackTrace) {
+            if (!completer.isCompleted) {
+              completer.completeError(error, stackTrace);
+            }
+          }),
     );
 
     while (!completer.isCompleted) {

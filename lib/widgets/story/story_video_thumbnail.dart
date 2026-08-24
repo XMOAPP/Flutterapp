@@ -171,9 +171,5 @@ class _StoryVideoThumbnailState extends State<StoryVideoThumbnail> {
 }
 
 Widget storyVideoFallback({double? width, double? height}) {
-  return Container(
-    width: width,
-    height: height,
-    color: kDarkerGrey,
-  );
+  return Container(width: width, height: height, color: kDarkerGrey);
 }

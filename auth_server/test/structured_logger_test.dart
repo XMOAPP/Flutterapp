@@ -29,7 +29,9 @@ void main() {
 
   test('unrelated request paths are unchanged', () {
     expect(sanitizeRequestPath('/health'), '/health');
-    expect(sanitizeRequestPath('/auth/otp/users/search'),
-        '/auth/otp/users/search');
+    expect(
+      sanitizeRequestPath('/auth/otp/users/search'),
+      '/auth/otp/users/search',
+    );
   });
 }

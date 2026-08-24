@@ -38,7 +38,9 @@ void main() {
 
       expect(encryptedFile.data, isNot(clearText));
       expect(
-          base64Url.decode(base64.normalize(encryptedFile.k)), hasLength(32));
+        base64Url.decode(base64.normalize(encryptedFile.k)),
+        hasLength(32),
+      );
       expect(base64.decode(base64.normalize(encryptedFile.iv)), hasLength(16));
       expect(
         base64.encode(dart_crypto.sha256.convert(encryptedFile.data).bytes),

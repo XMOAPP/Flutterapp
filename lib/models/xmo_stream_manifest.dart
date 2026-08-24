@@ -336,13 +336,7 @@ class XmoStreamChunk {
   }
 
   Map<String, dynamic> toJson() {
-    return {
-      'index': index,
-      'url': url,
-      'key': key,
-      'iv': iv,
-      'sha256': sha256,
-    };
+    return {'index': index, 'url': url, 'key': key, 'iv': iv, 'sha256': sha256};
   }
 }
 
@@ -365,9 +359,7 @@ int? _optionalNonNegativeInt(Map<dynamic, dynamic> json, String key) {
   if (!json.containsKey(key) || json[key] == null) return null;
   final value = _requiredInt(json, key);
   if (value < 0) {
-    throw XmoStreamManifestException(
-      'xmo_stream $key cannot be negative.',
-    );
+    throw XmoStreamManifestException('xmo_stream $key cannot be negative.');
   }
   return value;
 }

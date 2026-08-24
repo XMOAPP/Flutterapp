@@ -62,8 +62,9 @@ class VoipService with WidgetsBindingObserver {
   final ValueNotifier<CallSession?> incomingCall = ValueNotifier(null);
   final ValueNotifier<XmoGroupCall?> incomingGroupCall = ValueNotifier(null);
   final ValueNotifier<int> callStateVersion = ValueNotifier(0);
-  final ValueNotifier<CallRecoveryStatus> recoveryStatus =
-      ValueNotifier(CallRecoveryStatus.connected);
+  final ValueNotifier<CallRecoveryStatus> recoveryStatus = ValueNotifier(
+    CallRecoveryStatus.connected,
+  );
 
   CallSession? get activeSession => _activeSession;
   XmoGroupCall? get activeGroupCall => _activeGroupCall;
@@ -133,9 +134,9 @@ class VoipService with WidgetsBindingObserver {
 
   static const AndroidAudioAttributes _ringtoneAudioAttributes =
       AndroidAudioAttributes(
-    contentType: AndroidAudioContentType.music,
-    usage: AndroidAudioUsage.media,
-  );
+        contentType: AndroidAudioContentType.music,
+        usage: AndroidAudioUsage.media,
+      );
 
   Future<void> _startRingtone() async {
     if (_ringtoneStarting || _ringtonePlayer?.playing == true) return;
@@ -175,7 +176,8 @@ class VoipService with WidgetsBindingObserver {
       );
     } catch (e) {
       debugPrint(
-          '[VoipService] Failed to configure ringtone audio session: $e');
+        '[VoipService] Failed to configure ringtone audio session: $e',
+      );
     }
     try {
       await AndroidAudioManager().setMode(AndroidAudioHardwareMode.normal);
@@ -515,8 +517,7 @@ class VoipService with WidgetsBindingObserver {
     }
     _notifyCallStateChanged();
     _activeGroupCallStateSub?.cancel();
-    _activeGroupCallStateSub =
-        groupCall.stateStream.listen((state) {
+    _activeGroupCallStateSub = groupCall.stateStream.listen((state) {
       if (state == GroupCallState.entered &&
           _groupCallConnectedAt == null &&
           _hasConnectedGroupPeer(groupCall)) {
@@ -542,8 +543,9 @@ class VoipService with WidgetsBindingObserver {
 
   bool _hasConnectedGroupPeer(XmoGroupCall groupCall) {
     return groupCall.userMediaStreams.any((stream) => !stream.isLocal()) ||
-        groupCall.participants
-            .any((user) => user.id != groupCall.room.client.userID);
+        groupCall.participants.any(
+          (user) => user.id != groupCall.room.client.userID,
+        );
   }
 
   void _cleanupGroupCall() {
@@ -687,10 +689,7 @@ class VoipService with WidgetsBindingObserver {
     required String? roomId,
     required String? callId,
   }) {
-    final candidates = <CallSession?>[
-      incomingCall.value,
-      _activeSession,
-    ];
+    final candidates = <CallSession?>[incomingCall.value, _activeSession];
     for (final session in candidates) {
       if (session == null || session.isGroupCall) continue;
       if (session.direction != CallDirection.kIncoming) continue;
@@ -716,8 +715,7 @@ class VoipService with WidgetsBindingObserver {
             .where((call) => call.groupCallId == callId)
             .firstOrNull,
       incomingGroupCall.value,
-      if (roomId != null && roomId.isNotEmpty)
-        _groupCalls[roomId],
+      if (roomId != null && roomId.isNotEmpty) _groupCalls[roomId],
     ];
 
     for (final groupCall in candidates) {
@@ -875,8 +873,9 @@ class VoipService with WidgetsBindingObserver {
 
   Future<void> _routeDirectVoiceCallToEarpiece() async {
     try {
-      await AndroidAudioManager()
-          .setMode(AndroidAudioHardwareMode.inCommunication);
+      await AndroidAudioManager().setMode(
+        AndroidAudioHardwareMode.inCommunication,
+      );
     } catch (e) {
       debugPrint('[VoipService] Failed to set direct voice audio mode: $e');
     }
@@ -1129,7 +1128,8 @@ Uint8List _buildRingtoneWav() {
     final active = ms < 520 || (ms >= 720 && ms < 1120);
     final time = i / sampleRate;
     final envelope = active ? _ringtoneEnvelope(ms) : 0.0;
-    final wave = math.sin(2 * math.pi * 520 * time) * 0.72 +
+    final wave =
+        math.sin(2 * math.pi * 520 * time) * 0.72 +
         math.sin(2 * math.pi * 780 * time) * 0.28;
     final sample = (wave * envelope * 32767).clamp(-32768, 32767).round();
     data.setInt16(44 + i * 2, sample, Endian.little);
@@ -1168,10 +1168,7 @@ class _XmoWebRTCDelegate implements WebRTCDelegate {
   final Future<void> Function(CallSession session) onNewCall;
   final Future<void> Function(XmoGroupCall groupCall) onNewGroupCall;
 
-  _XmoWebRTCDelegate({
-    required this.onNewCall,
-    required this.onNewGroupCall,
-  });
+  _XmoWebRTCDelegate({required this.onNewCall, required this.onNewGroupCall});
 
   @override
   rtc.MediaDevices get mediaDevices => webrtc.navigator.mediaDevices;
@@ -1197,10 +1194,7 @@ class _XmoWebRTCDelegate implements WebRTCDelegate {
     normalizedConfiguration.putIfAbsent('iceCandidatePoolSize', () => 10);
     debugPrint('[VOIP] ICE servers configured: ${iceServers.length}');
 
-    return webrtc.createPeerConnection(
-      normalizedConfiguration,
-      constraints,
-    );
+    return webrtc.createPeerConnection(normalizedConfiguration, constraints);
   }
 
   static const List<Map<String, dynamic>> _fallbackStunServers = [
@@ -1215,17 +1209,16 @@ class _XmoWebRTCDelegate implements WebRTCDelegate {
         .whereType<Map>()
         .map((server) => Map<String, dynamic>.from(server))
         .where((server) {
-      final urls = server['urls'] ?? server['url'];
-      if (urls is String) {
-        return urls.trim().isNotEmpty;
-      }
-      if (urls is List) {
-        return urls.whereType<String>().any(
-              (url) => url.trim().isNotEmpty,
-            );
-      }
-      return false;
-    }).toList();
+          final urls = server['urls'] ?? server['url'];
+          if (urls is String) {
+            return urls.trim().isNotEmpty;
+          }
+          if (urls is List) {
+            return urls.whereType<String>().any((url) => url.trim().isNotEmpty);
+          }
+          return false;
+        })
+        .toList();
   }
 
   rtc.VideoRenderer createRenderer() => webrtc.RTCVideoRenderer();

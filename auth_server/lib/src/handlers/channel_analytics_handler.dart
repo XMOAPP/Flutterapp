@@ -1,7 +1,8 @@
 part of xmo_auth_server;
 
-final _channelAnalyticsConfig =
-    ChannelAnalyticsConfig.fromEnvironment(Platform.environment);
+final _channelAnalyticsConfig = ChannelAnalyticsConfig.fromEnvironment(
+  Platform.environment,
+);
 final _channelAnalyticsMemoryStore = <String, _StoredChannelPostAnalytics>{};
 Future<void> _channelAnalyticsStoreTail = Future<void>.value();
 
@@ -47,8 +48,10 @@ Future<void> _recordChannelForward(HttpRequest request) async {
   final roomId = _channelAnalyticsIdentifier(body['roomId'], '!');
   final eventId = _channelAnalyticsIdentifier(body['eventId'], r'$');
   final targetRoomId = _channelAnalyticsIdentifier(body['targetRoomId'], '!');
-  final targetEventId =
-      _channelAnalyticsIdentifier(body['targetEventId'], r'$');
+  final targetEventId = _channelAnalyticsIdentifier(
+    body['targetEventId'],
+    r'$',
+  );
   if (roomId == null ||
       eventId == null ||
       targetRoomId == null ||
@@ -59,8 +62,11 @@ Future<void> _recordChannelForward(HttpRequest request) async {
     throw const _BadRequestException('Source room is not an XMO channel');
   }
   final source = await _channelAnalyticsEvent(auth.token, roomId, eventId);
-  final target =
-      await _channelAnalyticsEvent(auth.token, targetRoomId, targetEventId);
+  final target = await _channelAnalyticsEvent(
+    auth.token,
+    targetRoomId,
+    targetEventId,
+  );
   if (source == null || !_channelAnalyticsIsPost(source) || target == null) {
     throw const _BadRequestException('Forwarded event could not be verified');
   }
@@ -130,9 +136,9 @@ Future<void> _getChannelAnalytics(HttpRequest request) async {
   final posts = <String, dynamic>{};
   final eventIds = requestedIds.isEmpty
       ? stored.values
-          .where((post) => post.roomId == roomId)
-          .map((post) => post.eventId)
-          .toSet()
+            .where((post) => post.roomId == roomId)
+            .map((post) => post.eventId)
+            .toSet()
       : requestedIds;
   var totalViews = 0;
   for (final eventId in eventIds) {
@@ -150,7 +156,8 @@ Future<void> _getChannelAnalytics(HttpRequest request) async {
 }
 
 Future<_ChannelAnalyticsAuth?> _channelAnalyticsAuth(
-    HttpRequest request) async {
+  HttpRequest request,
+) async {
   if (!_channelAnalyticsConfig.isConfigured) {
     await _json(request, HttpStatus.serviceUnavailable, {
       'success': false,
@@ -177,8 +184,15 @@ Future<Map<String, dynamic>?> _channelAnalyticsEvent(
   String roomId,
   String eventId,
 ) async {
-  final response = await _channelAnalyticsGet(
-      token, ['_matrix', 'client', 'v3', 'rooms', roomId, 'event', eventId]);
+  final response = await _channelAnalyticsGet(token, [
+    '_matrix',
+    'client',
+    'v3',
+    'rooms',
+    roomId,
+    'event',
+    eventId,
+  ]);
   if (response == null) return null;
   return _decodeJsonMap(response);
 }
@@ -192,7 +206,7 @@ Future<bool> _channelAnalyticsIsChannel(String token, String roomId) async {
     roomId,
     'state',
     'xmo.room.type',
-    ''
+    '',
   ]);
   if (typeRaw != null) {
     final content = _decodeJsonMap(typeRaw);
@@ -209,7 +223,7 @@ Future<bool> _channelAnalyticsIsChannel(String token, String roomId) async {
     roomId,
     'state',
     'm.room.power_levels',
-    ''
+    '',
   ]);
   if (powerRaw == null) return false;
   final power = _decodeJsonMap(powerRaw);
@@ -219,9 +233,12 @@ Future<bool> _channelAnalyticsIsChannel(String token, String roomId) async {
 }
 
 Future<String?> _channelAnalyticsGet(
-    String token, List<String> pathSegments) async {
-  final uri = Uri.parse(_channelAnalyticsConfig.homeserverUrl)
-      .replace(pathSegments: pathSegments);
+  String token,
+  List<String> pathSegments,
+) async {
+  final uri = Uri.parse(
+    _channelAnalyticsConfig.homeserverUrl,
+  ).replace(pathSegments: pathSegments);
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
   try {
     final request = await client.getUrl(uri);
@@ -260,7 +277,8 @@ String _channelAnalyticsHash(String value) {
 }
 
 Future<T> _withChannelAnalyticsStore<T>(
-    T Function(Map<String, _StoredChannelPostAnalytics>) operation) {
+  T Function(Map<String, _StoredChannelPostAnalytics>) operation,
+) {
   final completer = Completer<T>();
   _channelAnalyticsStoreTail = _channelAnalyticsStoreTail.then((_) async {
     try {
@@ -287,8 +305,9 @@ Future<Map<String, _StoredChannelPostAnalytics>> _readChannelAnalytics() async {
     final result = <String, _StoredChannelPostAnalytics>{};
     for (final entry in decoded.entries) {
       final map = _asMap(entry.value);
-      final value =
-          map == null ? null : _StoredChannelPostAnalytics.fromJson(map);
+      final value = map == null
+          ? null
+          : _StoredChannelPostAnalytics.fromJson(map);
       if (value != null) result[entry.key.toString()] = value;
     }
     return result;
@@ -298,7 +317,8 @@ Future<Map<String, _StoredChannelPostAnalytics>> _readChannelAnalytics() async {
 }
 
 Future<void> _writeChannelAnalytics(
-    Map<String, _StoredChannelPostAnalytics> values) async {
+  Map<String, _StoredChannelPostAnalytics> values,
+) async {
   if (_channelAnalyticsConfig.dataFile.isEmpty) {
     _channelAnalyticsMemoryStore
       ..clear()
@@ -308,7 +328,8 @@ Future<void> _writeChannelAnalytics(
   final file = File(_channelAnalyticsConfig.dataFile);
   await file.parent.create(recursive: true);
   await file.writeAsString(
-      jsonEncode(values.map((key, value) => MapEntry(key, value.toJson()))));
+    jsonEncode(values.map((key, value) => MapEntry(key, value.toJson()))),
+  );
 }
 
 Future<void> _deleteChannelAnalyticsForUser(String userId) async {
@@ -340,7 +361,8 @@ class ChannelAnalyticsConfig {
     return ChannelAnalyticsConfig(
       homeserverUrl: env['XMO_HOMESERVER_URL'] ?? 'http://synapse:8008',
       dataFile: dataFile,
-      secret: env['XMO_CHANNEL_ANALYTICS_SECRET'] ??
+      secret:
+          env['XMO_CHANNEL_ANALYTICS_SECRET'] ??
           env['XMO_WALLET_AUTH_SECRET'] ??
           '',
     );
@@ -371,10 +393,12 @@ class _StoredChannelPostAnalytics {
     );
     final forwards = _asMap(json['forwardActions']);
     if (forwards != null) {
-      value.forwardActions
-          .addAll(forwards.map((key, item) => MapEntry(key, item.toString())));
+      value.forwardActions.addAll(
+        forwards.map((key, item) => MapEntry(key, item.toString())),
+      );
     }
-    value.updatedAt = DateTime.tryParse(json['updatedAt']?.toString() ?? '') ??
+    value.updatedAt =
+        DateTime.tryParse(json['updatedAt']?.toString() ?? '') ??
         DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
     return value;
   }
@@ -386,10 +410,10 @@ class _StoredChannelPostAnalytics {
   DateTime updatedAt = DateTime.now().toUtc();
 
   Map<String, dynamic> toJson() => {
-        'roomId': roomId,
-        'eventId': eventId,
-        'viewerHashes': viewerHashes.toList(),
-        'forwardActions': forwardActions,
-        'updatedAt': updatedAt.toIso8601String(),
-      };
+    'roomId': roomId,
+    'eventId': eventId,
+    'viewerHashes': viewerHashes.toList(),
+    'forwardActions': forwardActions,
+    'updatedAt': updatedAt.toIso8601String(),
+  };
 }

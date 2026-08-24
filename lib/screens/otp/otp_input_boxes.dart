@@ -70,10 +70,10 @@ class OtpInputBoxes extends StatelessWidget {
                           color: error != null
                               ? Colors.red.withValues(alpha: 0.7)
                               : isActive
-                                  ? kWhite
-                                  : filled
-                                      ? kWhite.withValues(alpha: 0.35)
-                                      : Colors.white.withValues(alpha: 0.06),
+                              ? kWhite
+                              : filled
+                              ? kWhite.withValues(alpha: 0.35)
+                              : Colors.white.withValues(alpha: 0.06),
                           width: isActive ? 2 : 1.5,
                         ),
                       ),

@@ -27,10 +27,16 @@ Future<void> _submitReport(HttpRequest request) async {
   }
   final reporterUserId = await _userDirectoryWhoami(token);
   final body = await _readJson(request);
-  final targetType =
-      _requiredReportValue(body, 'targetType', _reportTargetTypes);
-  final contextType =
-      _requiredReportValue(body, 'contextType', _reportContextTypes);
+  final targetType = _requiredReportValue(
+    body,
+    'targetType',
+    _reportTargetTypes,
+  );
+  final contextType = _requiredReportValue(
+    body,
+    'contextType',
+    _reportContextTypes,
+  );
   final reason = _requiredReportValue(body, 'reason', _reportReasons);
   final reportedUserId = _reportIdentifier(body['reportedUserId'], '@');
   final roomId = _reportIdentifier(body['roomId'], '!');
@@ -72,7 +78,8 @@ Future<void> _submitReport(HttpRequest request) async {
   final now = DateTime.now().toUtc();
   final report = await _withReportStore((reports) {
     for (final existing in reports.values) {
-      final sameTarget = existing.reporterUserId == reporterUserId &&
+      final sameTarget =
+          existing.reporterUserId == reporterUserId &&
           existing.targetType == targetType &&
           existing.contextType == contextType &&
           existing.roomId == roomId &&
@@ -109,8 +116,9 @@ Future<void> _submitReport(HttpRequest request) async {
 Future<void> _listReports(HttpRequest request) async {
   final token = _userDirectoryBearerToken(request);
   if (token == null) {
-    await _json(request, HttpStatus.unauthorized,
-        {'error': 'Missing XMO session token'});
+    await _json(request, HttpStatus.unauthorized, {
+      'error': 'Missing XMO session token',
+    });
     return;
   }
   final reviewerUserId = await _userDirectoryWhoami(token);
@@ -119,8 +127,9 @@ Future<void> _listReports(HttpRequest request) async {
   final roomId = _reportIdentifier(body['roomId'], '!');
   if (global) {
     if (!await _isSynapseServerAdmin(reviewerUserId)) {
-      await _json(request, HttpStatus.forbidden,
-          {'error': 'Server administrator access required'});
+      await _json(request, HttpStatus.forbidden, {
+        'error': 'Server administrator access required',
+      });
       return;
     }
   } else if (roomId == null ||
@@ -129,16 +138,16 @@ Future<void> _listReports(HttpRequest request) async {
         userId: reviewerUserId,
         roomId: roomId,
       )) {
-    await _json(
-        request, HttpStatus.forbidden, {'error': 'Moderator access required'});
+    await _json(request, HttpStatus.forbidden, {
+      'error': 'Moderator access required',
+    });
     return;
   }
   final limit = ((body['limit'] as num?)?.toInt() ?? 200).clamp(1, 500).toInt();
   final reports = (await _readReports()).values.where((report) {
     if (global) return true;
     return report.roomId == roomId && report.contextType != 'direct';
-  }).toList()
-    ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }).toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   await _json(request, HttpStatus.ok, {
     'success': true,
     'reports': reports.take(limit).map((report) => report.toJson()).toList(),
@@ -148,8 +157,9 @@ Future<void> _listReports(HttpRequest request) async {
 Future<void> _updateReport(HttpRequest request) async {
   final token = _userDirectoryBearerToken(request);
   if (token == null) {
-    await _json(request, HttpStatus.unauthorized,
-        {'error': 'Missing XMO session token'});
+    await _json(request, HttpStatus.unauthorized, {
+      'error': 'Missing XMO session token',
+    });
     return;
   }
   final reviewerUserId = await _userDirectoryWhoami(token);
@@ -169,7 +179,8 @@ Future<void> _updateReport(HttpRequest request) async {
   final isServerAdmin = await _isSynapseServerAdmin(reviewerUserId);
   final roomId = existing.roomId;
   final isRoomModerationTarget = existing.contextType != 'direct';
-  final canReviewRoom = !isServerAdmin &&
+  final canReviewRoom =
+      !isServerAdmin &&
       isRoomModerationTarget &&
       roomId != null &&
       await _canReviewRoomReports(
@@ -178,8 +189,9 @@ Future<void> _updateReport(HttpRequest request) async {
         roomId: roomId,
       );
   if (!isServerAdmin && !canReviewRoom) {
-    await _json(
-        request, HttpStatus.forbidden, {'error': 'Moderator access required'});
+    await _json(request, HttpStatus.forbidden, {
+      'error': 'Moderator access required',
+    });
     return;
   }
 
@@ -198,9 +210,9 @@ Future<void> _updateReport(HttpRequest request) async {
 
 Future<bool> _isSynapseServerAdmin(String userId) async {
   if (_reportConfig.synapseAdminToken.isEmpty) return false;
-  final uri = Uri.parse(_reportConfig.homeserverUrl).replace(
-    pathSegments: ['_synapse', 'admin', 'v2', 'users', userId],
-  );
+  final uri = Uri.parse(
+    _reportConfig.homeserverUrl,
+  ).replace(pathSegments: ['_synapse', 'admin', 'v2', 'users', userId]);
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
   try {
     final request = await client.getUrl(uri);
@@ -233,7 +245,7 @@ Future<bool> _forwardMatrixEventReport({
       'rooms',
       roomId,
       'report',
-      eventId
+      eventId,
     ],
   );
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
@@ -266,7 +278,7 @@ Future<bool> _canReviewRoomReports({
       'rooms',
       roomId,
       'state',
-      'm.room.power_levels'
+      'm.room.power_levels',
     ],
   );
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
@@ -278,7 +290,8 @@ Future<bool> _canReviewRoomReports({
     if (response.statusCode < 200 || response.statusCode >= 300) return false;
     final content = _decodeJsonMap(raw);
     final users = _asMap(content['users']) ?? const <String, dynamic>{};
-    final userLevel = (users[userId] as num?)?.toInt() ??
+    final userLevel =
+        (users[userId] as num?)?.toInt() ??
         (content['users_default'] as num?)?.toInt() ??
         0;
     return userLevel >= 50;
@@ -366,9 +379,9 @@ Future<void> _writeReports(Map<String, _StoredReport> reports) async {
   }
   final file = File(_reportConfig.dataFile);
   await file.parent.create(recursive: true);
-  await file.writeAsString(jsonEncode(
-    reports.map((key, report) => MapEntry(key, report.toJson())),
-  ));
+  await file.writeAsString(
+    jsonEncode(reports.map((key, report) => MapEntry(key, report.toJson()))),
+  );
 }
 
 class ReportConfig {
@@ -439,40 +452,39 @@ class _StoredReport {
     String? reviewedBy,
     DateTime? reviewedAt,
     String? moderatorNote,
-  }) =>
-      _StoredReport(
-        id: id,
-        targetType: targetType,
-        contextType: contextType,
-        reporterUserId: reporterUserId,
-        reportedUserId: reportedUserId,
-        roomId: roomId,
-        eventId: eventId,
-        reason: reason,
-        details: details,
-        status: status,
-        createdAt: createdAt,
-        reviewedBy: reviewedBy,
-        reviewedAt: reviewedAt,
-        moderatorNote: moderatorNote,
-      );
+  }) => _StoredReport(
+    id: id,
+    targetType: targetType,
+    contextType: contextType,
+    reporterUserId: reporterUserId,
+    reportedUserId: reportedUserId,
+    roomId: roomId,
+    eventId: eventId,
+    reason: reason,
+    details: details,
+    status: status,
+    createdAt: createdAt,
+    reviewedBy: reviewedBy,
+    reviewedAt: reviewedAt,
+    moderatorNote: moderatorNote,
+  );
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'targetType': targetType,
-        'contextType': contextType,
-        'reporterUserId': reporterUserId,
-        if (reportedUserId != null) 'reportedUserId': reportedUserId,
-        if (roomId != null) 'roomId': roomId,
-        if (eventId != null) 'eventId': eventId,
-        'reason': reason,
-        if (details != null) 'details': details,
-        'status': status,
-        'createdAt': createdAt.toIso8601String(),
-        if (reviewedBy != null) 'reviewedBy': reviewedBy,
-        if (reviewedAt != null) 'reviewedAt': reviewedAt!.toIso8601String(),
-        if (moderatorNote != null) 'moderatorNote': moderatorNote,
-      };
+    'id': id,
+    'targetType': targetType,
+    'contextType': contextType,
+    'reporterUserId': reporterUserId,
+    if (reportedUserId != null) 'reportedUserId': reportedUserId,
+    if (roomId != null) 'roomId': roomId,
+    if (eventId != null) 'eventId': eventId,
+    'reason': reason,
+    if (details != null) 'details': details,
+    'status': status,
+    'createdAt': createdAt.toIso8601String(),
+    if (reviewedBy != null) 'reviewedBy': reviewedBy,
+    if (reviewedAt != null) 'reviewedAt': reviewedAt!.toIso8601String(),
+    if (moderatorNote != null) 'moderatorNote': moderatorNote,
+  };
 
   static _StoredReport? tryFromJson(Map<String, dynamic> json) {
     final id = json['id']?.toString();

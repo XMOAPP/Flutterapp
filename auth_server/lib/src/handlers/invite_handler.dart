@@ -110,8 +110,9 @@ Future<void> _listInviteLinks(HttpRequest request) async {
     return Map<String, _InviteRecord>.of(latest);
   });
   final result = <Map<String, dynamic>>[];
-  for (final record
-      in records.values.where((entry) => entry.roomId == roomId)) {
+  for (final record in records.values.where(
+    (entry) => entry.roomId == roomId,
+  )) {
     final token = await _inviteDecryptToken(record.encryptedToken);
     if (token != null) {
       result.add(record.toOwnerJson(token, _inviteConfig.webBaseUrl));
@@ -141,8 +142,10 @@ Future<void> _revokeInviteLink(HttpRequest request) async {
     }
   }
   if (target == null) {
-    await _json(request, HttpStatus.notFound,
-        {'success': false, 'error': 'Invite not found'});
+    await _json(request, HttpStatus.notFound, {
+      'success': false,
+      'error': 'Invite not found',
+    });
     return;
   }
   final room = await _inviteLoadRoom(target.roomId, session.token);
@@ -228,10 +231,13 @@ Future<void> _serveInviteAvatar(HttpRequest request) async {
       HttpHeaders.authorizationHeader,
       'Bearer ${_inviteConfig.mediaAccessToken}',
     );
-    final response =
-        await upstream.close().timeout(const Duration(seconds: 12));
-    final contentType =
-        response.headers.value(HttpHeaders.contentTypeHeader)?.split(';').first;
+    final response = await upstream.close().timeout(
+      const Duration(seconds: 12),
+    );
+    final contentType = response.headers
+        .value(HttpHeaders.contentTypeHeader)
+        ?.split(';')
+        .first;
     const allowedTypes = {
       'image/jpeg',
       'image/png',
@@ -277,10 +283,10 @@ Future<void> _serveInviteAvatar(HttpRequest request) async {
 }
 
 Future<void> _inviteAvatarNotFound(HttpRequest request) => _json(
-      request,
-      HttpStatus.notFound,
-      {'success': false, 'error': 'Invite avatar unavailable'},
-    );
+  request,
+  HttpStatus.notFound,
+  {'success': false, 'error': 'Invite avatar unavailable'},
+);
 
 Future<void> _redeemInviteLink(HttpRequest request) async {
   _inviteDisableCaching(request);
@@ -364,14 +370,9 @@ Future<_InviteSession?> _inviteSession(HttpRequest request) async {
 
 Future<_InviteRoom> _inviteLoadRoom(String roomId, String token) async {
   final base = Uri.parse(_userDirectoryConfig.homeserverUrl);
-  final uri = base.replace(pathSegments: [
-    '_matrix',
-    'client',
-    'v3',
-    'rooms',
-    roomId,
-    'state',
-  ]);
+  final uri = base.replace(
+    pathSegments: ['_matrix', 'client', 'v3', 'rooms', roomId, 'state'],
+  );
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
   try {
     final req = await client.getUrl(uri);
@@ -388,8 +389,10 @@ Future<_InviteRoom> _inviteLoadRoom(String roomId, String token) async {
     final decoded = jsonDecode(raw);
     if (decoded is! List)
       throw const _BadRequestException('Invalid room state');
-    final events =
-        decoded.map(_asMap).whereType<Map<String, dynamic>>().toList();
+    final events = decoded
+        .map(_asMap)
+        .whereType<Map<String, dynamic>>()
+        .toList();
     return _InviteRoom.fromState(roomId, events);
   } finally {
     client.close(force: true);
@@ -424,10 +427,7 @@ bool _inviteCanCreateLink(_InviteRoom room) {
   return limit == null || room.memberCount < limit;
 }
 
-Future<void> _inviteRoomAtCapacity(
-  HttpRequest request,
-  _InviteRoom room,
-) {
+Future<void> _inviteRoomAtCapacity(HttpRequest request, _InviteRoom room) {
   return _json(request, HttpStatus.conflict, {
     'success': false,
     'error': RoomCapacityPolicy.fullMessage(room.roomType),
@@ -544,18 +544,18 @@ Future<void> _writeInviteRecords(Map<String, _InviteRecord> records) async {
   final file = File(_inviteConfig.dataFile);
   await file.parent.create(recursive: true);
   final temp = File('${file.path}.tmp');
-  await temp.writeAsString(jsonEncode(records.map(
-    (key, value) => MapEntry(key, value.toJson()),
-  )));
+  await temp.writeAsString(
+    jsonEncode(records.map((key, value) => MapEntry(key, value.toJson()))),
+  );
   if (await file.exists()) await file.delete();
   await temp.rename(file.path);
 }
 
 Future<void> _inviteUnavailable(HttpRequest request) => _json(
-      request,
-      HttpStatus.serviceUnavailable,
-      {'success': false, 'error': 'Invite links are not configured'},
-    );
+  request,
+  HttpStatus.serviceUnavailable,
+  {'success': false, 'error': 'Invite links are not configured'},
+);
 
 class InviteConfig {
   const InviteConfig({
@@ -609,7 +609,7 @@ class InviteConfig {
     if (RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(value)) {
       return [
         for (var i = 0; i < value.length; i += 2)
-          int.parse(value.substring(i, i + 2), radix: 16)
+          int.parse(value.substring(i, i + 2), radix: 16),
       ];
     }
     try {
@@ -642,7 +642,9 @@ class _InviteRoom {
   });
 
   factory _InviteRoom.fromState(
-      String roomId, List<Map<String, dynamic>> events) {
+    String roomId,
+    List<Map<String, dynamic>> events,
+  ) {
     Map<String, dynamic>? content(String type) {
       for (final event in events.reversed) {
         if (event['type'] == type && '${event['state_key'] ?? ''}'.isEmpty) {
@@ -675,15 +677,11 @@ class _InviteRoom {
     return _InviteRoom(
       name:
           content('m.room.name')?['name']?.toString().trim().isNotEmpty == true
-              ? content('m.room.name')!['name'].toString().trim()
-              : 'XMO ${isChannel ? 'channel' : 'group'}',
+          ? content('m.room.name')!['name'].toString().trim()
+          : 'XMO ${isChannel ? 'channel' : 'group'}',
       roomType: isChannel ? 'channel' : 'group',
-      avatarUrl: _inviteOptionalText(
-        content('m.room.avatar')?['url'],
-      ),
-      topic: _inviteOptionalText(
-        content('m.room.topic')?['topic'],
-      ),
+      avatarUrl: _inviteOptionalText(content('m.room.avatar')?['url']),
+      topic: _inviteOptionalText(content('m.room.topic')?['topic']),
       memberCount: memberCount,
       encrypted: content('m.room.encryption') != null,
       joinRule:
@@ -710,8 +708,11 @@ class _InviteRoom {
 }
 
 class _EncryptedInviteToken {
-  const _EncryptedInviteToken(
-      {required this.cipherText, required this.nonce, required this.mac});
+  const _EncryptedInviteToken({
+    required this.cipherText,
+    required this.nonce,
+    required this.mac,
+  });
   factory _EncryptedInviteToken.fromJson(Map<String, dynamic> json) =>
       _EncryptedInviteToken(
         cipherText: json['cipherText']?.toString() ?? '',
@@ -721,8 +722,11 @@ class _EncryptedInviteToken {
   final String cipherText;
   final String nonce;
   final String mac;
-  Map<String, dynamic> toJson() =>
-      {'cipherText': cipherText, 'nonce': nonce, 'mac': mac};
+  Map<String, dynamic> toJson() => {
+    'cipherText': cipherText,
+    'nonce': nonce,
+    'mac': mac,
+  };
 }
 
 class _InviteRecord {
@@ -754,7 +758,8 @@ class _InviteRecord {
     if (tokenHash.isEmpty ||
         encrypted == null ||
         createdAt == null ||
-        expiresAt == null) return null;
+        expiresAt == null)
+      return null;
     return _InviteRecord(
       tokenHash: tokenHash,
       encryptedToken: _EncryptedInviteToken.fromJson(encrypted),
@@ -816,43 +821,43 @@ class _InviteRecord {
   }
 
   Map<String, dynamic> toPublicJson() => {
-        'linkId': linkId,
-        'name': roomName,
-        'type': roomType,
-        if (avatarUrl != null) 'avatarUrl': avatarUrl,
-        if (joinMode == 'join' && topic != null) 'topic': topic,
-        'memberCount': memberCount,
-        'joinMode': joinMode,
-        'expiresAt': expiresAt.toIso8601String(),
-      };
+    'linkId': linkId,
+    'name': roomName,
+    'type': roomType,
+    if (avatarUrl != null) 'avatarUrl': avatarUrl,
+    if (joinMode == 'join' && topic != null) 'topic': topic,
+    'memberCount': memberCount,
+    'joinMode': joinMode,
+    'expiresAt': expiresAt.toIso8601String(),
+  };
 
   Map<String, dynamic> toOwnerJson(String token, String webBaseUrl) => {
-        ...toPublicJson(),
-        'url': '$webBaseUrl/join/$token',
-        if (topic != null) 'topic': topic,
-        'createdAt': createdAt.toIso8601String(),
-        'usedCount': usedCount,
-        if (maxUses != null) 'maxUses': maxUses,
-        'active': active,
-      };
+    ...toPublicJson(),
+    'url': '$webBaseUrl/join/$token',
+    if (topic != null) 'topic': topic,
+    'createdAt': createdAt.toIso8601String(),
+    'usedCount': usedCount,
+    if (maxUses != null) 'maxUses': maxUses,
+    'active': active,
+  };
 
   Map<String, dynamic> toJson() => {
-        'tokenHash': tokenHash,
-        'encryptedToken': encryptedToken.toJson(),
-        'linkId': linkId,
-        'roomId': roomId,
-        'roomName': roomName,
-        'roomType': roomType,
-        if (avatarUrl != null) 'avatarUrl': avatarUrl,
-        if (topic != null) 'topic': topic,
-        'memberCount': memberCount,
-        'joinMode': joinMode,
-        'createdBy': createdBy,
-        'createdAt': createdAt.toIso8601String(),
-        'expiresAt': expiresAt.toIso8601String(),
-        if (maxUses != null) 'maxUses': maxUses,
-        'usedCount': usedCount,
-        'active': active,
-        'redeemedUserIds': redeemedUserIds.toList(),
-      };
+    'tokenHash': tokenHash,
+    'encryptedToken': encryptedToken.toJson(),
+    'linkId': linkId,
+    'roomId': roomId,
+    'roomName': roomName,
+    'roomType': roomType,
+    if (avatarUrl != null) 'avatarUrl': avatarUrl,
+    if (topic != null) 'topic': topic,
+    'memberCount': memberCount,
+    'joinMode': joinMode,
+    'createdBy': createdBy,
+    'createdAt': createdAt.toIso8601String(),
+    'expiresAt': expiresAt.toIso8601String(),
+    if (maxUses != null) 'maxUses': maxUses,
+    'usedCount': usedCount,
+    'active': active,
+    'redeemedUserIds': redeemedUserIds.toList(),
+  };
 }

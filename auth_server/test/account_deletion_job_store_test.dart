@@ -17,17 +17,12 @@ void main() {
     if (directory.existsSync()) directory.deleteSync(recursive: true);
   });
 
-  AccountDeletionJobStore createStore() => AccountDeletionJobStore(
-        storageFile: storageFile,
-        now: () => now,
-      );
+  AccountDeletionJobStore createStore() =>
+      AccountDeletionJobStore(storageFile: storageFile, now: () => now);
 
   test('persists phase progress so deletion can resume after restart', () {
     final store = createStore();
-    store.begin(
-      userId: '@alice:example.test',
-      username: 'alice',
-    );
+    store.begin(userId: '@alice:example.test', username: 'alice');
     store.advance(
       '@alice:example.test',
       AccountDeletionPhase.synapseDeactivated,
@@ -43,10 +38,7 @@ void main() {
   test('records failure without losing the last completed phase', () {
     final store = createStore();
     store.begin(userId: '@bob:example.test', username: 'bob');
-    store.advance(
-      '@bob:example.test',
-      AccountDeletionPhase.mediaDeleted,
-    );
+    store.advance('@bob:example.test', AccountDeletionPhase.mediaDeleted);
     store.recordFailure('@bob:example.test', StateError('offline'));
 
     final restored = createStore().get('@bob:example.test');
@@ -57,10 +49,7 @@ void main() {
 
   test('repeated begin is idempotent and completed jobs are retained', () {
     final store = createStore();
-    final first = store.begin(
-      userId: '@carol:example.test',
-      username: 'carol',
-    );
+    final first = store.begin(userId: '@carol:example.test', username: 'carol');
     final second = store.begin(
       userId: '@carol:example.test',
       username: 'changed',

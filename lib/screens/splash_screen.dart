@@ -44,8 +44,9 @@ class _SplashScreenState extends State<SplashScreen> {
     if (provider.state == MatrixAuthState.uninitialized) return;
 
     _navigated = true;
-    final destination =
-        provider.isLoggedIn ? const HomeScreen() : const AuthChoiceScreen();
+    final destination = provider.isLoggedIn
+        ? const HomeScreen()
+        : const AuthChoiceScreen();
 
     Navigator.of(context).pushReplacement(
       PageRouteBuilder<void>(

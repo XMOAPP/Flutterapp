@@ -9,10 +9,11 @@ import '../models/xmo_stream_manifest.dart';
 import 'matrix_encrypted_media_helper.dart';
 import 'matrix_media_helper.dart';
 
-typedef XmoStreamChunkDownloader = Future<Uint8List> Function(
-  MatrixMediaRequest request,
-  XmoStreamChunk chunk,
-);
+typedef XmoStreamChunkDownloader =
+    Future<Uint8List> Function(
+      MatrixMediaRequest request,
+      XmoStreamChunk chunk,
+    );
 
 typedef XmoStreamCacheDirectoryProvider = Future<Directory> Function();
 
@@ -69,14 +70,14 @@ class StreamingMediaService {
     XmoStreamCacheDirectoryProvider? cacheDirectoryProvider,
     int maxRetries = 3,
     int maxCacheBytes = 256 * 1024 * 1024,
-  })  : assert(maxRetries > 0),
-        assert(maxCacheBytes > 0),
-        _mediaHelper = mediaHelper,
-        _encryptedMediaHelper = encryptedMediaHelper,
-        _downloader = downloader,
-        _cacheDirectoryProvider = cacheDirectoryProvider,
-        _maxRetries = maxRetries,
-        _maxCacheBytes = maxCacheBytes;
+  }) : assert(maxRetries > 0),
+       assert(maxCacheBytes > 0),
+       _mediaHelper = mediaHelper,
+       _encryptedMediaHelper = encryptedMediaHelper,
+       _downloader = downloader,
+       _cacheDirectoryProvider = cacheDirectoryProvider,
+       _maxRetries = maxRetries,
+       _maxCacheBytes = maxCacheBytes;
 
   final MatrixMediaHelper _mediaHelper;
   final MatrixEncryptedMediaHelper _encryptedMediaHelper;
@@ -98,11 +99,7 @@ class StreamingMediaService {
         'This event does not contain xmo_stream media.',
       );
     }
-    return open(
-      eventId: eventId,
-      manifest: manifest,
-      quality: quality,
-    );
+    return open(eventId: eventId, manifest: manifest, quality: quality);
   }
 
   Future<XmoStreamingMediaSession> open({
@@ -308,11 +305,11 @@ class XmoStreamingMediaSession {
     required XmoStreamChunkDownloader downloader,
     required int maxRetries,
     required int maxCacheBytes,
-  })  : _mediaHelper = mediaHelper,
-        _encryptedMediaHelper = encryptedMediaHelper,
-        _downloader = downloader,
-        _maxRetries = maxRetries,
-        _maxCacheBytes = maxCacheBytes;
+  }) : _mediaHelper = mediaHelper,
+       _encryptedMediaHelper = encryptedMediaHelper,
+       _downloader = downloader,
+       _maxRetries = maxRetries,
+       _maxCacheBytes = maxCacheBytes;
 
   final String eventId;
   final XmoStreamManifest manifest;
@@ -550,11 +547,7 @@ class XmoStreamingMediaSession {
     return Duration(milliseconds: 200 * (1 << attempt.clamp(0, 3)));
   }
 
-  void _emit(
-    XmoStreamingMediaPhase phase, {
-    int? chunkIndex,
-    Object? error,
-  }) {
+  void _emit(XmoStreamingMediaPhase phase, {int? chunkIndex, Object? error}) {
     if (_states.isClosed) return;
     _states.add(
       XmoStreamingMediaState(

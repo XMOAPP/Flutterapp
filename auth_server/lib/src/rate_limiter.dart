@@ -18,10 +18,7 @@ class _RateLimitBucket {
 }
 
 class InMemoryRateLimiter {
-  InMemoryRateLimiter({
-    required this.maxRequests,
-    required this.window,
-  });
+  InMemoryRateLimiter({required this.maxRequests, required this.window});
 
   final int maxRequests;
   final Duration window;

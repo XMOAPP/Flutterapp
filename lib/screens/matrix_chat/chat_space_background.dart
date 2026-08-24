@@ -20,10 +20,7 @@ class ChatSpaceBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const RepaintBoundary(
-      child: ColoredBox(
-        color: _background,
-        child: _TiledSpacePattern(),
-      ),
+      child: ColoredBox(color: _background, child: _TiledSpacePattern()),
     );
   }
 }
@@ -36,7 +33,8 @@ class _TiledSpacePattern extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         const tileWidth = ChatSpaceBackground._tileWidth;
-        const tileHeight = tileWidth *
+        const tileHeight =
+            tileWidth *
             ChatSpaceBackground._svgHeight /
             ChatSpaceBackground._svgWidth;
         final columns = (constraints.maxWidth / tileWidth).ceil() + 1;
@@ -57,10 +55,7 @@ class _TiledSpacePattern extends StatelessWidget {
           }
         }
 
-        return Stack(
-          clipBehavior: Clip.hardEdge,
-          children: tiles,
-        );
+        return Stack(clipBehavior: Clip.hardEdge, children: tiles);
       },
     );
   }

@@ -31,8 +31,9 @@ class MatrixEncryptedMediaHelper {
 
   Future<Uint8List?> decrypt(EncryptedFile file) async {
     final expectedHash = base64.normalize(file.sha256);
-    final actualHash =
-        base64.encode(dart_crypto.sha256.convert(file.data).bytes);
+    final actualHash = base64.encode(
+      dart_crypto.sha256.convert(file.data).bytes,
+    );
     if (actualHash != expectedHash) {
       return null;
     }
@@ -55,9 +56,7 @@ class MatrixEncryptedMediaHelper {
     required List<int> key,
     required List<int> iv,
   }) async {
-    const algorithm = DartAesCtr.with256bits(
-      macAlgorithm: MacAlgorithm.empty,
-    );
+    const algorithm = DartAesCtr.with256bits(macAlgorithm: MacAlgorithm.empty);
     final secretBox = await algorithm.encrypt(
       input,
       secretKey: SecretKeyData(key),

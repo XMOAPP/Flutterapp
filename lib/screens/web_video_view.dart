@@ -72,7 +72,9 @@ void disposeVideoView(String viewId) {
 /// Generates a thumbnail from video bytes by extracting a frame at ~1 second.
 /// Uses a hidden HTML5 <video> + <canvas> to capture the frame as JPEG.
 Future<Uint8List?> generateVideoThumbnail(
-    Uint8List videoBytes, String mimeType) async {
+  Uint8List videoBytes,
+  String mimeType,
+) async {
   final completer = Completer<Uint8List?>();
   bool completed = false;
 
@@ -133,8 +135,9 @@ Future<Uint8List?> generateVideoThumbnail(
 
     // onLoadedData: frame data is ready, seek to 1s (or 0 for short clips)
     video.onloadeddata = ((web.Event e) {
-      final seekTo =
-          video.duration.isFinite && video.duration > 1.5 ? 1.0 : 0.0;
+      final seekTo = video.duration.isFinite && video.duration > 1.5
+          ? 1.0
+          : 0.0;
       video.currentTime = seekTo;
     }).toJS;
 

@@ -22,36 +22,42 @@ class ChatList extends StatelessWidget {
           searchQuery: filterProvider.searchQuery,
           isLoggedIn: matrixProvider.isLoggedIn,
           rooms: matrixProvider.rooms,
-          roomTypeSignature: matrixProvider.rooms.map((room) {
-            final typeCode = room.isChannel
-                ? 'c'
-                : room.isGroup
+          roomTypeSignature: matrixProvider.rooms
+              .map((room) {
+                final typeCode = room.isChannel
+                    ? 'c'
+                    : room.isGroup
                     ? 'g'
                     : matrixService.isDirectRoom(room)
-                        ? 'd'
-                        : 'u';
-            final archiveCode = ChatArchiveService.isArchived(room) ? 'a' : '-';
-            return '${room.id}:${room.membership.name}:$typeCode:$archiveCode';
-          }).join('|'),
-          roomPreviewSignature: matrixProvider.rooms.map((room) {
-            final lastEvent = room.lastEvent;
-            return [
-              room.id,
-              room.name,
-              room.topic,
-              room.avatar,
-              room.notificationCount,
-              room.highlightCount,
-              lastEvent?.eventId,
-              lastEvent?.type,
-              lastEvent?.messageType,
-              lastEvent?.body,
-              lastEvent?.content['filename'],
-              lastEvent?.content['msgtype'],
-              lastEvent?.redacted,
-              lastEvent?.originServerTs.millisecondsSinceEpoch,
-            ].join(':');
-          }).join('|'),
+                    ? 'd'
+                    : 'u';
+                final archiveCode = ChatArchiveService.isArchived(room)
+                    ? 'a'
+                    : '-';
+                return '${room.id}:${room.membership.name}:$typeCode:$archiveCode';
+              })
+              .join('|'),
+          roomPreviewSignature: matrixProvider.rooms
+              .map((room) {
+                final lastEvent = room.lastEvent;
+                return [
+                  room.id,
+                  room.name,
+                  room.topic,
+                  room.avatar,
+                  room.notificationCount,
+                  room.highlightCount,
+                  lastEvent?.eventId,
+                  lastEvent?.type,
+                  lastEvent?.messageType,
+                  lastEvent?.body,
+                  lastEvent?.content['filename'],
+                  lastEvent?.content['msgtype'],
+                  lastEvent?.redacted,
+                  lastEvent?.originServerTs.millisecondsSinceEpoch,
+                ].join(':');
+              })
+              .join('|'),
         );
       },
       shouldRebuild: (prev, next) => prev != next,
@@ -85,7 +91,8 @@ class ChatList extends StatelessWidget {
 
         // Filter out rooms where user has left or been kicked
         final activeRooms = matrixRooms.where((room) {
-          final isActive = room.membership == Membership.join ||
+          final isActive =
+              room.membership == Membership.join ||
               room.membership == Membership.invite;
           return isActive && !ChatArchiveService.isArchived(room);
         }).toList();
@@ -111,8 +118,10 @@ class ChatList extends StatelessWidget {
             );
           }
           return const Center(
-            child:
-                Text('No chats found', style: TextStyle(color: Colors.white54)),
+            child: Text(
+              'No chats found',
+              style: TextStyle(color: Colors.white54),
+            ),
           );
         }
 
@@ -121,10 +130,7 @@ class ChatList extends StatelessWidget {
           itemCount: filteredRooms.length,
           itemBuilder: (context, index) {
             final room = filteredRooms[index];
-            return MatrixRoomTile(
-              key: ValueKey(room.id),
-              room: room,
-            );
+            return MatrixRoomTile(key: ValueKey(room.id), room: room);
           },
         );
       },

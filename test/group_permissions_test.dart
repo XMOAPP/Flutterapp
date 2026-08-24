@@ -30,17 +30,11 @@ void main() {
 
     test('moderators can only act on lower-ranked members', () {
       expect(
-        GroupService.canActOnMember(
-          actorPowerLevel: 50,
-          targetPowerLevel: 0,
-        ),
+        GroupService.canActOnMember(actorPowerLevel: 50, targetPowerLevel: 0),
         isTrue,
       );
       expect(
-        GroupService.canActOnMember(
-          actorPowerLevel: 50,
-          targetPowerLevel: 50,
-        ),
+        GroupService.canActOnMember(actorPowerLevel: 50, targetPowerLevel: 50),
         isFalse,
       );
       expect(

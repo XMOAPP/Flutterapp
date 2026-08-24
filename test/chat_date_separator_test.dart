@@ -6,10 +6,7 @@ void main() {
     final now = DateTime(2026, 7, 21, 14, 30);
 
     test('labels the current local day as Today', () {
-      expect(
-        formatChatDateLabel(DateTime(2026, 7, 21, 1), now: now),
-        'Today',
-      );
+      expect(formatChatDateLabel(DateTime(2026, 7, 21, 1), now: now), 'Today');
     });
 
     test('labels the previous local day as Yesterday', () {

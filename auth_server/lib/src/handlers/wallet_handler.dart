@@ -23,8 +23,9 @@ Future<void> _getWalletSession(HttpRequest request) async {
 
   try {
     final userId = await _userDirectoryWhoami(token);
-    final account =
-        await _walletAccountStore.findActiveAccountByMatrixUserId(userId);
+    final account = await _walletAccountStore.findActiveAccountByMatrixUserId(
+      userId,
+    );
     await _json(request, HttpStatus.ok, {
       'success': true,
       'accountType': account == null ? 'standard' : 'wallet',
@@ -108,8 +109,9 @@ Future<void> _createWalletNonce(HttpRequest request) async {
       body['address']?.toString() ?? '',
       walletType: walletType,
     );
-    final requestedMode =
-        body['mode']?.toString() == 'create' ? 'create' : 'login';
+    final requestedMode = body['mode']?.toString() == 'create'
+        ? 'create'
+        : 'login';
     final existing = await _walletAccountStore.findAccount(
       walletType: walletType,
       walletAddress: address,
@@ -277,19 +279,11 @@ Future<bool> _isWalletUsernameAvailable(String username) async {
   if (await _authentikFindUser(username) != null) return false;
   final response = await _synapseRequest(
     method: 'GET',
-    pathSegments: [
-      '_synapse',
-      'admin',
-      'v2',
-      'users',
-      _matrixUserId(username),
-    ],
+    pathSegments: ['_synapse', 'admin', 'v2', 'users', _matrixUserId(username)],
   );
   if (response.statusCode == HttpStatus.notFound) return true;
   if (response.statusCode == HttpStatus.ok) return false;
-  throw HttpException(
-    'Synapse user lookup failed: ${response.statusCode}',
-  );
+  throw HttpException('Synapse user lookup failed: ${response.statusCode}');
 }
 
 Future<void> _ensurePasswordlessWalletMatrixUser(String username) async {
@@ -302,9 +296,7 @@ Future<void> _ensurePasswordlessWalletMatrixUser(String username) async {
     return;
   }
   if (existing.statusCode != HttpStatus.notFound) {
-    throw HttpException(
-      'Synapse user lookup failed: ${existing.statusCode}',
-    );
+    throw HttpException('Synapse user lookup failed: ${existing.statusCode}');
   }
   await _synapseUpdateUser(userId, {
     'displayname': username,
@@ -322,7 +314,7 @@ String _walletMessageField(String message, String field) {
 }
 
 Future<void> _walletUnavailable(HttpRequest request) => _json(
-      request,
-      HttpStatus.serviceUnavailable,
-      {'error': 'Wallet account service is not configured'},
-    );
+  request,
+  HttpStatus.serviceUnavailable,
+  {'error': 'Wallet account service is not configured'},
+);

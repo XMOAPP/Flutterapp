@@ -8,8 +8,9 @@ const Color kMediumGrey = Color(0xFF2A2A2A);
 const Color kLightGrey = Color(0xFF888888);
 const Color kLimeGreen = Color(0xFFA3E635);
 const Color kAudioBlue = Color(0xFF3B82F6);
-const Color kBlueGrey =
-    Color(0xFF3A3A3C); // Message bubble grey for unread badges
+const Color kBlueGrey = Color(
+  0xFF3A3A3C,
+); // Message bubble grey for unread badges
 const Color kWhite = Color(0xFFFFFFFF);
 
 ThemeData buildXmoTheme() {
@@ -22,16 +23,20 @@ ThemeData buildXmoTheme() {
       secondary: kLimeGreen,
       surface: kDarkGrey,
     ),
-    textTheme: GoogleFonts.interTextTheme(
-      ThemeData.dark().textTheme,
-    ).copyWith(
+    textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme).copyWith(
       bodyLarge: GoogleFonts.inter(color: kWhite, fontSize: 16),
       bodyMedium: GoogleFonts.inter(color: kWhite, fontSize: 14),
       bodySmall: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
       titleLarge: GoogleFonts.inter(
-          color: kWhite, fontSize: 20, fontWeight: FontWeight.bold),
+        color: kWhite,
+        fontSize: 20,
+        fontWeight: FontWeight.bold,
+      ),
       titleMedium: GoogleFonts.inter(
-          color: kWhite, fontSize: 16, fontWeight: FontWeight.w600),
+        color: kWhite,
+        fontSize: 16,
+        fontWeight: FontWeight.w600,
+      ),
     ),
     appBarTheme: AppBarTheme(
       backgroundColor: kBlack,
@@ -46,9 +51,7 @@ ThemeData buildXmoTheme() {
         fontWeight: FontWeight.bold,
       ),
     ),
-    drawerTheme: const DrawerThemeData(
-      backgroundColor: Color(0xFF0F0F0F),
-    ),
+    drawerTheme: const DrawerThemeData(backgroundColor: Color(0xFF0F0F0F)),
     iconTheme: const IconThemeData(color: kWhite),
   );
 }

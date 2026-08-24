@@ -35,8 +35,9 @@ void main() {
     );
   }
 
-  testWidgets('reaction details chip keeps per-user metadata and taps',
-      (tester) async {
+  testWidgets('reaction details chip keeps per-user metadata and taps', (
+    tester,
+  ) async {
     MessageReactionSummary? tapped;
     const summary = MessageReactionSummary(
       emoji: '👍',
@@ -75,8 +76,9 @@ void main() {
     ]);
   });
 
-  testWidgets('chat input renders on very narrow phones without overflow',
-      (tester) async {
+  testWidgets('chat input renders on very narrow phones without overflow', (
+    tester,
+  ) async {
     final controller = TextEditingController(text: 'hello');
     addTearDown(controller.dispose);
 
@@ -90,8 +92,9 @@ void main() {
     expect(find.byKey(const ValueKey('send')), findsOneWidget);
   });
 
-  testWidgets('recording input renders in landscape without overflow',
-      (tester) async {
+  testWidgets('recording input renders in landscape without overflow', (
+    tester,
+  ) async {
     final controller = TextEditingController();
     addTearDown(controller.dispose);
 
@@ -106,8 +109,9 @@ void main() {
     expect(find.text('01:05'), findsOneWidget);
   });
 
-  testWidgets('OTP input boxes fit narrow phones without overflow',
-      (tester) async {
+  testWidgets('OTP input boxes fit narrow phones without overflow', (
+    tester,
+  ) async {
     final controllers = List.generate(6, (_) => TextEditingController());
     final focusNodes = List.generate(6, (_) => FocusNode());
     addTearDown(() {

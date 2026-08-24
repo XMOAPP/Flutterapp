@@ -20,10 +20,12 @@ void main() {
 
     test('removes malformed IDs and the sender own ID', () {
       expect(
-        MatrixMentions.forUserIds(
-          ['alice', '@me:example.org', '@valid:example.org', '@bad:'],
-          ownUserId: '@me:example.org',
-        ),
+        MatrixMentions.forUserIds([
+          'alice',
+          '@me:example.org',
+          '@valid:example.org',
+          '@bad:',
+        ], ownUserId: '@me:example.org'),
         {
           'm.mentions': {
             'user_ids': ['@valid:example.org'],
@@ -42,14 +44,11 @@ void main() {
         displayName: 'Bob Smith',
       );
 
-      expect(
-        MatrixMentions.forText('Hello @Alice', [alice, bob]),
-        {
-          'm.mentions': {
-            'user_ids': ['@alice:example.org'],
-          },
+      expect(MatrixMentions.forText('Hello @Alice', [alice, bob]), {
+        'm.mentions': {
+          'user_ids': ['@alice:example.org'],
         },
-      );
+      });
     });
 
     test('does not match a mention inside a longer username', () {

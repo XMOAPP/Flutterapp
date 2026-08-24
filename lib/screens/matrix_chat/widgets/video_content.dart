@@ -89,7 +89,8 @@ class _VideoContentState extends State<VideoContent> {
       future: cachedBytes != null ? null : _thumbnailFuture,
       builder: (context, snapshot) {
         final thumbnailBytes = snapshot.data;
-        final isLoading = snapshot.connectionState == ConnectionState.waiting &&
+        final isLoading =
+            snapshot.connectionState == ConnectionState.waiting &&
             thumbnailBytes == null;
 
         return GestureDetector(
@@ -161,18 +162,13 @@ class _VideoContentState extends State<VideoContent> {
   }
 
   Size _displaySizeForRatio(double aspectRatio, double screenWidth) {
-    final maxWidth = math.min(
-      292.0,
-      math.max(160.0, screenWidth * 0.76),
-    );
-    final maxHeight = math.min(
-      360.0,
-      math.max(140.0, maxWidth * 1.23),
-    );
+    final maxWidth = math.min(292.0, math.max(160.0, screenWidth * 0.76));
+    final maxHeight = math.min(360.0, math.max(140.0, maxWidth * 1.23));
     const minReadableHeight = 96.0;
 
-    final ratio =
-        aspectRatio.isFinite && aspectRatio > 0 ? aspectRatio : 16 / 9;
+    final ratio = aspectRatio.isFinite && aspectRatio > 0
+        ? aspectRatio
+        : 16 / 9;
 
     double width;
     double height;

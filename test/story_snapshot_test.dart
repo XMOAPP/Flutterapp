@@ -8,19 +8,13 @@ void main() {
         version: 300,
         storyTimes: const [100, 200, 300],
       );
-      final incoming = _snapshot(
-        version: 100,
-        storyTimes: const [100],
-      );
+      final incoming = _snapshot(version: 100, storyTimes: const [100]);
 
       expect(shouldReplaceStorySnapshot(current, incoming), isFalse);
     });
 
     test('accepts a newer snapshot with additional stories', () {
-      final current = _snapshot(
-        version: 100,
-        storyTimes: const [100],
-      );
+      final current = _snapshot(version: 100, storyTimes: const [100]);
       final incoming = _snapshot(
         version: 300,
         storyTimes: const [100, 200, 300],
@@ -30,14 +24,8 @@ void main() {
     });
 
     test('accepts a newer empty snapshot when stories are deleted', () {
-      final current = _snapshot(
-        version: 100,
-        storyTimes: const [100],
-      );
-      final incoming = _snapshot(
-        version: 200,
-        storyTimes: const [],
-      );
+      final current = _snapshot(version: 100, storyTimes: const [100]);
+      final incoming = _snapshot(version: 200, storyTimes: const []);
 
       expect(shouldReplaceStorySnapshot(current, incoming), isTrue);
     });
@@ -58,15 +46,13 @@ void main() {
   });
 }
 
-UserStories _snapshot({
-  int? version,
-  required List<int> storyTimes,
-}) {
+UserStories _snapshot({int? version, required List<int> storyTimes}) {
   return UserStories(
     userId: '@story-owner:xmo.test',
     userName: 'Story owner',
-    snapshotUpdatedAt:
-        version == null ? null : DateTime.fromMillisecondsSinceEpoch(version),
+    snapshotUpdatedAt: version == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(version),
     stories: [
       for (final time in storyTimes)
         Story(

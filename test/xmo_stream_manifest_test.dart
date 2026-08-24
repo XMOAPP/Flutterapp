@@ -19,10 +19,7 @@ void main() {
       expect(manifest.durationMs, 65000);
       expect(manifest.sourceQuality, isNotNull);
       expect(manifest.sourceQuality!.chunks, hasLength(2));
-      expect(
-        manifest.resolveQuality(XmoStreamQualityMode.auto),
-        'source',
-      );
+      expect(manifest.resolveQuality(XmoStreamQualityMode.auto), 'source');
       expect(manifest.sourceQuality!.chunks.first.index, 0);
       expect(manifest.sourceQuality!.chunks.first.url, 'mxc://server/chunk0');
       expect(manifest.sourceQuality!.chunks.first.key, _encodedKey(0));
@@ -94,10 +91,7 @@ void main() {
       expect(manifest.quality('480p')!.mimeType, 'video/mp4');
       expect(manifest.resolveQuality(XmoStreamQualityMode.auto), '480p');
       expect(manifest.resolveQuality(XmoStreamQualityMode.dataSaver), '240p');
-      expect(
-        manifest.resolveQuality(XmoStreamQualityMode.highQuality),
-        '480p',
-      );
+      expect(manifest.resolveQuality(XmoStreamQualityMode.highQuality), '480p');
       expect(manifest.resolveQuality(XmoStreamQualityMode.original), 'source');
     });
 

@@ -44,34 +44,36 @@ void main() {
       expect(await service.isUsernameAvailable('alice'), isFalse);
     });
 
-    test('identifies the current wallet-only account from its session token',
-        () async {
-      final service = WalletAuthService(
-        httpClient: MockClient((request) async {
-          expect(request.method, 'GET');
-          expect(request.url.path, endsWith('/session'));
-          expect(request.headers['authorization'], 'Bearer matrix-token');
-          return http.Response(
-            jsonEncode({
-              'accountType': 'wallet',
-              'wallet': {
-                'type': 'evm',
-                'address': '0xabc',
-                'chainId': 'eip155:1',
-              },
-            }),
-            200,
-          );
-        }),
-      );
+    test(
+      'identifies the current wallet-only account from its session token',
+      () async {
+        final service = WalletAuthService(
+          httpClient: MockClient((request) async {
+            expect(request.method, 'GET');
+            expect(request.url.path, endsWith('/session'));
+            expect(request.headers['authorization'], 'Bearer matrix-token');
+            return http.Response(
+              jsonEncode({
+                'accountType': 'wallet',
+                'wallet': {
+                  'type': 'evm',
+                  'address': '0xabc',
+                  'chainId': 'eip155:1',
+                },
+              }),
+              200,
+            );
+          }),
+        );
 
-      final account = await service.getCurrentSessionAccount(
-        accessToken: 'matrix-token',
-      );
+        final account = await service.getCurrentSessionAccount(
+          accessToken: 'matrix-token',
+        );
 
-      expect(account.isWalletAccount, isTrue);
-      expect(account.walletAddress, '0xabc');
-    });
+        expect(account.isWalletAccount, isTrue);
+        expect(account.walletAddress, '0xabc');
+      },
+    );
 
     test('keeps the server-selected challenge mode and username', () async {
       final service = WalletAuthService(

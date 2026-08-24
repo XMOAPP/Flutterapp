@@ -158,12 +158,7 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
                 onTap: () => Navigator.pop(context),
               ),
             ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: _buildCaptionBar(),
-            ),
+            Positioned(left: 0, right: 0, bottom: 0, child: _buildCaptionBar()),
           ],
         ),
       ),
@@ -191,9 +186,7 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
 
     final controller = _videoController;
     if (_loadingVideo) {
-      return const Center(
-        child: CircularProgressIndicator(color: kLimeGreen),
-      );
+      return const Center(child: CircularProgressIndicator(color: kLimeGreen));
     }
     if (_videoError != null || controller == null) {
       return Center(
@@ -256,8 +249,10 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
           children: [
             Expanded(
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: kDarkGrey,
                   borderRadius: BorderRadius.circular(24),
@@ -290,11 +285,7 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
                   color: kLimeGreen,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                  Icons.send_rounded,
-                  color: kBlack,
-                  size: 20,
-                ),
+                child: const Icon(Icons.send_rounded, color: kBlack, size: 20),
               ),
             ),
           ],
@@ -303,10 +294,7 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
     );
   }
 
-  Widget _roundButton({
-    required IconData icon,
-    required VoidCallback onTap,
-  }) {
+  Widget _roundButton({required IconData icon, required VoidCallback onTap}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(

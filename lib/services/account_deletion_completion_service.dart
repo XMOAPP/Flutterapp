@@ -52,7 +52,9 @@ class AccountDeletionCompletionService with WidgetsBindingObserver {
   }
 
   static bool isCompletionUri(Uri uri) {
-    final completion = Uri.tryParse(AppConfig.accountDeletionCompletionUrl.trim());
+    final completion = Uri.tryParse(
+      AppConfig.accountDeletionCompletionUrl.trim(),
+    );
     final isVerifiedHttpsCallback =
         completion != null &&
         uri.userInfo.isEmpty &&

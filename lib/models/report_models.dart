@@ -15,22 +15,22 @@ enum XmoReportReason {
 
 extension XmoReportReasonDetails on XmoReportReason {
   String get code => switch (this) {
-        XmoReportReason.hateOrAbuse => 'hate_or_abuse',
-        XmoReportReason.sexualContent => 'sexual_content',
-        XmoReportReason.illegalContent => 'illegal_content',
-        _ => name,
-      };
+    XmoReportReason.hateOrAbuse => 'hate_or_abuse',
+    XmoReportReason.sexualContent => 'sexual_content',
+    XmoReportReason.illegalContent => 'illegal_content',
+    _ => name,
+  };
 
   String get label => switch (this) {
-        XmoReportReason.spam => 'Spam or scam',
-        XmoReportReason.harassment => 'Harassment or bullying',
-        XmoReportReason.hateOrAbuse => 'Hate or abusive content',
-        XmoReportReason.sexualContent => 'Sexual content',
-        XmoReportReason.violence => 'Violence or threats',
-        XmoReportReason.impersonation => 'Impersonation',
-        XmoReportReason.illegalContent => 'Illegal content',
-        XmoReportReason.other => 'Other',
-      };
+    XmoReportReason.spam => 'Spam or scam',
+    XmoReportReason.harassment => 'Harassment or bullying',
+    XmoReportReason.hateOrAbuse => 'Hate or abusive content',
+    XmoReportReason.sexualContent => 'Sexual content',
+    XmoReportReason.violence => 'Violence or threats',
+    XmoReportReason.impersonation => 'Impersonation',
+    XmoReportReason.illegalContent => 'Illegal content',
+    XmoReportReason.other => 'Other',
+  };
 }
 
 enum XmoReportStatus { pending, reviewed, actioned, dismissed }
@@ -72,7 +72,8 @@ class XmoModerationReport {
         (value) => value.name == json['status'],
         orElse: () => XmoReportStatus.pending,
       ),
-      createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
+      createdAt:
+          DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
           DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
       moderatorNote: json['moderatorNote']?.toString(),
     );

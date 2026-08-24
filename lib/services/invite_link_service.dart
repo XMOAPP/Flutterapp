@@ -297,11 +297,7 @@ class InviteLinkService {
     var room = service.getRoomById(redemption.roomId);
     if (room?.membership == Membership.join ||
         room?.membership == Membership.invite) {
-      await _openRedeemedRoom(
-        room!,
-        provider,
-        replaceCurrent: previewIsOpen,
-      );
+      await _openRedeemedRoom(room!, provider, replaceCurrent: previewIsOpen);
       return;
     }
 
@@ -319,11 +315,7 @@ class InviteLinkService {
       _showCurrentMessage('Joined successfully. The chat will appear shortly.');
       return;
     }
-    await _openRedeemedRoom(
-      room,
-      provider,
-      replaceCurrent: previewIsOpen,
-    );
+    await _openRedeemedRoom(room, provider, replaceCurrent: previewIsOpen);
   }
 
   Future<Room?> _waitForRoom(MatrixService service, String roomId) async {
@@ -378,9 +370,9 @@ class InviteLinkService {
     try {
       final results = await service.searchPublicRooms(roomId);
       final previewRoom = results.cast<PublicRoomsChunk?>().firstWhere(
-            (chunk) => chunk?.roomId == roomId,
-            orElse: () => results.isNotEmpty ? results.first : null,
-          );
+        (chunk) => chunk?.roomId == roomId,
+        orElse: () => results.isNotEmpty ? results.first : null,
+      );
       if (previewRoom != null) {
         await _navigatorKey!.currentState!.push(
           MaterialPageRoute(
@@ -409,7 +401,8 @@ class InviteLinkService {
     final token = service?.accessToken;
     if (service != null && (token == null || token.isEmpty)) {
       throw const InviteLinkException(
-          'Your XMO session is unavailable. Sign in again.');
+        'Your XMO session is unavailable. Sign in again.',
+      );
     }
     if (token != null) headers['Authorization'] = 'Bearer $token';
     if (body != null || method == 'POST')
@@ -417,13 +410,15 @@ class InviteLinkService {
 
     final response = method == 'GET'
         ? await http
-            .get(uri, headers: headers)
-            .timeout(const Duration(seconds: 15))
+              .get(uri, headers: headers)
+              .timeout(const Duration(seconds: 15))
         : await http
-            .post(uri,
+              .post(
+                uri,
                 headers: headers,
-                body: jsonEncode(body ?? const <String, dynamic>{}))
-            .timeout(const Duration(seconds: 15));
+                body: jsonEncode(body ?? const <String, dynamic>{}),
+              )
+              .timeout(const Duration(seconds: 15));
     Map<String, dynamic> decoded = const {};
     try {
       final value = jsonDecode(response.body);

@@ -127,9 +127,9 @@ class _InviteLinksScreenState extends State<InviteLinksScreen> {
       );
       if (!mounted) return;
       setState(() => _inviteLink = null);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invite link disabled')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Invite link disabled')));
     } on InviteLinkException catch (error) {
       _showError(error.message);
     } catch (_) {

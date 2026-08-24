@@ -35,13 +35,12 @@ class MatrixSdkSessionRepository implements MatrixSessionRepository {
     Uint8List? avatarBytes,
     String avatarFileName = 'avatar.jpg',
     bool removeAvatar = false,
-  }) =>
-      _api.updateProfile(
-        displayName: displayName,
-        avatarBytes: avatarBytes,
-        avatarFileName: avatarFileName,
-        removeAvatar: removeAvatar,
-      );
+  }) => _api.updateProfile(
+    displayName: displayName,
+    avatarBytes: avatarBytes,
+    avatarFileName: avatarFileName,
+    removeAvatar: removeAvatar,
+  );
 }
 
 class MatrixSdkRoomRepository implements MatrixRoomRepository {
@@ -55,12 +54,7 @@ class MatrixSdkRoomRepository implements MatrixRoomRepository {
     required String name,
     String? topic,
     bool isPublic = true,
-  }) =>
-      _api.createChannel(
-        name: name,
-        isPublic: isPublic,
-        topic: topic,
-      );
+  }) => _api.createChannel(name: name, isPublic: isPublic, topic: topic);
   @override
   Future<String> createDirectRoom(String userId) =>
       _api.createDirectRoom(userId);
@@ -69,12 +63,7 @@ class MatrixSdkRoomRepository implements MatrixRoomRepository {
     required String name,
     String? topic,
     bool isDirect = false,
-  }) =>
-      _api.createRoom(
-        name: name,
-        topic: topic,
-        isDirect: isDirect,
-      );
+  }) => _api.createRoom(name: name, topic: topic, isDirect: isDirect);
   @override
   Future<Timeline?> getTimeline(String roomId) => _api.getTimeline(roomId);
   @override
@@ -97,16 +86,15 @@ class MatrixSdkMediaRepository implements MatrixMediaRepository {
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
     Map<String, dynamic>? xmoStream,
-  }) =>
-      _api.sendFileWithProgress(
-        roomId: roomId,
-        bytes: bytes,
-        fileName: fileName,
-        mimeType: mimeType,
-        onUploadProgress: onUploadProgress,
-        isCancelled: isCancelled,
-        xmoStream: xmoStream,
-      );
+  }) => _api.sendFileWithProgress(
+    roomId: roomId,
+    bytes: bytes,
+    fileName: fileName,
+    mimeType: mimeType,
+    onUploadProgress: onUploadProgress,
+    isCancelled: isCancelled,
+    xmoStream: xmoStream,
+  );
   @override
   Future<void> sendImageWithCaption({
     required String roomId,
@@ -120,20 +108,19 @@ class MatrixSdkMediaRepository implements MatrixMediaRepository {
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
     Map<String, dynamic>? xmoStream,
-  }) =>
-      _api.sendImageWithCaption(
-        roomId: roomId,
-        bytes: bytes,
-        fileName: fileName,
-        mimeType: mimeType,
-        caption: caption,
-        thumbnailBytes: thumbnailBytes,
-        thumbnailWidth: thumbnailWidth,
-        thumbnailHeight: thumbnailHeight,
-        onUploadProgress: onUploadProgress,
-        isCancelled: isCancelled,
-        xmoStream: xmoStream,
-      );
+  }) => _api.sendImageWithCaption(
+    roomId: roomId,
+    bytes: bytes,
+    fileName: fileName,
+    mimeType: mimeType,
+    caption: caption,
+    thumbnailBytes: thumbnailBytes,
+    thumbnailWidth: thumbnailWidth,
+    thumbnailHeight: thumbnailHeight,
+    onUploadProgress: onUploadProgress,
+    isCancelled: isCancelled,
+    xmoStream: xmoStream,
+  );
 }
 
 class MatrixSdkPushRepository implements MatrixPushRepository {
@@ -141,9 +128,10 @@ class MatrixSdkPushRepository implements MatrixPushRepository {
   final MatrixRepositoryApi _api;
 
   @override
-  Future<void> removeHttpPusher(
-          {required String pushKey, required String appId}) =>
-      _api.removeHttpPusher(pushKey: pushKey, appId: appId);
+  Future<void> removeHttpPusher({
+    required String pushKey,
+    required String appId,
+  }) => _api.removeHttpPusher(pushKey: pushKey, appId: appId);
   @override
   Future<void> setHttpPusher({
     required String pushKey,
@@ -153,16 +141,15 @@ class MatrixSdkPushRepository implements MatrixPushRepository {
     required String profileTag,
     required String pushGatewayUrl,
     String lang = 'en',
-  }) =>
-      _api.setHttpPusher(
-        pushKey: pushKey,
-        appId: appId,
-        appDisplayName: appDisplayName,
-        deviceDisplayName: deviceDisplayName,
-        profileTag: profileTag,
-        pushGatewayUrl: pushGatewayUrl,
-        lang: lang,
-      );
+  }) => _api.setHttpPusher(
+    pushKey: pushKey,
+    appId: appId,
+    appDisplayName: appDisplayName,
+    deviceDisplayName: deviceDisplayName,
+    profileTag: profileTag,
+    pushGatewayUrl: pushGatewayUrl,
+    lang: lang,
+  );
 }
 
 class MatrixSdkCommunityRepository implements MatrixCommunityRepository {

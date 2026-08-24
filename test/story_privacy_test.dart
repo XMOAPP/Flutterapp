@@ -26,14 +26,8 @@ void main() {
         customPrivacyList: const ['@selected:xmo.test'],
       );
 
-      expect(
-        canDirectContactViewStory(story, '@selected:xmo.test'),
-        isTrue,
-      );
-      expect(
-        canDirectContactViewStory(story, '@other:xmo.test'),
-        isFalse,
-      );
+      expect(canDirectContactViewStory(story, '@selected:xmo.test'), isTrue);
+      expect(canDirectContactViewStory(story, '@other:xmo.test'), isFalse);
     });
 
     test('contactsExcept excludes selected direct contacts', () {
@@ -42,14 +36,8 @@ void main() {
         customPrivacyList: const ['@hidden:xmo.test'],
       );
 
-      expect(
-        canDirectContactViewStory(story, '@hidden:xmo.test'),
-        isFalse,
-      );
-      expect(
-        canDirectContactViewStory(story, '@visible:xmo.test'),
-        isTrue,
-      );
+      expect(canDirectContactViewStory(story, '@hidden:xmo.test'), isFalse);
+      expect(canDirectContactViewStory(story, '@visible:xmo.test'), isTrue);
     });
   });
 

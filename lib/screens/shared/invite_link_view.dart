@@ -271,22 +271,14 @@ class _QrCorner extends StatelessWidget {
             bottom: top ? null : 0,
             left: left ? 0 : null,
             right: left ? null : 0,
-            child: Container(
-              width: 28,
-              height: 2,
-              color: kLimeGreen,
-            ),
+            child: Container(width: 28, height: 2, color: kLimeGreen),
           ),
           Positioned(
             top: top ? 0 : null,
             bottom: top ? null : 0,
             left: left ? 0 : null,
             right: left ? null : 0,
-            child: Container(
-              width: 2,
-              height: 28,
-              color: kLimeGreen,
-            ),
+            child: Container(width: 2, height: 28, color: kLimeGreen),
           ),
         ],
       ),
@@ -380,9 +372,7 @@ class _InviteLinkField extends StatelessWidget {
                   style: OutlinedButton.styleFrom(
                     foregroundColor: kWhite,
                     disabledForegroundColor: kLightGrey,
-                    side: BorderSide(
-                      color: enabled ? kLightGrey : kMediumGrey,
-                    ),
+                    side: BorderSide(color: enabled ? kLightGrey : kMediumGrey),
                     minimumSize: const Size.fromHeight(43),
                     padding: const EdgeInsets.symmetric(horizontal: 10),
                     textStyle: GoogleFonts.inter(
@@ -471,8 +461,9 @@ class _ManagementActions extends StatelessWidget {
             leading: _ManagementIcon(
               icon: Icons.link_off,
               color: canRevoke ? Colors.redAccent : kLightGrey,
-              backgroundColor:
-                  canRevoke ? const Color(0x263F151A) : const Color(0xFF20262D),
+              backgroundColor: canRevoke
+                  ? const Color(0x263F151A)
+                  : const Color(0xFF20262D),
             ),
             title: Text(
               'Disable Link',
@@ -517,10 +508,7 @@ class _ManagementIcon extends StatelessWidget {
     return Container(
       width: 38,
       height: 38,
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        shape: BoxShape.circle,
-      ),
+      decoration: BoxDecoration(color: backgroundColor, shape: BoxShape.circle),
       child: Icon(icon, color: color, size: 21),
     );
   }

@@ -12,8 +12,9 @@ class WalletAuthService {
 
   Uri get _baseUri {
     final value = AppConfig.walletAuthServerUrl.trim();
-    final normalized =
-        value.endsWith('/') ? value.substring(0, value.length - 1) : value;
+    final normalized = value.endsWith('/')
+        ? value.substring(0, value.length - 1)
+        : value;
     return Uri.parse(normalized);
   }
 
@@ -37,9 +38,7 @@ class WalletAuthService {
   }
 
   Future<bool> isUsernameAvailable(String username) async {
-    final body = await _post('username-availability', {
-      'username': username,
-    });
+    final body = await _post('username-availability', {'username': username});
     return body['available'] == true;
   }
 
@@ -205,7 +204,8 @@ class WalletAuthChallenge {
     return WalletAuthChallenge(
       message: json['message']?.toString() ?? '',
       nonce: json['nonce']?.toString() ?? '',
-      expiresAt: DateTime.tryParse(json['expiresAt']?.toString() ?? '') ??
+      expiresAt:
+          DateTime.tryParse(json['expiresAt']?.toString() ?? '') ??
           DateTime.now().toUtc(),
       mode: json['mode']?.toString() ?? 'login',
       username: json['username']?.toString() ?? '',

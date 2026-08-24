@@ -22,13 +22,15 @@ class EmailConfig {
   });
 
   factory EmailConfig.fromEnvironment(Map<String, String> env) {
-    final providerValue = (env['EMAIL_PROVIDER'] ??
-            (env['BREVO_API_KEY'] != null ? 'brevo' : 'gmail'))
-        .trim()
-        .toLowerCase();
+    final providerValue =
+        (env['EMAIL_PROVIDER'] ??
+                (env['BREVO_API_KEY'] != null ? 'brevo' : 'gmail'))
+            .trim()
+            .toLowerCase();
     return EmailConfig(
-      provider:
-          providerValue == 'gmail' ? EmailProvider.gmail : EmailProvider.brevo,
+      provider: providerValue == 'gmail'
+          ? EmailProvider.gmail
+          : EmailProvider.brevo,
       brevoApiKey: env['BREVO_API_KEY'] ?? '',
       mailFrom: env['MAIL_FROM'] ?? 'noreply@xmo.dpdns.org',
       mailFromName: env['MAIL_FROM_NAME'] ?? 'XMO',
@@ -75,11 +77,11 @@ class EmailService {
     StructuredLogger logger = const StructuredLogger(),
     Duration requestTimeout = const Duration(seconds: 12),
     int maxAttempts = 3,
-  })  : _config = config,
-        _httpClient = httpClient ?? http.Client(),
-        _logger = logger,
-        _requestTimeout = requestTimeout,
-        _maxAttempts = maxAttempts.clamp(1, 5).toInt();
+  }) : _config = config,
+       _httpClient = httpClient ?? http.Client(),
+       _logger = logger,
+       _requestTimeout = requestTimeout,
+       _maxAttempts = maxAttempts.clamp(1, 5).toInt();
 
   final EmailConfig _config;
   final http.Client _httpClient;
@@ -89,14 +91,12 @@ class EmailService {
 
   bool get isConfigured => _config.isConfigured;
 
-  Future<void> sendOtpEmail({
-    required String email,
-    required String otp,
-  }) {
+  Future<void> sendOtpEmail({required String email, required String otp}) {
     return sendGenericEmail(
       to: email,
       subject: 'Your XMO verification code',
-      htmlContent: '''
+      htmlContent:
+          '''
         <div style="font-family: Arial, sans-serif; color: #111827; padding: 24px; line-height: 1.5; text-align: center;">
           <div style="max-width: 440px; margin: 0 auto;">
             <h2 style="margin: 0 0 16px;">Verify your XMO account</h2>
@@ -110,7 +110,8 @@ class EmailService {
           </div>
         </div>
       ''',
-      textContent: 'Verify your XMO account\n\n'
+      textContent:
+          'Verify your XMO account\n\n'
           'You requested this code to verify your email address for XMO Messenger.\n\n'
           'Your verification code is: $otp\n\n'
           'This code expires in 1 minute.\n\n'
@@ -127,7 +128,8 @@ class EmailService {
     return sendGenericEmail(
       to: email,
       subject: 'Reset your XMO password',
-      htmlContent: '''
+      htmlContent:
+          '''
         <div style="font-family: Arial, sans-serif; padding: 24px;">
           <h2>Reset your XMO password</h2>
           <p>Use this link to reset your password:</p>
@@ -141,9 +143,7 @@ class EmailService {
     );
   }
 
-  Future<void> sendWelcomeEmail({
-    required String email,
-  }) {
+  Future<void> sendWelcomeEmail({required String email}) {
     return sendGenericEmail(
       to: email,
       subject: 'Welcome to XMO',
@@ -207,20 +207,14 @@ class EmailService {
   }) async {
     final uri = Uri.parse(_config.brevoEndpoint);
     final body = <String, Object?>{
-      'sender': {
-        'name': _config.mailFromName,
-        'email': _config.mailFrom,
-      },
+      'sender': {'name': _config.mailFromName, 'email': _config.mailFrom},
       'to': [
         {
           'email': to,
           if (toName != null && toName.trim().isNotEmpty) 'name': toName,
-        }
+        },
       ],
-      'replyTo': {
-        'name': _config.mailFromName,
-        'email': _config.replyTo,
-      },
+      'replyTo': {'name': _config.mailFromName, 'email': _config.replyTo},
       'subject': subject,
       'htmlContent': htmlContent,
       if (textContent != null && textContent.trim().isNotEmpty)

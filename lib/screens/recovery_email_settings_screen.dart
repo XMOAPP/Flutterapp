@@ -261,10 +261,7 @@ class _RecoveryEmailSettingsScreenState
         ),
         child: Text(
           label,
-          style: GoogleFonts.inter(
-            fontSize: 13,
-            fontWeight: FontWeight.w800,
-          ),
+          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w800),
         ),
       ),
     );

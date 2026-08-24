@@ -12,9 +12,6 @@ class WalletErrorDisplay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ErrorDisplay(
-      error: error,
-      padding: EdgeInsets.zero,
-    );
+    return ErrorDisplay(error: error, padding: EdgeInsets.zero);
   }
 }

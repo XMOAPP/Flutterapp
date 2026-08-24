@@ -7,39 +7,31 @@ Future<void> _createDonationPayment(HttpRequest request) async {
   final donorDisplayName = body['donorDisplayName']?.toString().trim() ?? '';
 
   if (_thirdwebSecretKey.isEmpty) {
-    await _json(
-      request,
-      HttpStatus.internalServerError,
-      {'error': 'Thirdweb secret key is not configured'},
-    );
+    await _json(request, HttpStatus.internalServerError, {
+      'error': 'Thirdweb secret key is not configured',
+    });
     return;
   }
 
   if (_donationRecipientAddress.isEmpty) {
-    await _json(
-      request,
-      HttpStatus.internalServerError,
-      {'error': 'Donation recipient wallet is not configured'},
-    );
+    await _json(request, HttpStatus.internalServerError, {
+      'error': 'Donation recipient wallet is not configured',
+    });
     return;
   }
 
   if (amount == null || amount <= BigInt.zero) {
-    await _json(
-      request,
-      HttpStatus.badRequest,
-      {'error': 'Invalid donation amount'},
-    );
+    await _json(request, HttpStatus.badRequest, {
+      'error': 'Invalid donation amount',
+    });
     return;
   }
 
   final minSmallestUnit = BigInt.from((_minDonationUsd * 1000000).round());
   if (amount < minSmallestUnit) {
-    await _json(
-      request,
-      HttpStatus.badRequest,
-      {'error': 'Minimum donation is \$5'},
-    );
+    await _json(request, HttpStatus.badRequest, {
+      'error': 'Minimum donation is \$5',
+    });
     return;
   }
 
@@ -85,45 +77,34 @@ Future<void> _createDonationPayment(HttpRequest request) async {
       'statusCode': response.statusCode,
       'providerError': _thirdwebErrorMessage(response.body),
     });
-    await _json(
-      request,
-      HttpStatus.badGateway,
-      {
-        'error':
-            'Donation checkout is temporarily unavailable. Please try again.',
-      },
-    );
+    await _json(request, HttpStatus.badGateway, {
+      'error':
+          'Donation checkout is temporarily unavailable. Please try again.',
+    });
     return;
   }
 
   final decoded = _decodeJsonMap(response.body);
   final result = decoded['result'];
   if (result is! Map<String, dynamic>) {
-    await _json(
-      request,
-      HttpStatus.badGateway,
-      {'error': 'Thirdweb did not return payment details'},
-    );
+    await _json(request, HttpStatus.badGateway, {
+      'error': 'Thirdweb did not return payment details',
+    });
     return;
   }
 
   final id = result['id']?.toString() ?? '';
   final link = result['link']?.toString() ?? '';
   if (id.isEmpty || Uri.tryParse(link) == null) {
-    await _json(
-      request,
-      HttpStatus.badGateway,
-      {'error': 'Thirdweb did not return a checkout link'},
-    );
+    await _json(request, HttpStatus.badGateway, {
+      'error': 'Thirdweb did not return a checkout link',
+    });
     return;
   }
 
   await _json(request, HttpStatus.ok, {
     'success': true,
-    'payment': {
-      'id': id,
-      'link': link,
-    },
+    'payment': {'id': id, 'link': link},
   });
 }
 
@@ -139,28 +120,27 @@ Future<_ThirdwebResponse> _postThirdwebPayment({
     );
     request.headers.contentType = ContentType.json;
     request.headers.add('x-secret-key', _thirdwebSecretKey);
-    request.write(jsonEncode({
-      'name': 'XMO Donation',
-      'description': 'Support XMO development',
-      'token': {
-        'address': _baseUsdcAddress,
-        'chainId': _baseChainId,
-        'amount': amountUsdcSmallestUnit.toString(),
-      },
-      'recipient': _donationRecipientAddress,
-      'purchaseData': {
-        'source': 'xmo_app',
-        if (donorUserId.isNotEmpty) 'donorUserId': donorUserId,
-        if (donorDisplayName.isNotEmpty) 'donorDisplayName': donorDisplayName,
-      },
-    }));
+    request.write(
+      jsonEncode({
+        'name': 'XMO Donation',
+        'description': 'Support XMO development',
+        'token': {
+          'address': _baseUsdcAddress,
+          'chainId': _baseChainId,
+          'amount': amountUsdcSmallestUnit.toString(),
+        },
+        'recipient': _donationRecipientAddress,
+        'purchaseData': {
+          'source': 'xmo_app',
+          if (donorUserId.isNotEmpty) 'donorUserId': donorUserId,
+          if (donorDisplayName.isNotEmpty) 'donorDisplayName': donorDisplayName,
+        },
+      }),
+    );
 
     final response = await request.close().timeout(const Duration(seconds: 15));
     final body = await utf8.decoder.bind(response).join();
-    return _ThirdwebResponse(
-      statusCode: response.statusCode,
-      body: body,
-    );
+    return _ThirdwebResponse(statusCode: response.statusCode, body: body);
   } finally {
     client.close(force: true);
   }
@@ -192,8 +172,5 @@ class _ThirdwebResponse {
   final int statusCode;
   final String body;
 
-  const _ThirdwebResponse({
-    required this.statusCode,
-    required this.body,
-  });
+  const _ThirdwebResponse({required this.statusCode, required this.body});
 }

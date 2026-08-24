@@ -53,7 +53,8 @@ Future<void> openFile(
   await channel.invokeMethod<void>('openFile', {
     'filePath': file.path,
     'fileName': safeName,
-    'mimeType': resolvedMimeType ??
+    'mimeType':
+        resolvedMimeType ??
         lookupMimeType(safeName, headerBytes: bytes) ??
         '*/*',
   });

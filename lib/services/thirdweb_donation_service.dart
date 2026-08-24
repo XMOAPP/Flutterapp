@@ -8,10 +8,7 @@ class ThirdwebDonationPayment {
   final String id;
   final Uri link;
 
-  const ThirdwebDonationPayment({
-    required this.id,
-    required this.link,
-  });
+  const ThirdwebDonationPayment({required this.id, required this.link});
 }
 
 class ThirdwebDonationService {
@@ -24,9 +21,7 @@ class ThirdwebDonationService {
   }) async {
     final response = await http.post(
       _endpoint(),
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         'amountUsdcSmallestUnit': amountUsdcSmallestUnit.toString(),
         'donorUserId': donorUserId,

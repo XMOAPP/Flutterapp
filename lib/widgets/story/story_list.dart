@@ -16,10 +16,9 @@ class StoryList extends StatelessWidget {
       builder: (context, storyProvider, matrixProvider, _) {
         final myUserId = matrixProvider.userId ?? '';
         final hasMyStories = storyProvider.hasMyStories;
-        final myLatestStory = storyProvider.myStories
-            .where((story) => !story.isExpired)
-            .toList()
-          ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+        final myLatestStory =
+            storyProvider.myStories.where((story) => !story.isExpired).toList()
+              ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
         final contactStories = storyProvider.contactStories;
 
         // Always show at least the "Add Story" button
@@ -43,8 +42,9 @@ class StoryList extends StatelessWidget {
                       avatarUrl: matrixProvider.avatarUrl,
                       isMyStory: true,
                       hasUnviewedStories: true,
-                      previewStory:
-                          myLatestStory.isNotEmpty ? myLatestStory.last : null,
+                      previewStory: myLatestStory.isNotEmpty
+                          ? myLatestStory.last
+                          : null,
                       storyCount: myLatestStory.length,
                       viewedCount: 0,
                       onAddStory: () {
@@ -118,8 +118,9 @@ class StoryList extends StatelessWidget {
                       MaterialPageRoute(
                         builder: (_) => StoryViewerScreen(
                           initialUserIndex: index - 1,
-                          allUserStories:
-                              contactStories.map((us) => us.userId).toList(),
+                          allUserStories: contactStories
+                              .map((us) => us.userId)
+                              .toList(),
                         ),
                       ),
                     );

@@ -66,10 +66,7 @@ String stripMatrixReplyFallback(String body, {required bool isReply}) {
   return lines.skip(index).join('\n');
 }
 
-String stripMatrixFormattedReplyFallback(
-  String html, {
-  required bool isReply,
-}) {
+String stripMatrixFormattedReplyFallback(String html, {required bool isReply}) {
   if (!isReply || !html.trimLeft().startsWith('<mx-reply')) return html;
   const closingTag = '</mx-reply>';
   final end = html.indexOf(closingTag);
@@ -80,8 +77,7 @@ String stripMatrixFormattedReplyFallback(
 String matrixAttachmentFileName(
   Event event, {
   String fallback = 'attachment',
-}) =>
-    matrixAttachmentFileNameFromContent(event.content, fallback: fallback);
+}) => matrixAttachmentFileNameFromContent(event.content, fallback: fallback);
 
 String matrixAttachmentFileNameFromContent(
   Map<dynamic, dynamic> content, {
@@ -98,11 +94,10 @@ String matrixAttachmentFileNameFromContent(
 String safeMatrixAttachmentFileName(
   Event event, {
   String fallback = 'attachment',
-}) =>
-    sanitizeAttachmentFileName(
-      matrixAttachmentFileName(event, fallback: fallback),
-      fallback: fallback,
-    );
+}) => sanitizeAttachmentFileName(
+  matrixAttachmentFileName(event, fallback: fallback),
+  fallback: fallback,
+);
 
 String sanitizeAttachmentFileName(
   String value, {

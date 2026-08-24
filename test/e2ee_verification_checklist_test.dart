@@ -40,9 +40,9 @@ void main() {
     };
 
     expect(E2eeVerificationChecklist.isProductionReady(evidence), isFalse);
-    expect(
-      E2eeVerificationChecklist.missingProductionEvidenceIds(evidence),
-      ['xmo_element_text_media', 'verified_device_key_requests'],
-    );
+    expect(E2eeVerificationChecklist.missingProductionEvidenceIds(evidence), [
+      'xmo_element_text_media',
+      'verified_device_key_requests',
+    ]);
   });
 }

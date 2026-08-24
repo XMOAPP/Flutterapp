@@ -1,11 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 /// Story media type
-enum StoryMediaType {
-  image,
-  video,
-  text,
-}
+enum StoryMediaType { image, video, text }
 
 /// Story privacy setting
 enum StoryPrivacy {
@@ -150,19 +146,28 @@ class Story {
     }
 
     final mediaUrl = _optionalBoundedString(json['media_url'], maxUrlLength);
-    final thumbnailUrl =
-        _optionalBoundedString(json['thumbnail_url'], maxUrlLength);
-    final mediaMimeType =
-        _optionalBoundedString(json['media_mime_type'], maxMimeTypeLength);
-    final caption =
-        _optionalBoundedString(json['caption'], maxCaptionLength, trim: false);
+    final thumbnailUrl = _optionalBoundedString(
+      json['thumbnail_url'],
+      maxUrlLength,
+    );
+    final mediaMimeType = _optionalBoundedString(
+      json['media_mime_type'],
+      maxMimeTypeLength,
+    );
+    final caption = _optionalBoundedString(
+      json['caption'],
+      maxCaptionLength,
+      trim: false,
+    );
     final textContent = _optionalBoundedString(
       json['text_content'],
       maxTextLength,
       trim: false,
     );
-    final userAvatarUrl =
-        _optionalBoundedString(json['user_avatar_url'], maxUrlLength);
+    final userAvatarUrl = _optionalBoundedString(
+      json['user_avatar_url'],
+      maxUrlLength,
+    );
     if (mediaUrl == _invalidOptionalString ||
         thumbnailUrl == _invalidOptionalString ||
         mediaMimeType == _invalidOptionalString ||
@@ -195,7 +200,8 @@ class Story {
       return null;
     }
 
-    final privacy = _enumByName(StoryPrivacy.values, json['privacy']) ??
+    final privacy =
+        _enumByName(StoryPrivacy.values, json['privacy']) ??
         StoryPrivacy.contacts;
 
     return Story(
@@ -373,10 +379,7 @@ class UserStories {
 /// Story updates contain the owner's complete active story list. Matrix sync
 /// can deliver older timeline events after newer ones, so list arrival order
 /// cannot be used as snapshot order.
-bool shouldReplaceStorySnapshot(
-  UserStories current,
-  UserStories incoming,
-) {
+bool shouldReplaceStorySnapshot(UserStories current, UserStories incoming) {
   final currentVersion = current.snapshotUpdatedAt;
   final incomingVersion = incoming.snapshotUpdatedAt;
 
@@ -547,8 +550,9 @@ StoryViewReceipt? parseStoryViewReceipt({
   if (rawClaimedViewerId != null && rawClaimedViewerId is! String) {
     return null;
   }
-  final claimedViewerId =
-      rawClaimedViewerId is String ? rawClaimedViewerId.trim() : null;
+  final claimedViewerId = rawClaimedViewerId is String
+      ? rawClaimedViewerId.trim()
+      : null;
   if (claimedViewerId != null && claimedViewerId.isNotEmpty) {
     if (claimedViewerId.length > Story.maxUserIdLength ||
         claimedViewerId != actualViewerId) {

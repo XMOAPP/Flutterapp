@@ -2,10 +2,7 @@ class MatrixMentionTarget {
   final String userId;
   final String displayName;
 
-  const MatrixMentionTarget({
-    required this.userId,
-    required this.displayName,
-  });
+  const MatrixMentionTarget({required this.userId, required this.displayName});
 }
 
 class MatrixMentions {
@@ -28,9 +25,7 @@ class MatrixMentions {
 
     if (uniqueUserIds.isEmpty) return const {};
     return {
-      contentKey: {
-        'user_ids': uniqueUserIds.toList(growable: false),
-      },
+      contentKey: {'user_ids': uniqueUserIds.toList(growable: false)},
     };
   }
 
@@ -44,10 +39,10 @@ class MatrixMentions {
         .where((target) => _containsVisibleMention(text, target.displayName))
         .map((target) => target.userId);
 
-    return forUserIds(
-      [...visibleUserIds, ...additionalUserIds],
-      ownUserId: ownUserId,
-    );
+    return forUserIds([
+      ...visibleUserIds,
+      ...additionalUserIds,
+    ], ownUserId: ownUserId);
   }
 
   static bool _containsVisibleMention(String text, String displayName) {
@@ -57,10 +52,12 @@ class MatrixMentions {
     final token = '@$normalizedName';
     var index = text.indexOf(token);
     while (index >= 0) {
-      final beforeIsValid = index == 0 ||
+      final beforeIsValid =
+          index == 0 ||
           !_isMentionContinuation(text.substring(index - 1, index));
       final end = index + token.length;
-      final afterIsValid = end == text.length ||
+      final afterIsValid =
+          end == text.length ||
           !_isMentionContinuation(text.substring(end, end + 1));
       if (beforeIsValid && afterIsValid) return true;
       index = text.indexOf(token, index + token.length);

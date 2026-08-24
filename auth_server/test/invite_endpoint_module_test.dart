@@ -29,7 +29,7 @@ void main() {
     for (final prefix in const [
       '/invites/',
       '/auth/invites/',
-      '/auth/otp/invites/'
+      '/auth/otp/invites/',
     ]) {
       final previewPath = '$prefix$token/preview';
       final avatarPath = '$prefix$token/avatar';

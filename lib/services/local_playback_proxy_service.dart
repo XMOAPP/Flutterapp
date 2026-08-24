@@ -36,7 +36,7 @@ class XmoLocalPlaybackHandle {
 
 class LocalPlaybackProxyService {
   LocalPlaybackProxyService({Random? random})
-      : _random = random ?? Random.secure();
+    : _random = random ?? Random.secure();
 
   final Map<String, XmoStreamingMediaSession> _sessions =
       <String, XmoStreamingMediaSession>{};
@@ -147,11 +147,7 @@ class LocalPlaybackProxyService {
         return;
       }
 
-      await _sendRange(
-        request,
-        session: session,
-        range: range,
-      );
+      await _sendRange(request, session: session, range: range);
     } catch (_) {
       try {
         request.response.statusCode = HttpStatus.internalServerError;

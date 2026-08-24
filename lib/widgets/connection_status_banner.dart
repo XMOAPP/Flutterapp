@@ -54,8 +54,11 @@ class ConnectionStatusBanner extends StatelessWidget {
                     ),
                   )
                 else
-                  const Icon(Icons.cloud_off_outlined,
-                      color: kLightGrey, size: 16),
+                  const Icon(
+                    Icons.cloud_off_outlined,
+                    color: kLightGrey,
+                    size: 16,
+                  ),
                 const SizedBox(width: 7),
                 Flexible(
                   child: Column(
@@ -129,7 +132,8 @@ class ConnectionStatusBanner extends StatelessWidget {
     final pendingTransfers = provider.pendingTransferCount;
     if (pendingTransfers > 0) {
       parts.add(
-          '$pendingTransfers transfer${pendingTransfers == 1 ? '' : 's'} pending');
+        '$pendingTransfers transfer${pendingTransfers == 1 ? '' : 's'} pending',
+      );
     }
     return parts.isEmpty ? null : parts.join(' | ');
   }

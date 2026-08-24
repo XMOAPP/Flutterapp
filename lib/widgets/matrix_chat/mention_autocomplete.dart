@@ -44,9 +44,7 @@ class MentionAutocomplete extends StatelessWidget {
       constraints: const BoxConstraints(maxHeight: 200),
       decoration: const BoxDecoration(
         color: kDarkerGrey,
-        border: Border(
-          top: BorderSide(color: kMediumGrey, width: 1),
-        ),
+        border: Border(top: BorderSide(color: kMediumGrey, width: 1)),
       ),
       child: ListView.builder(
         shrinkWrap: true,
@@ -69,10 +67,7 @@ class MentionAutocomplete extends StatelessWidget {
       ),
       title: Text(
         member.displayName,
-        style: GoogleFonts.inter(
-          color: kWhite,
-          fontSize: 14,
-        ),
+        style: GoogleFonts.inter(color: kWhite, fontSize: 14),
       ),
       trailing: _buildRoleBadge(member.role),
       onTap: () => onMemberSelected(member),

@@ -13,23 +13,21 @@ class PushRepository {
     required String profileTag,
     required String pushGatewayUrl,
     String lang = 'en',
-  }) =>
-      matrixService.pushRepository.setHttpPusher(
-        pushKey: pushKey,
-        appId: appId,
-        appDisplayName: appDisplayName,
-        deviceDisplayName: deviceDisplayName,
-        profileTag: profileTag,
-        pushGatewayUrl: pushGatewayUrl,
-        lang: lang,
-      );
+  }) => matrixService.pushRepository.setHttpPusher(
+    pushKey: pushKey,
+    appId: appId,
+    appDisplayName: appDisplayName,
+    deviceDisplayName: deviceDisplayName,
+    profileTag: profileTag,
+    pushGatewayUrl: pushGatewayUrl,
+    lang: lang,
+  );
 
   Future<void> removeHttpPusher({
     required String pushKey,
     required String appId,
-  }) =>
-      matrixService.pushRepository.removeHttpPusher(
-        pushKey: pushKey,
-        appId: appId,
-      );
+  }) => matrixService.pushRepository.removeHttpPusher(
+    pushKey: pushKey,
+    appId: appId,
+  );
 }

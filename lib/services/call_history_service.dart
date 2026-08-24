@@ -44,16 +44,19 @@ class CallHistoryEntry {
     final callType = video ? 'video' : 'voice';
     final scope = kind == CallHistoryKind.group ? 'group ' : '';
     final label = switch (status) {
-      CallHistoryStatus.answered => direction == CallHistoryDirection.incoming
-          ? 'Incoming $scope$callType call'
-          : 'Outgoing $scope$callType call',
-      CallHistoryStatus.ended => direction == CallHistoryDirection.incoming
-          ? 'Incoming $scope$callType call'
-          : 'Outgoing $scope$callType call',
+      CallHistoryStatus.answered =>
+        direction == CallHistoryDirection.incoming
+            ? 'Incoming $scope$callType call'
+            : 'Outgoing $scope$callType call',
+      CallHistoryStatus.ended =>
+        direction == CallHistoryDirection.incoming
+            ? 'Incoming $scope$callType call'
+            : 'Outgoing $scope$callType call',
       CallHistoryStatus.missed => 'Missed $scope$callType call',
-      CallHistoryStatus.rejected => direction == CallHistoryDirection.incoming
-          ? 'Rejected $scope$callType call'
-          : 'Declined $scope$callType call',
+      CallHistoryStatus.rejected =>
+        direction == CallHistoryDirection.incoming
+            ? 'Rejected $scope$callType call'
+            : 'Declined $scope$callType call',
     };
     final callDuration = duration;
     if (callDuration == null || callDuration.inSeconds <= 0) return label;
@@ -105,7 +108,8 @@ class CallHistoryEntry {
         orElse: () => CallHistoryStatus.ended,
       ),
       video: json['video'] as bool? ?? false,
-      timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+      timestamp:
+          DateTime.tryParse(json['timestamp'] as String? ?? '') ??
           DateTime.fromMillisecondsSinceEpoch(0),
       duration: durationMs is int ? Duration(milliseconds: durationMs) : null,
     );
@@ -208,8 +212,9 @@ class CallHistoryService {
       id: '${DateTime.now().microsecondsSinceEpoch}_${room.id}',
       ownerUserId: ownerUserId,
       roomId: room.id,
-      roomName:
-          MatrixService.cleanName(MatrixService().getResolvedDisplayName(room)),
+      roomName: MatrixService.cleanName(
+        MatrixService().getResolvedDisplayName(room),
+      ),
       avatarUrl: room.avatar?.toString(),
       kind: kind,
       direction: direction,
@@ -253,13 +258,16 @@ class CallHistoryService {
       entries.value = const [];
       return;
     }
-    final next = box.values
-        .whereType<Map>()
-        .map(CallHistoryEntry.fromJson)
-        .where(
-            (entry) => entry.id.isNotEmpty && entry.ownerUserId == ownerUserId)
-        .toList()
-      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    final next =
+        box.values
+            .whereType<Map>()
+            .map(CallHistoryEntry.fromJson)
+            .where(
+              (entry) =>
+                  entry.id.isNotEmpty && entry.ownerUserId == ownerUserId,
+            )
+            .toList()
+          ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     entries.value = List.unmodifiable(next);
   }
 
@@ -267,13 +275,16 @@ class CallHistoryService {
     final box = _box;
     final ownerUserId = _ownerUserId;
     if (box == null || ownerUserId == null) return;
-    final sorted = box.values
-        .whereType<Map>()
-        .map(CallHistoryEntry.fromJson)
-        .where(
-            (entry) => entry.id.isNotEmpty && entry.ownerUserId == ownerUserId)
-        .toList()
-      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    final sorted =
+        box.values
+            .whereType<Map>()
+            .map(CallHistoryEntry.fromJson)
+            .where(
+              (entry) =>
+                  entry.id.isNotEmpty && entry.ownerUserId == ownerUserId,
+            )
+            .toList()
+          ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     if (sorted.length <= _maxEntries) return;
     for (final entry in sorted.skip(_maxEntries)) {
       await box.delete(entry.id);

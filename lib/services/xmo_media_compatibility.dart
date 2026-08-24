@@ -18,7 +18,8 @@ class XmoMediaCompatibility {
   }
 
   static bool hasMatrixMediaFallback(Map<String, dynamic> content) {
-    final hasBasicFields = content['msgtype'] is String &&
+    final hasBasicFields =
+        content['msgtype'] is String &&
         content['body'] is String &&
         content['info'] is Map;
     if (!hasBasicFields) return false;

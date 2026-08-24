@@ -10,8 +10,9 @@ void main() {
   const password = String.fromEnvironment('XMO_TEST_PASSWORD');
   const requireE2ee = bool.fromEnvironment('XMO_TEST_REQUIRE_E2EE');
 
-  testWidgets('real Matrix account can login, report E2EE state, and logout',
-      (tester) async {
+  testWidgets('real Matrix account can login, report E2EE state, and logout', (
+    tester,
+  ) async {
     if (username.isEmpty || password.isEmpty) {
       markTestSkipped(
         'Set XMO_TEST_USERNAME and XMO_TEST_PASSWORD to run this real-account Android test.',

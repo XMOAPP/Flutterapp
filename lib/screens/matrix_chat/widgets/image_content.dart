@@ -50,10 +50,7 @@ class _ImageContentState extends State<ImageContent> {
   Widget build(BuildContext context) {
     final fileName = matrixAttachmentFileName(widget.event, fallback: 'Photo');
     final screenWidth = MediaQuery.sizeOf(context).width;
-    final maxMediaWidth = math.min(
-      292.0,
-      math.max(160.0, screenWidth * 0.76),
-    );
+    final maxMediaWidth = math.min(292.0, math.max(160.0, screenWidth * 0.76));
     final maxMediaHeight = math.min(
       336.0,
       math.max(120.0, maxMediaWidth * 1.15),
@@ -81,7 +78,9 @@ class _ImageContentState extends State<ImageContent> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const CircularProgressIndicator(
-                      color: kLimeGreen, strokeWidth: 2),
+                    color: kLimeGreen,
+                    strokeWidth: 2,
+                  ),
                   const SizedBox(height: 8),
                   Text(
                     fileName,
@@ -109,12 +108,16 @@ class _ImageContentState extends State<ImageContent> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.broken_image_outlined,
-                      color: kLightGrey, size: 28),
+                  const Icon(
+                    Icons.broken_image_outlined,
+                    color: kLightGrey,
+                    size: 28,
+                  ),
                   const SizedBox(height: 4),
-                  Text(fileName,
-                      style:
-                          GoogleFonts.inter(color: kLightGrey, fontSize: 11)),
+                  Text(
+                    fileName,
+                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
+                  ),
                 ],
               ),
             ),
@@ -146,12 +149,19 @@ class _ImageContentState extends State<ImageContent> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.broken_image_outlined,
-                            color: kLightGrey, size: 28),
+                        const Icon(
+                          Icons.broken_image_outlined,
+                          color: kLightGrey,
+                          size: 28,
+                        ),
                         const SizedBox(height: 4),
-                        Text(fileName,
-                            style: GoogleFonts.inter(
-                                color: kLightGrey, fontSize: 11)),
+                        Text(
+                          fileName,
+                          style: GoogleFonts.inter(
+                            color: kLightGrey,
+                            fontSize: 11,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -169,10 +179,7 @@ class _RenderedSizeReporter extends StatefulWidget {
   final Widget child;
   final ValueChanged<Size>? onSize;
 
-  const _RenderedSizeReporter({
-    required this.child,
-    required this.onSize,
-  });
+  const _RenderedSizeReporter({required this.child, required this.onSize});
 
   @override
   State<_RenderedSizeReporter> createState() => _RenderedSizeReporterState();
@@ -211,9 +218,6 @@ class _RenderedSizeReporterState extends State<_RenderedSizeReporter> {
 
   @override
   Widget build(BuildContext context) {
-    return KeyedSubtree(
-      key: _key,
-      child: widget.child,
-    );
+    return KeyedSubtree(key: _key, child: widget.child);
   }
 }

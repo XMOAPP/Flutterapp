@@ -51,8 +51,8 @@ class AccountDeletionJobStore {
     required File storageFile,
     DateTime Function()? now,
     this.completedRetention = const Duration(days: 30),
-  })  : _storageFile = storageFile,
-        _now = now ?? (() => DateTime.now().toUtc()) {
+  }) : _storageFile = storageFile,
+       _now = now ?? (() => DateTime.now().toUtc()) {
     _load();
     prune();
   }
@@ -62,10 +62,7 @@ class AccountDeletionJobStore {
   final Duration completedRetention;
   final Map<String, AccountDeletionJob> _jobs = {};
 
-  AccountDeletionJob begin({
-    required String userId,
-    required String username,
-  }) {
+  AccountDeletionJob begin({required String userId, required String username}) {
     final existing = _jobs[userId];
     if (existing != null) return existing;
     final job = AccountDeletionJob(
@@ -79,10 +76,7 @@ class AccountDeletionJobStore {
     return job;
   }
 
-  AccountDeletionJob advance(
-    String userId,
-    AccountDeletionPhase phase,
-  ) {
+  AccountDeletionJob advance(String userId, AccountDeletionPhase phase) {
     final current = _jobs[userId];
     if (current == null) {
       throw StateError('Account deletion job does not exist');

@@ -54,7 +54,9 @@ void main() {
     test('extractRoomIdentifier rejects unrelated strings', () {
       expect(MatrixService.extractRoomIdentifier('general'), isNull);
       expect(
-          MatrixService.extractRoomIdentifier('https://example.com'), isNull);
+        MatrixService.extractRoomIdentifier('https://example.com'),
+        isNull,
+      );
     });
   });
 }

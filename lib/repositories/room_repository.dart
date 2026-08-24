@@ -13,12 +13,11 @@ class RoomRepository {
     required String name,
     String? topic,
     bool isDirect = false,
-  }) =>
-      matrixService.roomRepository.createRoom(
-        name: name,
-        topic: topic,
-        isDirect: isDirect,
-      );
+  }) => matrixService.roomRepository.createRoom(
+    name: name,
+    topic: topic,
+    isDirect: isDirect,
+  );
 
   Future<String> createDirectRoom(String userId) =>
       matrixService.roomRepository.createDirectRoom(userId);
@@ -27,12 +26,11 @@ class RoomRepository {
     required String name,
     String? topic,
     bool isPublic = true,
-  }) =>
-      matrixService.roomRepository.createChannel(
-        name: name,
-        topic: topic,
-        isPublic: isPublic,
-      );
+  }) => matrixService.roomRepository.createChannel(
+    name: name,
+    topic: topic,
+    isPublic: isPublic,
+  );
 
   Future<void> joinRoom(String roomIdOrAlias) =>
       matrixService.roomRepository.joinRoom(roomIdOrAlias);

@@ -65,27 +65,25 @@ class ReportService {
   }
 
   Future<List<XmoModerationReport>> listRoomReports(String roomId) async {
-    final response = await _postAuthenticated(
-      'reports/review/list',
-      {'roomId': roomId},
-    );
+    final response = await _postAuthenticated('reports/review/list', {
+      'roomId': roomId,
+    });
     return _parseReports(response['reports']);
   }
 
   Future<List<XmoModerationReport>> listGlobalReports() async {
-    final response = await _postAuthenticated(
-      'reports/review/list',
-      const {'global': true},
-    );
+    final response = await _postAuthenticated('reports/review/list', const {
+      'global': true,
+    });
     return _parseReports(response['reports']);
   }
 
   Future<bool> canReviewGlobalReports() async {
     try {
-      await _postAuthenticated(
-        'reports/review/list',
-        const {'global': true, 'limit': 1},
-      );
+      await _postAuthenticated('reports/review/list', const {
+        'global': true,
+        'limit': 1,
+      });
       return true;
     } catch (_) {
       return false;
@@ -139,8 +137,9 @@ class ReportService {
 
   Uri _endpoint(String path) {
     final value = AppConfig.reportServerUrl.trim();
-    final normalized =
-        value.endsWith('/') ? value.substring(0, value.length - 1) : value;
+    final normalized = value.endsWith('/')
+        ? value.substring(0, value.length - 1)
+        : value;
     final base = Uri.parse(normalized);
     return base.replace(path: '${base.path}/$path');
   }

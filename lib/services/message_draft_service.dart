@@ -35,10 +35,7 @@ class MessageDraftService implements MessageDraftStore {
   }
 
   @override
-  Future<String?> load({
-    required String userId,
-    required String roomId,
-  }) async {
+  Future<String?> load({required String userId, required String roomId}) async {
     if (!_validScope(userId, roomId)) return null;
     final value = (await _box()).get(_key(userId, roomId));
     if (value is String) return value.isEmpty ? null : value;
@@ -65,10 +62,7 @@ class MessageDraftService implements MessageDraftStore {
   }
 
   @override
-  Future<void> delete({
-    required String userId,
-    required String roomId,
-  }) async {
+  Future<void> delete({required String userId, required String roomId}) async {
     if (!_validScope(userId, roomId)) return;
     await (await _box()).delete(_key(userId, roomId));
   }
@@ -77,15 +71,17 @@ class MessageDraftService implements MessageDraftStore {
   Future<void> clearAccount(String userId) async {
     if (userId.trim().isEmpty) return;
     final box = await _box();
-    final keys = box.keys.where((key) {
-      if (key is! String) return false;
-      try {
-        final scope = jsonDecode(key);
-        return scope is List && scope.length == 2 && scope.first == userId;
-      } catch (_) {
-        return false;
-      }
-    }).toList(growable: false);
+    final keys = box.keys
+        .where((key) {
+          if (key is! String) return false;
+          try {
+            final scope = jsonDecode(key);
+            return scope is List && scope.length == 2 && scope.first == userId;
+          } catch (_) {
+            return false;
+          }
+        })
+        .toList(growable: false);
     if (keys.isNotEmpty) await box.deleteAll(keys);
   }
 

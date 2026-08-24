@@ -46,12 +46,14 @@ Future<String> connectWalletImpl(String walletName) async {
     final walletBridge = bridge as XmoWalletBridge;
     final promise = walletBridge.connectBrowserWallet(walletName);
 
-    promise.toDart.then((result) {
-      final account = (result as JSString).toDart;
-      completer.complete(account);
-    }).catchError((error) {
-      completer.completeError(error.toString());
-    });
+    promise.toDart
+        .then((result) {
+          final account = (result as JSString).toDart;
+          completer.complete(account);
+        })
+        .catchError((error) {
+          completer.completeError(error.toString());
+        });
   } catch (e) {
     completer.completeError(e.toString());
   }
@@ -71,12 +73,14 @@ Future<String> signMessageImpl(String message) async {
     final walletBridge = bridge as XmoWalletBridge;
     final promise = walletBridge.signMessage(message);
 
-    promise.toDart.then((result) {
-      final signature = (result as JSString).toDart;
-      completer.complete(signature);
-    }).catchError((error) {
-      completer.completeError(error.toString());
-    });
+    promise.toDart
+        .then((result) {
+          final signature = (result as JSString).toDart;
+          completer.complete(signature);
+        })
+        .catchError((error) {
+          completer.completeError(error.toString());
+        });
   } catch (e) {
     completer.completeError(e.toString());
   }

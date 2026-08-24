@@ -166,16 +166,18 @@ Future<bool> _azureBlobUserJoinedRoom({
 }) async {
   if (!roomId.startsWith('!') || roomId.length > 512) return false;
   final base = Uri.parse(_azureBlobConfig.homeserverUrl);
-  final uri = base.replace(pathSegments: [
-    '_matrix',
-    'client',
-    'v3',
-    'rooms',
-    roomId,
-    'state',
-    'm.room.member',
-    userId,
-  ]);
+  final uri = base.replace(
+    pathSegments: [
+      '_matrix',
+      'client',
+      'v3',
+      'rooms',
+      roomId,
+      'state',
+      'm.room.member',
+      userId,
+    ],
+  );
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
   try {
     final membershipRequest = await client.getUrl(uri);
@@ -183,8 +185,9 @@ Future<bool> _azureBlobUserJoinedRoom({
       HttpHeaders.authorizationHeader,
       'Bearer $token',
     );
-    final response =
-        await membershipRequest.close().timeout(const Duration(seconds: 15));
+    final response = await membershipRequest.close().timeout(
+      const Duration(seconds: 15),
+    );
     final body = await utf8.decoder.bind(response).join();
     if (response.statusCode < 200 || response.statusCode >= 300) return false;
     return _decodeJsonMap(body)['membership'] == 'join';
@@ -217,36 +220,38 @@ class AzureBlobConfig {
   factory AzureBlobConfig.fromEnvironment(Map<String, String> environment) {
     final account = environment['XMO_AZURE_BLOB_ACCOUNT'] ?? '';
     final container = environment['XMO_AZURE_BLOB_CONTAINER'] ?? '';
-    final endpoint = environment['XMO_AZURE_BLOB_ENDPOINT'] ??
+    final endpoint =
+        environment['XMO_AZURE_BLOB_ENDPOINT'] ??
         (account.isEmpty ? '' : 'https://$account.blob.core.windows.net');
     return AzureBlobConfig(
       account: account,
       container: container,
       accountKey: environment['XMO_AZURE_BLOB_ACCOUNT_KEY'] ?? '',
       endpoint: endpoint,
-      publicBaseUrl: environment['XMO_PUBLIC_BASE_URL'] ??
+      publicBaseUrl:
+          environment['XMO_PUBLIC_BASE_URL'] ??
           environment['XMO_WALLET_AUTH_URI'] ??
           '',
       homeserverUrl: environment['XMO_HOMESERVER_URL'] ?? 'http://synapse:8008',
       uploadTtl: Duration(
-        minutes: int.tryParse(
+        minutes:
+            int.tryParse(
               environment['XMO_AZURE_BLOB_UPLOAD_TTL_MINUTES'] ?? '',
             ) ??
             15,
       ),
       downloadTtl: Duration(
-        minutes: int.tryParse(
+        minutes:
+            int.tryParse(
               environment['XMO_AZURE_BLOB_DOWNLOAD_TTL_MINUTES'] ?? '',
             ) ??
             10,
       ),
-      maxChunkBytes: int.tryParse(
-            environment['XMO_AZURE_BLOB_MAX_CHUNK_BYTES'] ?? '',
-          ) ??
+      maxChunkBytes:
+          int.tryParse(environment['XMO_AZURE_BLOB_MAX_CHUNK_BYTES'] ?? '') ??
           8 * 1024 * 1024,
-      maxUploadBytes: int.tryParse(
-            environment['XMO_MAX_MEDIA_UPLOAD_BYTES'] ?? '',
-          ) ??
+      maxUploadBytes:
+          int.tryParse(environment['XMO_MAX_MEDIA_UPLOAD_BYTES'] ?? '') ??
           50 * 1024 * 1024,
     );
   }
@@ -331,9 +336,7 @@ class AzureBlobConfig {
       ),
     );
     final downloadUrl = Uri.parse(publicBaseUrl)
-        .resolve(
-      '/auth/media/chunks/azure/download',
-    )
+        .resolve('/auth/media/chunks/azure/download')
         .replace(queryParameters: {'ref': accessReference});
 
     return AzureBlobSignedChunkUpload(
@@ -358,8 +361,10 @@ class AzureBlobConfig {
     try {
       final payload = _decodeBase64Url(parts[0]);
       final suppliedSignature = _decodeBase64Url(parts[1]);
-      final expectedSignature =
-          Hmac(sha256, base64Decode(accountKey)).convert(payload).bytes;
+      final expectedSignature = Hmac(
+        sha256,
+        base64Decode(accountKey),
+      ).convert(payload).bytes;
       if (!_constantTimeEquals(suppliedSignature, expectedSignature)) {
         return null;
       }
@@ -375,8 +380,10 @@ class AzureBlobConfig {
 
   String _encodeAccessReference(AzureBlobAccessReference access) {
     final payload = utf8.encode(jsonEncode(access.toJson()));
-    final signature =
-        Hmac(sha256, base64Decode(accountKey)).convert(payload).bytes;
+    final signature = Hmac(
+      sha256,
+      base64Decode(accountKey),
+    ).convert(payload).bytes;
     return '${base64Url.encode(payload).replaceAll('=', '')}.'
         '${base64Url.encode(signature).replaceAll('=', '')}';
   }
@@ -412,8 +419,10 @@ class AzureBlobConfig {
         .subtract(const Duration(minutes: 5))
         .toIso8601String()
         .replaceFirst(RegExp(r'\.\d+Z$'), 'Z');
-    final expiry =
-        expiresAt.toIso8601String().replaceFirst(RegExp(r'\.\d+Z$'), 'Z');
+    final expiry = expiresAt.toIso8601String().replaceFirst(
+      RegExp(r'\.\d+Z$'),
+      'Z',
+    );
     final canonicalizedResource = '/blob/$account/$container/$blobName';
     final stringToSign = [
       permissions,
@@ -434,8 +443,10 @@ class AzureBlobConfig {
     ].join('\n');
 
     final keyBytes = base64Decode(accountKey);
-    final signature =
-        Hmac(sha256, keyBytes).convert(utf8.encode(stringToSign)).bytes;
+    final signature = Hmac(
+      sha256,
+      keyBytes,
+    ).convert(utf8.encode(stringToSign)).bytes;
     final params = <String, String>{
       'sv': version,
       'spr': 'https',
@@ -446,8 +457,10 @@ class AzureBlobConfig {
       'sig': base64Encode(signature),
     };
     return params.entries
-        .map((entry) =>
-            '${Uri.encodeQueryComponent(entry.key)}=${Uri.encodeQueryComponent(entry.value)}')
+        .map(
+          (entry) =>
+              '${Uri.encodeQueryComponent(entry.key)}=${Uri.encodeQueryComponent(entry.value)}',
+        )
         .join('&');
   }
 }
@@ -475,12 +488,12 @@ class AzureBlobSignedChunkUpload {
   final DateTime expiresAt;
 
   Map<String, dynamic> toJson() => {
-        'success': true,
-        'uploadUrl': uploadUrl.toString(),
-        'downloadUrl': downloadUrl.toString(),
-        'blobName': blobName,
-        'expiresAt': expiresAt.toIso8601String(),
-      };
+    'success': true,
+    'uploadUrl': uploadUrl.toString(),
+    'downloadUrl': downloadUrl.toString(),
+    'blobName': blobName,
+    'expiresAt': expiresAt.toIso8601String(),
+  };
 }
 
 class AzureBlobAccessReference {
@@ -511,8 +524,9 @@ class AzureBlobAccessReference {
       size: json['size'] as int,
       cipherSha256: json['sha256'] as String,
     );
-    if (!RegExp(r'^\d{4}/\d{2}/[A-Za-z0-9._-]+$')
-            .hasMatch(reference.blobName) ||
+    if (!RegExp(
+          r'^\d{4}/\d{2}/[A-Za-z0-9._-]+$',
+        ).hasMatch(reference.blobName) ||
         !reference.roomId.startsWith('!') ||
         reference.roomId.length > 512 ||
         !reference.ownerUserId.startsWith('@') ||
@@ -534,24 +548,20 @@ class AzureBlobAccessReference {
   final String cipherSha256;
 
   Map<String, dynamic> toJson() => {
-        'v': 1,
-        'blob': blobName,
-        'room': roomId,
-        'owner': ownerUserId,
-        'index': chunkIndex,
-        'size': size,
-        'sha256': cipherSha256,
-      };
+    'v': 1,
+    'blob': blobName,
+    'room': roomId,
+    'owner': ownerUserId,
+    'index': chunkIndex,
+    'size': size,
+    'sha256': cipherSha256,
+  };
 }
 
 class _AzureBlobUserRateLimiter {
   final Map<String, List<DateTime>> _requests = {};
 
-  bool allow(
-    String key, {
-    required int limit,
-    required Duration window,
-  }) {
+  bool allow(String key, {required int limit, required Duration window}) {
     final now = DateTime.now().toUtc();
     final cutoff = now.subtract(window);
     final entries = _requests.putIfAbsent(key, () => <DateTime>[])
@@ -559,8 +569,10 @@ class _AzureBlobUserRateLimiter {
     if (entries.length >= limit) return false;
     entries.add(now);
     if (_requests.length > 10000) {
-      _requests.removeWhere((_, timestamps) =>
-          timestamps.isEmpty || timestamps.last.isBefore(cutoff));
+      _requests.removeWhere(
+        (_, timestamps) =>
+            timestamps.isEmpty || timestamps.last.isBefore(cutoff),
+      );
     }
     return true;
   }
