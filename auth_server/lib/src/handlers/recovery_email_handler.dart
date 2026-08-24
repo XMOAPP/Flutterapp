@@ -159,6 +159,23 @@ Future<void> _startRecoveryEmailChange(HttpRequest request) async {
 
   final userId = await _userDirectoryWhoami(token);
   final username = _normalizeMatrixLocalpart(userId);
+  final currentPassword = body['currentPassword']?.toString() ?? '';
+  var currentPasswordVerified = false;
+  if (currentPassword.isNotEmpty &&
+      !_passwordResetConfig.oidcOnlyAuthentication) {
+    if (!_passwordResetConfig.isConfigured ||
+        !await _verifyCurrentMatrixPassword(
+          userId: userId,
+          password: currentPassword,
+        )) {
+      await _json(request, HttpStatus.forbidden, {
+        'success': false,
+        'error': 'Current password is incorrect',
+      });
+      return;
+    }
+    currentPasswordVerified = true;
+  }
   final currentEmail = _recoveryEmailStore.verifiedEmailFor(username);
   var legacyPasswordEnrollment = false;
   var effectiveCurrentEmail = currentEmail;
@@ -168,14 +185,7 @@ Future<void> _startRecoveryEmailChange(HttpRequest request) async {
     if (effectiveCurrentEmail.isEmpty) effectiveCurrentEmail = null;
   }
   if (effectiveCurrentEmail == null) {
-    final currentPassword = body['currentPassword']?.toString() ?? '';
-    if (currentPassword.isEmpty ||
-        !_passwordResetConfig.isConfigured ||
-        _passwordResetConfig.oidcOnlyAuthentication ||
-        !await _verifyCurrentMatrixPassword(
-          userId: userId,
-          password: currentPassword,
-        )) {
+    if (!currentPasswordVerified) {
       await _json(request, HttpStatus.forbidden, {
         'success': false,
         'error':

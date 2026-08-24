@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
+import '../config/app_config.dart';
 import '../providers/matrix_provider.dart';
 import '../services/otp_service.dart';
 import '../theme.dart';
@@ -187,14 +188,16 @@ class _RecoveryEmailSettingsScreenState
           autocorrect: false,
           enabled: _transactionId == null && !_busy,
         ),
-        const SizedBox(height: 18),
-        _field(
-          controller: _password,
-          label: 'Current password (required for legacy accounts)',
-          hint: '********',
-          obscureText: true,
-          enabled: _transactionId == null && !_busy,
-        ),
+        if (!AppConfig.oidcOnlyAuthentication) ...[
+          const SizedBox(height: 18),
+          _field(
+            controller: _password,
+            label: 'Current password (required for legacy accounts)',
+            hint: '********',
+            obscureText: true,
+            enabled: _transactionId == null && !_busy,
+          ),
+        ],
         if (_transactionId == null) ...[
           const SizedBox(height: 28),
           _primaryButton(
