@@ -221,19 +221,6 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                   },
                 ),
                 _navTile(
-                  icon: Icons.mark_email_read,
-                  title: 'Recovery email',
-                  subtitle: 'Enroll or change your password recovery email',
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const RecoveryEmailSettingsScreen(),
-                      ),
-                    );
-                  },
-                ),
-                _navTile(
                   icon: Icons.lock,
                   title: 'Privacy',
                   subtitle: 'Profile photo and story visibility',
@@ -1204,6 +1191,20 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
           ),
           _panelDivider(),
           _accountSecurityTile(),
+          _panelDivider(),
+          _securityNavTile(
+            icon: Icons.mark_email_read,
+            title: 'Recovery email',
+            subtitle: 'Enroll or change your password recovery email',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const RecoveryEmailSettingsScreen(),
+                ),
+              );
+            },
+          ),
         ],
       ),
       const SizedBox(height: 18),

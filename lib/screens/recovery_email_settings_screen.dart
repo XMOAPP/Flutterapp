@@ -95,12 +95,12 @@ class _RecoveryEmailSettingsScreenState
     labelText: label,
     labelStyle: GoogleFonts.inter(
       color: kLightGrey,
-      fontSize: 16,
+      fontSize: 13,
       fontWeight: FontWeight.w400,
     ),
     floatingLabelStyle: GoogleFonts.inter(
       color: kLightGrey,
-      fontSize: 16,
+      fontSize: 13,
       fontWeight: FontWeight.w400,
     ),
     contentPadding: const EdgeInsets.only(top: 10, bottom: 13),
@@ -108,7 +108,7 @@ class _RecoveryEmailSettingsScreenState
       borderSide: BorderSide(color: kDarkGrey),
     ),
     focusedBorder: const UnderlineInputBorder(
-      borderSide: BorderSide(color: kLimeGreen),
+      borderSide: BorderSide(color: kWhite),
     ),
   );
 
@@ -120,30 +120,30 @@ class _RecoveryEmailSettingsScreenState
         'Recovery email',
         style: GoogleFonts.inter(
           color: kWhite,
-          fontSize: 22,
+          fontSize: 20,
           fontWeight: FontWeight.w700,
         ),
       ),
       backgroundColor: kBlack,
     ),
     body: ListView(
-      padding: const EdgeInsets.fromLTRB(34, 28, 34, 28),
+      padding: const EdgeInsets.fromLTRB(22, 24, 22, 28),
       children: [
         Text(
           'A recovery email can reset your password and delete your account. '
           'You must confirm both the existing and new email addresses.',
           style: GoogleFonts.inter(
             color: kLightGrey,
-            fontSize: 16,
+            fontSize: 13,
             height: 1.45,
           ),
         ),
-        const SizedBox(height: 34),
+        const SizedBox(height: 26),
         TextField(
           controller: _email,
           keyboardType: TextInputType.emailAddress,
           autocorrect: false,
-          style: GoogleFonts.inter(color: kWhite, fontSize: 20),
+          style: GoogleFonts.inter(color: kWhite, fontSize: 15),
           decoration: _decoration('New recovery email'),
           enabled: _transactionId == null && !_busy,
         ),
@@ -151,7 +151,7 @@ class _RecoveryEmailSettingsScreenState
         TextField(
           controller: _password,
           obscureText: true,
-          style: GoogleFonts.inter(color: kWhite, fontSize: 20),
+          style: GoogleFonts.inter(color: kWhite, fontSize: 15),
           decoration: _decoration(
             'Current password (required for legacy accounts)',
           ),
@@ -168,14 +168,14 @@ class _RecoveryEmailSettingsScreenState
           TextField(
             controller: _currentCode,
             keyboardType: TextInputType.number,
-            style: GoogleFonts.inter(color: kWhite, fontSize: 20),
+            style: GoogleFonts.inter(color: kWhite, fontSize: 15),
             decoration: _decoration('Code sent to existing email'),
           ),
           const SizedBox(height: 18),
           TextField(
             controller: _newCode,
             keyboardType: TextInputType.number,
-            style: GoogleFonts.inter(color: kWhite, fontSize: 20),
+            style: GoogleFonts.inter(color: kWhite, fontSize: 15),
             decoration: _decoration('Code sent to new email'),
           ),
           const SizedBox(height: 28),
@@ -190,7 +190,7 @@ class _RecoveryEmailSettingsScreenState
             _error!,
             style: GoogleFonts.inter(
               color: const Color(0xFFFF646E),
-              fontSize: 16,
+              fontSize: 13,
               height: 1.35,
             ),
           ),
@@ -204,7 +204,7 @@ class _RecoveryEmailSettingsScreenState
     required String label,
   }) {
     return SizedBox(
-      height: 56,
+      height: 46,
       width: double.infinity,
       child: ElevatedButton(
         onPressed: onPressed,
@@ -221,8 +221,8 @@ class _RecoveryEmailSettingsScreenState
         child: Text(
           label,
           style: GoogleFonts.inter(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
           ),
         ),
       ),
