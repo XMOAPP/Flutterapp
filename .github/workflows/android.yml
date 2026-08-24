@@ -40,13 +40,11 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+      - uses: ./.github/actions/setup-flutter
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-          # The pinned Flutter action's optional cache branch references a
-          # tag-based action. Keep it disabled while SHA pinning is enforced.
-          cache: false
+          sha256: f344d5057db52abc2a63cd3a7c7370957b7685d1fca5e5fbe2ce4dfe74657a79
       - name: Create log directory
         run: mkdir -p build/quality-logs
       - name: Resolve Flutter dependencies
@@ -75,13 +73,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+      - uses: ./.github/actions/setup-flutter
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-          # The pinned Flutter action's optional cache branch references a
-          # tag-based action. Keep it disabled while SHA pinning is enforced.
-          cache: false
+          sha256: f344d5057db52abc2a63cd3a7c7370957b7685d1fca5e5fbe2ce4dfe74657a79
       - name: Create log directory
         run: mkdir -p build/quality-logs
       - name: Resolve auth server dependencies
@@ -124,13 +120,11 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+      - uses: ./.github/actions/setup-flutter
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-          # The pinned Flutter action's optional cache branch references a
-          # tag-based action. Keep it disabled while SHA pinning is enforced.
-          cache: false
+          sha256: f344d5057db52abc2a63cd3a7c7370957b7685d1fca5e5fbe2ce4dfe74657a79
       - name: Reclaim runner disk for Android build
         run: bash tools/ci/free_android_runner_disk.sh
       - name: Set up Android SDK command-line tools
@@ -196,13 +190,11 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+      - uses: ./.github/actions/setup-flutter
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-          # The pinned Flutter action's optional cache branch references a
-          # tag-based action. Keep it disabled while SHA pinning is enforced.
-          cache: false
+          sha256: f344d5057db52abc2a63cd3a7c7370957b7685d1fca5e5fbe2ce4dfe74657a79
       - name: Create log directory
         run: mkdir -p build/quality-logs
       - name: Resolve Flutter dependencies
