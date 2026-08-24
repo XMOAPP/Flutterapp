@@ -1,11 +1,17 @@
 part of xmo_auth_server;
 
+const _maxPushDevicesPerRequest = 100;
+const _pushDuplicateSuppressionTtl = Duration(minutes: 15);
+const _maxRememberedPushEvents = 10000;
+final _recentPushEvents = <String, DateTime>{};
+
 Future<void> _handleMatrixPush(HttpRequest request) async {
   final body = await _readJson(request);
   final notification = _asMap(body['notification']);
   if (notification == null) {
-    await _json(
-        request, HttpStatus.badRequest, {'error': 'Missing notification'});
+    await _json(request, HttpStatus.badRequest, {
+      'error': 'Missing notification',
+    });
     return;
   }
 
@@ -14,23 +20,35 @@ Future<void> _handleMatrixPush(HttpRequest request) async {
     await _json(request, HttpStatus.ok, {'rejected': <String>[]});
     return;
   }
+  if (devices.length > _maxPushDevicesPerRequest) {
+    await _json(request, HttpStatus.badRequest, {
+      'error': 'Too many devices in push notification',
+    });
+    return;
+  }
 
   final fcmConfig = await _loadFirebaseConfig();
   if (fcmConfig == null) {
-    await _json(
-      request,
-      HttpStatus.internalServerError,
-      {'error': 'Firebase service account is not configured'},
-    );
+    await _json(request, HttpStatus.internalServerError, {
+      'error': 'Firebase service account is not configured',
+    });
+    return;
+  }
+
+  final eventId = notification['event_id']?.toString().trim() ?? '';
+  if (eventId.isNotEmpty && !_rememberPushEvent(eventId)) {
+    logInfo('push_notification_duplicate_suppressed', {
+      'eventIdHash': eventId.hashCode,
+    });
+    await _json(request, HttpStatus.ok, {'rejected': <String>[]});
     return;
   }
 
   final fcmPayload = _buildFcmPayload(notification);
   final rejected = <String>[];
-  final client = await clientViaServiceAccount(
-    fcmConfig.credentials,
-    const [_firebaseMessagingScope],
-  );
+  final client = await clientViaServiceAccount(fcmConfig.credentials, const [
+    _firebaseMessagingScope,
+  ]);
 
   try {
     stdout.writeln(
@@ -67,6 +85,26 @@ Future<void> _handleMatrixPush(HttpRequest request) async {
   await _json(request, HttpStatus.ok, {'rejected': rejected});
 }
 
+/// Synapse retries failed calls to the Matrix push-gateway API. Avoid turning
+/// a retry into a duplicate user-facing notification while keeping the cache
+/// bounded and short-lived.
+bool _rememberPushEvent(String eventId) {
+  final now = DateTime.now().toUtc();
+  _recentPushEvents.removeWhere(
+    (_, seenAt) => now.difference(seenAt) >= _pushDuplicateSuppressionTtl,
+  );
+  if (_recentPushEvents.containsKey(eventId)) return false;
+  if (_recentPushEvents.length >= _maxRememberedPushEvents) {
+    final oldest = _recentPushEvents.entries.reduce(
+      (earliest, entry) =>
+          entry.value.isBefore(earliest.value) ? entry : earliest,
+    );
+    _recentPushEvents.remove(oldest.key);
+  }
+  _recentPushEvents[eventId] = now;
+  return true;
+}
+
 Future<bool> _sendFcmMessage({
   required AutoRefreshingAuthClient client,
   required String projectId,
@@ -94,9 +132,7 @@ Future<bool> _sendFcmMessage({
     return true;
   }
 
-  stderr.writeln(
-    'FCM send failed ${response.statusCode}: ${response.body}',
-  );
+  stderr.writeln('FCM send failed ${response.statusCode}: ${response.body}');
   return response.statusCode != HttpStatus.notFound &&
       response.statusCode != HttpStatus.badRequest;
 }
@@ -108,8 +144,13 @@ _FcmPayload _buildFcmPayload(Map<String, dynamic> notification) {
   final isCall = _isCallNotification(eventType, msgType, content);
   final title = _notificationTitle(notification, isCall);
   final preview = _notificationPreview(content, eventType, msgType, isCall);
-  final body =
-      _notificationBody(notification, content, eventType, msgType, isCall);
+  final body = _notificationBody(
+    notification,
+    content,
+    eventType,
+    msgType,
+    isCall,
+  );
   final avatarUrl = _notificationAvatarUrl(notification);
 
   final data = <String, String>{
@@ -152,7 +193,8 @@ _FcmPayload _buildFcmPayload(Map<String, dynamic> notification) {
   if (isCall) {
     data['type'] = 'm.call';
     data['call_type'] = _callType(eventType, msgType, content);
-    final isGroupCall = _isXmoGroupCallPushMarker(content) ||
+    final isGroupCall =
+        _isXmoGroupCallPushMarker(content) ||
         _isGroupCallEventType(eventType) ||
         _isGroupCallEventType(content['type']?.toString() ?? '');
     if (isGroupCall) {
@@ -359,7 +401,8 @@ String? _contentMimeType(Map<String, dynamic> content) {
 
 String? _mediaPreviewUrl(Map<String, dynamic> content) {
   final info = _asMap(content['info']);
-  final raw = info?['thumbnail_url'] ??
+  final raw =
+      info?['thumbnail_url'] ??
       content['thumbnail_url'] ??
       content['url'] ??
       info?['url'];
@@ -372,18 +415,42 @@ String _attachmentKind({required String? mimeType, required String fileName}) {
   final extension = _fileExtension(fileName);
 
   if (normalizedMime.startsWith('image/') ||
-      const {'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif', 'svg'}
-          .contains(extension)) {
+      const {
+        'jpg',
+        'jpeg',
+        'png',
+        'gif',
+        'webp',
+        'bmp',
+        'heic',
+        'heif',
+        'svg',
+      }.contains(extension)) {
     return 'image';
   }
   if (normalizedMime.startsWith('video/') ||
-      const {'mp4', 'mkv', 'mov', 'avi', 'webm', '3gp', 'm4v'}
-          .contains(extension)) {
+      const {
+        'mp4',
+        'mkv',
+        'mov',
+        'avi',
+        'webm',
+        '3gp',
+        'm4v',
+      }.contains(extension)) {
     return 'video';
   }
   if (normalizedMime.startsWith('audio/') ||
-      const {'mp3', 'm4a', 'aac', 'wav', 'ogg', 'opus', 'flac', 'amr'}
-          .contains(extension)) {
+      const {
+        'mp3',
+        'm4a',
+        'aac',
+        'wav',
+        'ogg',
+        'opus',
+        'flac',
+        'amr',
+      }.contains(extension)) {
     return 'audio';
   }
 
@@ -508,8 +575,10 @@ String? _notificationAvatarUrl(Map<String, dynamic> notification) {
 
 String _mediaUrlToHttp(String value) {
   if (!value.startsWith('mxc://')) return value;
-  final homeserver = Platform.environment['XMO_HOMESERVER_URL']
-      ?.replaceFirst(RegExp(r'/$'), '');
+  final homeserver = Platform.environment['XMO_HOMESERVER_URL']?.replaceFirst(
+    RegExp(r'/$'),
+    '',
+  );
   if (homeserver == null || homeserver.isEmpty) return value;
   final parts = value.substring('mxc://'.length).split('/');
   if (parts.length < 2) return value;
@@ -643,18 +712,12 @@ class _FcmPayload {
   final Map<String, String> data;
   final bool isCall;
 
-  const _FcmPayload({
-    required this.data,
-    required this.isCall,
-  });
+  const _FcmPayload({required this.data, required this.isCall});
 }
 
 class _FirebaseConfig {
   final String projectId;
   final ServiceAccountCredentials credentials;
 
-  const _FirebaseConfig({
-    required this.projectId,
-    required this.credentials,
-  });
+  const _FirebaseConfig({required this.projectId, required this.credentials});
 }

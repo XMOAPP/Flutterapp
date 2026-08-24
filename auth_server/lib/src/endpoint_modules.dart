@@ -319,10 +319,7 @@ class PushGatewayEndpointModule {
   const PushGatewayEndpointModule(this.forward);
   final EndpointHandler forward;
 
-  bool handles(String path) =>
-      path == '/push' ||
-      path == '/auth/otp/push' ||
-      path == '/_matrix/push/v1/notify' ||
-      path == '/auth/push/_matrix/push/v1/notify' ||
-      path == '/auth/otp/_matrix/push/v1/notify';
+  /// Matrix-standard route only. The former app-facing aliases made the
+  /// privileged FCM relay unnecessarily reachable through public API paths.
+  bool handles(String path) => path == '/_matrix/push/v1/notify';
 }
