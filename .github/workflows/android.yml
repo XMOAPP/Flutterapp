@@ -44,7 +44,9 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-          cache: true
+          # The pinned Flutter action's optional cache branch references a
+          # tag-based action. Keep it disabled while SHA pinning is enforced.
+          cache: false
       - name: Create log directory
         run: mkdir -p build/quality-logs
       - name: Resolve Flutter dependencies
@@ -77,7 +79,9 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-          cache: true
+          # The pinned Flutter action's optional cache branch references a
+          # tag-based action. Keep it disabled while SHA pinning is enforced.
+          cache: false
       - name: Create log directory
         run: mkdir -p build/quality-logs
       - name: Resolve auth server dependencies
@@ -124,7 +128,9 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-          cache: true
+          # The pinned Flutter action's optional cache branch references a
+          # tag-based action. Keep it disabled while SHA pinning is enforced.
+          cache: false
       - name: Reclaim runner disk for Android build
         run: bash tools/ci/free_android_runner_disk.sh
       - name: Set up Android SDK command-line tools
@@ -194,7 +200,9 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-          cache: true
+          # The pinned Flutter action's optional cache branch references a
+          # tag-based action. Keep it disabled while SHA pinning is enforced.
+          cache: false
       - name: Create log directory
         run: mkdir -p build/quality-logs
       - name: Resolve Flutter dependencies
