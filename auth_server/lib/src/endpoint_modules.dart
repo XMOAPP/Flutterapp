@@ -2,6 +2,19 @@ import 'dart:io';
 
 typedef EndpointHandler = Future<void> Function(HttpRequest request);
 
+/// The single authorization classification for every public auth-server route.
+///
+/// `proofBased` routes intentionally have no Matrix session: their handlers
+/// must validate their one-time email or enrollment proof. `capability` routes
+/// are intentionally public and use an unguessable invite token in the path.
+enum EndpointAuthorizationPolicy {
+  public,
+  proofBased,
+  capability,
+  matrixUser,
+  internalService,
+}
+
 /// Route modules keep endpoint ownership separate from the HTTP server loop.
 /// Handler implementation remains injectable for unit tests.
 class OtpEndpointModule {
@@ -322,4 +335,102 @@ class PushGatewayEndpointModule {
   /// Matrix-standard route only. The former app-facing aliases made the
   /// privileged FCM relay unnecessarily reachable through public API paths.
   bool handles(String path) => path == '/_matrix/push/v1/notify';
+}
+
+/// Central, testable authorization policy for every route the auth server
+/// dispatches. Adding a handler without adding its policy is deliberately not
+/// possible through the server dispatcher.
+class EndpointAuthorizationRegistry {
+  const EndpointAuthorizationRegistry({
+    required this.otp,
+    required this.passwordReset,
+    required this.recoveryEmail,
+    required this.donation,
+    required this.invite,
+    required this.wallet,
+    required this.azureBlob,
+    required this.userDirectory,
+    required this.reports,
+    required this.accountDeletion,
+    required this.channelAnalytics,
+    required this.push,
+  });
+
+  final OtpEndpointModule otp;
+  final PasswordResetEndpointModule passwordReset;
+  final RecoveryEmailEndpointModule recoveryEmail;
+  final DonationEndpointModule donation;
+  final InviteEndpointModule invite;
+  final WalletEndpointModule wallet;
+  final AzureBlobEndpointModule azureBlob;
+  final UserDirectoryEndpointModule userDirectory;
+  final ReportEndpointModule reports;
+  final AccountDeletionEndpointModule accountDeletion;
+  final ChannelAnalyticsEndpointModule channelAnalytics;
+  final PushGatewayEndpointModule push;
+
+  EndpointAuthorizationPolicy? policyFor({
+    required String method,
+    required String path,
+  }) {
+    if (method == 'GET' &&
+        (invite.handlesPreview(path) || invite.handlesAvatar(path))) {
+      return EndpointAuthorizationPolicy.capability;
+    }
+    if (method == 'GET' && (path == '/health' || path == '/account-deletion')) {
+      return EndpointAuthorizationPolicy.public;
+    }
+    if (method == 'GET' &&
+        (wallet.handlesSession(path) || azureBlob.handlesDownload(path))) {
+      return EndpointAuthorizationPolicy.matrixUser;
+    }
+
+    if (method != 'POST') return null;
+
+    if (accountDeletion.handlesDeleteData(path) ||
+        recoveryEmail.handlesCompleteLocalEnrollment(path) ||
+        recoveryEmail.handlesStartChange(path) ||
+        recoveryEmail.handlesConfirmChange(path) ||
+        donation.handles(path) ||
+        invite.handlesCreate(path) ||
+        invite.handlesList(path) ||
+        invite.handlesRevoke(path) ||
+        invite.handlesRedeem(path) ||
+        channelAnalytics.handlesView(path) ||
+        channelAnalytics.handlesForward(path) ||
+        channelAnalytics.handlesStats(path) ||
+        azureBlob.handlesSignUpload(path) ||
+        userDirectory.handlesUpsert(path) ||
+        userDirectory.handlesProvisionSecureLogin(path) ||
+        reports.handlesSubmit(path) ||
+        reports.handlesList(path) ||
+        reports.handlesUpdate(path)) {
+      return EndpointAuthorizationPolicy.matrixUser;
+    }
+
+    if (push.handles(path)) return EndpointAuthorizationPolicy.internalService;
+
+    if (otp.handlesSend(path) ||
+        otp.handlesVerify(path) ||
+        passwordReset.handlesStart(path) ||
+        passwordReset.handlesComplete(path) ||
+        accountDeletion.handlesExternalRequest(path) ||
+        accountDeletion.handlesExternalConfirm(path) ||
+        recoveryEmail.handlesPrepareLocalEnrollment(path) ||
+        userDirectory.handlesRegisterOidcAccount(path) ||
+        userDirectory.handlesPrepareSecureRegistration(path)) {
+      return EndpointAuthorizationPolicy.proofBased;
+    }
+
+    if (wallet.handlesAccount(path) ||
+        wallet.handlesUsernameAvailability(path) ||
+        wallet.handlesNonce(path) ||
+        wallet.handlesVerify(path) ||
+        userDirectory.handlesSearch(path) ||
+        userDirectory.handlesUsernameAvailability(path)) {
+      return EndpointAuthorizationPolicy.public;
+    }
+
+    return null;
+  }
 }

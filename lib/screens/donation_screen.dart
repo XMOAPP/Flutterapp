@@ -34,6 +34,11 @@ class _DonationScreenState extends State<DonationScreen> {
       setState(() => _error = 'Minimum donation is \$5.');
       return;
     }
+    final accessToken = context.read<MatrixProvider>().accessToken;
+    if (accessToken == null || accessToken.isEmpty) {
+      setState(() => _error = 'Sign in to donate.');
+      return;
+    }
 
     setState(() {
       _busy = true;
@@ -41,11 +46,9 @@ class _DonationScreenState extends State<DonationScreen> {
     });
 
     try {
-      final provider = context.read<MatrixProvider>();
       final payment = await _donationService.createDonationPayment(
         amountUsdcSmallestUnit: amount,
-        donorUserId: provider.userId ?? '',
-        donorDisplayName: provider.displayName,
+        accessToken: accessToken,
       );
       if (!mounted) return;
       final opened =

@@ -4,15 +4,18 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:cryptography/cryptography.dart' as cryptography;
 import 'package:googleapis_auth/auth_io.dart';
 
 import 'package:xmo_auth_server/src/account_deletion_job_store.dart';
+import 'package:xmo_auth_server/src/cors_policy.dart';
 import 'package:xmo_auth_server/src/email_service.dart';
 import 'package:xmo_auth_server/src/endpoint_modules.dart';
 import 'package:xmo_auth_server/src/health_status.dart';
+import 'package:xmo_auth_server/src/password_policy.dart';
 import 'package:xmo_auth_server/src/request_body.dart';
 import 'package:xmo_auth_server/src/request_guard.dart';
 import 'package:xmo_auth_server/src/recovery_email_store.dart';
@@ -35,6 +38,7 @@ part '../lib/src/handlers/report_handler.dart';
 part '../lib/src/handlers/recovery_email_handler.dart';
 part '../lib/src/handlers/user_directory_handler.dart';
 part '../lib/src/handlers/wallet_handler.dart';
+part '../lib/src/request_authorization.dart';
 
 final int _port = int.tryParse(Platform.environment['PORT'] ?? '') ?? 3000;
 final String _thirdwebSecretKey =
@@ -64,6 +68,7 @@ final _random = Random.secure();
 final _trustedProxyConfig = TrustedProxyConfig.fromEnvironment(
   Platform.environment,
 );
+final _corsPolicy = CorsPolicy.fromEnvironment(Platform.environment);
 final _rateLimiter = RequestRateLimiter(trustedProxies: _trustedProxyConfig);
 const _logger = StructuredLogger();
 final _emailConfig = EmailConfig.fromEnvironment(Platform.environment);
@@ -147,6 +152,20 @@ const _channelAnalyticsEndpoints = ChannelAnalyticsEndpointModule(
   stats: _getChannelAnalytics,
 );
 const _pushEndpoints = PushGatewayEndpointModule(_handleMatrixPush);
+const _endpointAuthorization = EndpointAuthorizationRegistry(
+  otp: _otpEndpoints,
+  passwordReset: _passwordResetEndpoints,
+  recoveryEmail: _recoveryEmailEndpoints,
+  donation: _donationEndpoints,
+  invite: _inviteEndpoints,
+  wallet: _walletEndpoints,
+  azureBlob: _azureBlobEndpoints,
+  userDirectory: _userDirectoryEndpoints,
+  reports: _reportEndpoints,
+  accountDeletion: _accountDeletionEndpoints,
+  channelAnalytics: _channelAnalyticsEndpoints,
+  push: _pushEndpoints,
+);
 
 const _otpTtl = Duration(minutes: 1);
 const _secureLoginEnrollmentProofTtl = Duration(minutes: 5);
@@ -187,13 +206,40 @@ Future<void> main() async {
 
 Future<void> _handleRequest(HttpRequest request) async {
   final stopwatch = Stopwatch()..start();
-  _setCorsHeaders(request.response);
 
   try {
+    final origin = request.headers.value('origin');
+    if (origin != null && !_corsPolicy.allowsOrigin(origin)) {
+      await _json(request, HttpStatus.forbidden, {
+        'error': 'Cross-origin request is not allowed',
+      });
+      return;
+    }
+
     if (request.method == 'OPTIONS') {
+      if (origin != null &&
+          !_corsPolicy.allowsPreflight(
+            requestMethod: request.headers.value(
+              'access-control-request-method',
+            ),
+            requestHeaders: request.headers.value(
+              'access-control-request-headers',
+            ),
+          )) {
+        request.response.statusCode = HttpStatus.forbidden;
+        await request.response.close();
+        return;
+      }
+      if (origin != null) {
+        _corsPolicy.applyHeaders(request.response, origin);
+      }
       request.response.statusCode = HttpStatus.noContent;
       await request.response.close();
       return;
+    }
+
+    if (origin != null) {
+      _corsPolicy.applyHeaders(request.response, origin);
     }
 
     final invitePreview =
@@ -220,34 +266,18 @@ Future<void> _handleRequest(HttpRequest request) async {
       return;
     }
 
+    final authorizationPolicy = _endpointAuthorization.policyFor(
+      method: request.method,
+      path: request.uri.path,
+    );
+    if (authorizationPolicy == null) {
+      await _json(request, HttpStatus.notFound, {'error': 'Not found'});
+      return;
+    }
+    if (!await _authorizeEndpoint(request, authorizationPolicy)) return;
+
     if (request.method == 'GET' && request.uri.path == '/health') {
-      await _json(
-        request,
-        HttpStatus.ok,
-        buildHealthStatus(
-          emailConfigured: _emailService.isConfigured,
-          donationConfigured:
-              _thirdwebSecretKey.isNotEmpty &&
-              _donationRecipientAddress.isNotEmpty,
-          walletAuthConfigured:
-              _walletAuthService.config.isConfigured &&
-              _walletAccountStoreReady,
-          passwordResetConfigured: _passwordResetConfig.isConfigured,
-          pushConfigured:
-              _firebaseServiceAccountJson.isNotEmpty ||
-              _firebaseServiceAccountBase64.isNotEmpty ||
-              _firebaseServiceAccountFile.isNotEmpty,
-          azureBlobConfigured: _azureBlobConfig.isConfigured,
-          userDirectoryConfigured: _userDirectoryConfig.isConfigured,
-          reportsConfigured: _reportConfig.isConfigured,
-          accountDeletionConfigured:
-              _passwordResetConfig.isConfigured &&
-              _authentikConfig.isConfigured &&
-              _emailService.isConfigured,
-          channelAnalyticsConfigured: _channelAnalyticsConfig.isConfigured,
-          inviteLinksConfigured: _inviteConfig.isConfigured,
-        ),
-      );
+      await _json(request, HttpStatus.ok, buildHealthStatus());
       return;
     }
 
@@ -532,15 +562,6 @@ Map<String, dynamic>? _asMap(Object? value) {
 }
 
 List<dynamic>? _asList(Object? value) => value is List ? value : null;
-
-void _setCorsHeaders(HttpResponse response) {
-  response.headers.add('Access-Control-Allow-Origin', '*');
-  response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  response.headers.add(
-    'Access-Control-Allow-Headers',
-    'Content-Type, Authorization',
-  );
-}
 
 Future<void> _json(
   HttpRequest request,

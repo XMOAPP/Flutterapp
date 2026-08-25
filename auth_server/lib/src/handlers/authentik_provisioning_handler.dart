@@ -76,8 +76,9 @@ Future<void> _registerOidcAccount(HttpRequest request) async {
   if (!_isValidEmail(email)) {
     throw const _BadRequestException('Invalid email');
   }
-  if (password.length < 6) {
-    throw const _BadRequestException('Password must be at least 6 characters');
+  final passwordError = PasswordPolicy.validationError(password);
+  if (passwordError != null) {
+    throw _BadRequestException(passwordError);
   }
   if (enrollmentProof.isEmpty) {
     await _json(request, HttpStatus.forbidden, {
@@ -271,8 +272,9 @@ Future<void> _provisionSecureLogin(HttpRequest request) async {
   if (!_isValidEmail(email)) {
     throw const _BadRequestException('Invalid email');
   }
-  if (password.length < 6) {
-    throw const _BadRequestException('Password must be at least 6 characters');
+  final passwordError = PasswordPolicy.validationError(password);
+  if (passwordError != null) {
+    throw _BadRequestException(passwordError);
   }
   if (enrollmentProof.isEmpty) {
     await _json(request, HttpStatus.forbidden, {
@@ -282,7 +284,7 @@ Future<void> _provisionSecureLogin(HttpRequest request) async {
     return;
   }
 
-  final whoamiUserId = await _userDirectoryWhoami(token);
+  final whoamiUserId = await _userDirectoryWhoamiForRequest(request, token);
   if (_userDirectoryLocalpartFromUserId(whoamiUserId) != username) {
     await _json(request, HttpStatus.forbidden, {
       'success': false,
@@ -382,8 +384,9 @@ Future<void> _prepareSecureRegistration(HttpRequest request) async {
   if (!_isValidEmail(email)) {
     throw const _BadRequestException('Invalid email');
   }
-  if (password.length < 6) {
-    throw const _BadRequestException('Password must be at least 6 characters');
+  final passwordError = PasswordPolicy.validationError(password);
+  if (passwordError != null) {
+    throw _BadRequestException(passwordError);
   }
   if (enrollmentProof.isEmpty) {
     await _json(request, HttpStatus.forbidden, {
@@ -608,6 +611,8 @@ Future<void> _authentikSyncPassword({
   await _authentikSetPassword(user.pk, password);
 }
 
+// Retained for the administrative deactivation flow.
+// ignore: unused_element
 Future<void> _authentikDeactivateUser(String username) async {
   if (!_authentikConfig.isConfigured) return;
   final user = await _authentikFindUser(username);

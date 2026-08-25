@@ -123,7 +123,13 @@ class InviteLinkService {
 
   static String? extractSecureToken(String value) {
     final uri = Uri.tryParse(value.trim());
-    if (uri == null) return null;
+    if (uri == null ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasPort ||
+        uri.fragment.isNotEmpty ||
+        uri.queryParameters.isNotEmpty) {
+      return null;
+    }
 
     String? token;
     if (uri.scheme.toLowerCase() == 'https' &&

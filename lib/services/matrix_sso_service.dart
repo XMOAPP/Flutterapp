@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../config/app_config.dart';
+import '../security/callback_uri_validation.dart';
 
 class MatrixSsoException implements Exception {
   const MatrixSsoException(this.message);
@@ -143,7 +144,18 @@ class MatrixSsoService {
 
   static bool isSupportedCallbackUri(Uri uri) {
     final configured = Uri.tryParse(AppConfig.ssoCallbackUrl.trim());
+    final hasAllowedQuery = hasOnlySingleAllowedQueryParameters(uri, {
+      'state',
+      'loginToken',
+      'login_token',
+      'error',
+    });
+    final hasAmbiguousTokenAlias =
+        uri.queryParameters.containsKey('loginToken') &&
+        uri.queryParameters.containsKey('login_token');
     if (configured != null &&
+        hasAllowedQuery &&
+        !hasAmbiguousTokenAlias &&
         uri.scheme.toLowerCase() == configured.scheme.toLowerCase() &&
         uri.host.toLowerCase() == configured.host.toLowerCase() &&
         uri.port == configured.port &&
@@ -151,6 +163,8 @@ class MatrixSsoService {
       return true;
     }
     return AppConfig.enableLegacySsoCallback &&
+        hasAllowedQuery &&
+        !hasAmbiguousTokenAlias &&
         uri.scheme.toLowerCase() == _legacyCallback.scheme &&
         uri.host.toLowerCase() == _legacyCallback.host &&
         uri.path == _legacyCallback.path;

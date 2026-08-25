@@ -25,7 +25,7 @@ Future<void> _submitReport(HttpRequest request) async {
     });
     return;
   }
-  final reporterUserId = await _userDirectoryWhoami(token);
+  final reporterUserId = await _userDirectoryWhoamiForRequest(request, token);
   final body = await _readJson(request);
   final targetType = _requiredReportValue(
     body,
@@ -121,7 +121,7 @@ Future<void> _listReports(HttpRequest request) async {
     });
     return;
   }
-  final reviewerUserId = await _userDirectoryWhoami(token);
+  final reviewerUserId = await _userDirectoryWhoamiForRequest(request, token);
   final body = await _readJson(request);
   final global = body['global'] == true;
   final roomId = _reportIdentifier(body['roomId'], '!');
@@ -162,7 +162,7 @@ Future<void> _updateReport(HttpRequest request) async {
     });
     return;
   }
-  final reviewerUserId = await _userDirectoryWhoami(token);
+  final reviewerUserId = await _userDirectoryWhoamiForRequest(request, token);
   final body = await _readJson(request);
   final reportId = _reportText(body['reportId'], 100);
   final status = _requiredReportValue(body, 'status', _reportStatuses);

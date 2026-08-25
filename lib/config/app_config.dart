@@ -215,6 +215,7 @@ class AppConfig {
       'XMO_ACCOUNT_DELETION_SERVER_URL': accountDeletionServerUrl,
       'XMO_INVITE_SERVER_URL': inviteServerUrl,
       'XMO_PUBLIC_WEBSITE_URL': publicWebsiteUrl,
+      'XMO_ACCOUNT_DELETION_COMPLETION_URL': accountDeletionCompletionUrl,
       'XMO_SECURE_ACCOUNT_URL': secureAccountUrl,
       'XMO_MFA_SETUP_URL': mfaSetupUrl,
       'XMO_SECURE_ACCOUNT_RECOVERY_URL': secureAccountRecoveryUrl,

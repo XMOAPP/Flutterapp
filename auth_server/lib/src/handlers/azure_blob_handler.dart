@@ -22,7 +22,7 @@ Future<void> _signAzureBlobChunkUpload(HttpRequest request) async {
 
   final String userId;
   try {
-    userId = await _userDirectoryWhoami(token);
+    userId = await _userDirectoryWhoamiForRequest(request, token);
   } catch (_) {
     await _json(request, HttpStatus.unauthorized, {
       'success': false,
@@ -108,7 +108,7 @@ Future<void> _downloadAzureBlobChunk(HttpRequest request) async {
 
   final String userId;
   try {
-    userId = await _userDirectoryWhoami(token);
+    userId = await _userDirectoryWhoamiForRequest(request, token);
   } catch (_) {
     await _json(request, HttpStatus.unauthorized, {
       'success': false,

@@ -24,7 +24,7 @@ void main() {
       );
     });
 
-    test('accepts only the dedicated custom-scheme fallback', () {
+    test('rejects the legacy custom-scheme fallback', () {
       expect(
         AccountDeletionCompletionService.isCompletionUri(
           Uri.parse(
@@ -32,7 +32,7 @@ void main() {
             'xmo_action=account_deleted&user_id=%40alice%3Aexample.org',
           ),
         ),
-        isTrue,
+        isFalse,
       );
       expect(
         AccountDeletionCompletionService.isCompletionUri(
@@ -50,6 +50,16 @@ void main() {
         AccountDeletionCompletionService.isCompletionUri(
           Uri.parse(
             'https://evil.example/auth/callback?xmo_action=account_deleted&user_id=%40alice%3Aexample.org',
+          ),
+        ),
+        isFalse,
+      );
+      expect(
+        AccountDeletionCompletionService.isCompletionUri(
+          Uri.parse(
+            'https://xmo.dpdns.org/account/deleted?'
+            'xmo_action=account_deleted&user_id=%40alice%3Aexample.org&'
+            'user_id=%40bob%3Aexample.org',
           ),
         ),
         isFalse,

@@ -175,7 +175,7 @@ Future<_ChannelAnalyticsAuth?> _channelAnalyticsAuth(
   }
   return _ChannelAnalyticsAuth(
     token: token,
-    userId: await _userDirectoryWhoami(token),
+    userId: await _userDirectoryWhoamiForRequest(request, token),
   );
 }
 

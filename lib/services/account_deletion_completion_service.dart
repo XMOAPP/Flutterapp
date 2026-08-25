@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../config/app_config.dart';
 import '../providers/matrix_provider.dart';
+import '../security/callback_uri_validation.dart';
 
 class AccountDeletionCompletionService with WidgetsBindingObserver {
   AccountDeletionCompletionService._();
@@ -13,8 +14,6 @@ class AccountDeletionCompletionService with WidgetsBindingObserver {
 
   static const actionParameter = 'xmo_action';
   static const completionAction = 'account_deleted';
-  static final Uri _fallbackCompletionUri = Uri.parse('xmo://account/deleted');
-
   GlobalKey<NavigatorState>? _navigatorKey;
   MatrixProvider? _matrixProvider;
   bool _observingLifecycle = false;
@@ -57,19 +56,22 @@ class AccountDeletionCompletionService with WidgetsBindingObserver {
     );
     final isVerifiedHttpsCallback =
         completion != null &&
-        uri.userInfo.isEmpty &&
-        uri.fragment.isEmpty &&
+        completion.scheme.toLowerCase() == 'https' &&
+        completion.host.toLowerCase() == 'xmo.dpdns.org' &&
+        completion.path == '/account/deleted' &&
+        completion.query.isEmpty &&
+        completion.fragment.isEmpty &&
         uri.scheme.toLowerCase() == completion.scheme.toLowerCase() &&
         uri.host.toLowerCase() == completion.host.toLowerCase() &&
         uri.port == completion.port &&
         uri.path == completion.path;
-    final isFallbackCallback =
-        uri.userInfo.isEmpty &&
-        uri.fragment.isEmpty &&
-        uri.scheme.toLowerCase() == _fallbackCompletionUri.scheme &&
-        uri.host.toLowerCase() == _fallbackCompletionUri.host &&
-        uri.path == _fallbackCompletionUri.path;
-    if (!isVerifiedHttpsCallback && !isFallbackCallback) return false;
+    if (!isVerifiedHttpsCallback ||
+        !hasOnlySingleAllowedQueryParameters(uri, {
+          actionParameter,
+          'user_id',
+        })) {
+      return false;
+    }
 
     return uri.queryParameters.length == 2 &&
         uri.queryParameters[actionParameter] == completionAction &&

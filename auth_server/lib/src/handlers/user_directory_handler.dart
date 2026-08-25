@@ -29,7 +29,7 @@ Future<void> _upsertUserDirectoryEntry(HttpRequest request) async {
     throw const _BadRequestException('Valid userId is required');
   }
 
-  final whoamiUserId = await _userDirectoryWhoami(token);
+  final whoamiUserId = await _userDirectoryWhoamiForRequest(request, token);
   if (whoamiUserId != userId) {
     await _json(request, HttpStatus.forbidden, {
       'success': false,

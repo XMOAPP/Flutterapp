@@ -358,7 +358,10 @@ Future<_InviteSession?> _inviteSession(HttpRequest request) async {
     return null;
   }
   try {
-    return _InviteSession(token, await _userDirectoryWhoami(token));
+    return _InviteSession(
+      token,
+      await _userDirectoryWhoamiForRequest(request, token),
+    );
   } on _BadRequestException {
     await _json(request, HttpStatus.unauthorized, {
       'success': false,
@@ -424,7 +427,7 @@ bool _inviteHasCapacity(_InviteRoom room, String userId) {
 
 bool _inviteCanCreateLink(_InviteRoom room) {
   final limit = RoomCapacityPolicy.limitForRoomType(room.roomType);
-  return limit == null || room.memberCount < limit;
+  return room.memberCount < limit;
 }
 
 Future<void> _inviteRoomAtCapacity(HttpRequest request, _InviteRoom room) {

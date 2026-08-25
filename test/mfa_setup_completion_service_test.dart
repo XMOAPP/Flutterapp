@@ -24,6 +24,15 @@ void main() {
     expect(
       MfaSetupCompletionService.isCompletionUri(
         Uri.parse(
+          'https://xmo.dpdns.org/auth/callback?'
+          'xmo_action=mfa_setup_complete&xmo_action=mfa_setup_complete',
+        ),
+      ),
+      isFalse,
+    );
+    expect(
+      MfaSetupCompletionService.isCompletionUri(
+        Uri.parse(
           'https://xmo.dpdns.org/auth/callback?state=abc&loginToken=token',
         ),
       ),

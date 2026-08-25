@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+import '../../security/password_policy.dart';
 import '../../theme.dart';
 import '../../utils/xmo_username.dart';
 
@@ -258,7 +260,7 @@ class _PasswordFieldState extends State<PasswordField> {
           ),
           validator:
               widget.validator ??
-              (v) => (v == null || v.length < 6) ? 'Min 6 characters' : null,
+              (v) => PasswordPolicy.validationError(v ?? ''),
         ),
       ],
     );
