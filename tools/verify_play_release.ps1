@@ -17,6 +17,7 @@ param(
         "XMO_INVITE_SERVER_URL=https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp",
         "XMO_INVITE_WEB_BASE_URL=https://xmo.dpdns.org",
         "XMO_ENABLE_SSO_LOGIN=true",
+        "XMO_OIDC_ONLY_AUTHENTICATION=true",
         "XMO_SSO_IDP_ID=oidc-authentik",
         "XMO_SSO_CALLBACK_URL=https://xmo.dpdns.org/auth/callback",
         "XMO_MFA_SETUP_URL=https://auth.xmo.dpdns.org/if/flow/xmo-totp-setup/"
@@ -179,7 +180,8 @@ $requiredDefines = @(
     "XMO_ACCOUNT_DELETION_SERVER_URL",
     "XMO_ACCOUNT_DELETION_WEB_URL",
     "XMO_INVITE_SERVER_URL",
-    "XMO_INVITE_WEB_BASE_URL"
+    "XMO_INVITE_WEB_BASE_URL",
+    "XMO_OIDC_ONLY_AUTHENTICATION"
 )
 
 $providedDefineNames = @{}
@@ -309,6 +311,28 @@ if ($BuildAab) {
         } else {
             $localProperties = $localProperties.TrimEnd() +
                 [Environment]::NewLine + $replacement +
+                [Environment]::NewLine
+        }
+    }
+
+    # sqlite3's Android native-asset hook launches the Flutter SDK through
+    # local.properties. It fails when the SDK path contains spaces on Windows.
+    # The normal Android runner already uses this short-path junction; keep the
+    # release build on the same verified toolchain when it is available.
+    $shortFlutterSdk = 'C:\tmp\xmo-toolchain-links\flutter'
+    if (Test-Path (Join-Path $shortFlutterSdk 'bin\flutter.bat')) {
+        $escapedShortFlutterSdk = $shortFlutterSdk.Replace('\', '\\')
+        $flutterSdkPattern = '(?m)^flutter\.sdk=.*$'
+        $flutterSdkReplacement = "flutter.sdk=$escapedShortFlutterSdk"
+        if ($localProperties -match $flutterSdkPattern) {
+            $localProperties = [regex]::Replace(
+                $localProperties,
+                $flutterSdkPattern,
+                $flutterSdkReplacement
+            )
+        } else {
+            $localProperties = $localProperties.TrimEnd() +
+                [Environment]::NewLine + $flutterSdkReplacement +
                 [Environment]::NewLine
         }
     }

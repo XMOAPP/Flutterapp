@@ -48,6 +48,11 @@ function Add-Gate {
     $results.Add($result) | Out-Null
 }
 
+# Check both unstaged and staged changes. A passing test suite does not catch
+# whitespace errors that would make a commit fail in CI or during review.
+Add-Gate "Git working-tree diff check" @("git", "diff", "--check") 30
+Add-Gate "Git staged diff check" @("git", "diff", "--cached", "--check") 30
+
 if (!$SkipFlutter) {
     $env:APPDATA = $isolatedAppData
     Add-Gate "Flutter format check" @(

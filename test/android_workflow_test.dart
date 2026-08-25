@@ -11,10 +11,12 @@ void main() {
     analysisOptions = File('analysis_options.yaml').readAsStringSync();
   });
 
-  test('Flutter analysis excludes the independently analyzed backend package',
-      () {
-    expect(analysisOptions, contains('auth_server/**'));
-  });
+  test(
+    'Flutter analysis excludes the independently analyzed backend package',
+    () {
+      expect(analysisOptions, contains('auth_server/**'));
+    },
+  );
 
   test('release workflow validates every signing secret before building', () {
     for (final secret in const [
@@ -28,12 +30,14 @@ void main() {
     }
   });
 
-  test('release workflow writes keystore where Gradle release signing reads it',
-      () {
-    expect(workflow, contains('> android/upload-keystore.jks'));
-    expect(workflow, contains('storeFile=upload-keystore.jks'));
-    expect(workflow, isNot(contains('> android/app/upload-keystore.jks')));
-  });
+  test(
+    'release workflow writes keystore where Gradle release signing reads it',
+    () {
+      expect(workflow, contains('> android/upload-keystore.jks'));
+      expect(workflow, contains('storeFile=upload-keystore.jks'));
+      expect(workflow, isNot(contains('> android/app/upload-keystore.jks')));
+    },
+  );
 
   test('release workflow validates release dart defines', () {
     for (final variable in const [
@@ -65,12 +69,30 @@ void main() {
 
   test('format checks never rewrite source', () {
     expect(
-        workflow, contains('dart format --output=none --set-exit-if-changed'));
+      workflow,
+      contains('dart format --output=none --set-exit-if-changed'),
+    );
+  });
+
+  test('merge workflow checks whitespace and gates internal changes on a signed bundle', () {
+    expect(workflow, contains('git diff --check'));
+    expect(
+      workflow,
+      contains('github.event.pull_request.head.repo.full_name == github.repository'),
+    );
+    expect(workflow, contains('flutter build appbundle --release'));
+    expect(
+      workflow,
+      contains('--dart-define=XMO_OIDC_ONLY_AUTHENTICATION=true'),
+    );
   });
 
   test('backend tests are required and logs are retained', () {
     expect(workflow, contains(r'"$DART_BIN" test --reporter expanded'));
-    expect(workflow, contains('uses: actions/upload-artifact@v4'));
+    expect(
+      workflow,
+      contains('uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'),
+    );
     expect(workflow, contains('if: always()'));
     expect(workflow, contains('tools/ci/redact_logs.sh'));
   });
@@ -83,14 +105,18 @@ void main() {
     expect(workflow, contains('tools/ci/free_android_runner_disk.sh'));
     expect(workflow, contains('sdkmanager "platform-tools"'));
     expect(
-        workflow, contains(r'SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"'));
-    expect(workflow,
-        contains(r'export ANDROID_AVD_HOME="$RUNNER_TEMP/android-avd"'));
+      workflow,
+      contains(r'SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"'),
+    );
+    expect(
+      workflow,
+      contains(r'export ANDROID_AVD_HOME="$RUNNER_TEMP/android-avd"'),
+    );
     expect(workflow, contains(r'test -x "$SDK_ROOT/emulator/emulator"'));
     expect(
-        workflow,
-        contains(
-            r'"$SDK_ROOT/emulator/emulator" -list-avds | grep -Fx xmo_ci'));
+      workflow,
+      contains(r'"$SDK_ROOT/emulator/emulator" -list-avds | grep -Fx xmo_ci'),
+    );
     expect(workflow, contains(r'nohup "$SDK_ROOT/emulator/emulator"'));
     expect(workflow, contains(r'test "$available_kb" -ge 6291456'));
   });
