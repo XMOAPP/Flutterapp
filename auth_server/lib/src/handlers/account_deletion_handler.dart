@@ -329,7 +329,9 @@ Future<void> _purgeXmoAccountRecords(String userId) async {
 
   final email = _recoveryEmailStore.removeVerified(localpart);
 
-  _passwordResetStore.removeWhere((key, _) => key.startsWith('$localpart|'));
+  if (_passwordResetStoreReady) {
+    await _passwordResetStore.removeForUsername(localpart);
+  }
   _accountDeletionStore.removeWhere((key, _) => key.startsWith('$localpart|'));
   if (email != null) _otpStore.remove(email);
   if (_walletAccountStoreReady) {

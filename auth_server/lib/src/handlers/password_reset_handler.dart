@@ -25,6 +25,12 @@ Future<void> _startPasswordReset(HttpRequest request) async {
     });
     return;
   }
+  if (!_passwordResetStoreReady) {
+    await _json(request, HttpStatus.serviceUnavailable, {
+      'error': 'Password reset is temporarily unavailable',
+    });
+    return;
+  }
 
   final verified = await _isPasswordResetEmailVerified(
     username: username,
@@ -36,13 +42,23 @@ Future<void> _startPasswordReset(HttpRequest request) async {
   }
 
   final otp = (_random.nextInt(900000) + 100000).toString();
-  _passwordResetStore[_passwordResetKey(
-    username,
-    email,
-  )] = _PasswordResetRecord(
-    code: otp,
-    expiresAt: DateTime.now().toUtc().add(_passwordResetTtl),
-  );
+  try {
+    await _passwordResetStore.issue(
+      username: username,
+      email: email,
+      codeDigest: passwordResetCodeDigest(
+        code: otp,
+        secret: _passwordResetStore.config.codeSecret,
+      ),
+      expiresAt: DateTime.now().toUtc().add(_passwordResetTtl),
+    );
+  } catch (error, stackTrace) {
+    _logger.error('password_reset_challenge_issue_failed', error, stackTrace);
+    await _json(request, HttpStatus.serviceUnavailable, {
+      'error': 'Password reset is temporarily unavailable',
+    });
+    return;
+  }
 
   try {
     await _emailService.sendGenericEmail(
@@ -68,6 +84,7 @@ Future<void> _startPasswordReset(HttpRequest request) async {
       tag: 'password-reset',
     );
   } on EmailDeliveryException catch (error) {
+    await _removePasswordResetChallenge(username: username, email: email);
     await _json(request, HttpStatus.badGateway, {'error': error.message});
     return;
   }
@@ -111,35 +128,62 @@ Future<void> _completePasswordReset(HttpRequest request) async {
     });
     return;
   }
+  if (!_passwordResetStoreReady) {
+    await _json(request, HttpStatus.serviceUnavailable, {
+      'error': 'Password reset is temporarily unavailable',
+    });
+    return;
+  }
 
-  final key = _passwordResetKey(username, email);
-  final record = _passwordResetStore[key];
-  if (record == null) {
-    await _json(request, HttpStatus.badRequest, {
-      'error': 'Reset not requested',
+  late final PasswordResetAttemptResult attempt;
+  try {
+    attempt = await _passwordResetStore.claimAttempt(
+      username: username,
+      email: email,
+      codeDigest: passwordResetCodeDigest(
+        code: otp,
+        secret: _passwordResetStore.config.codeSecret,
+      ),
+      maxAttempts: _maxAttempts,
+      claimTtl: _passwordResetClaimTtl,
+    );
+  } catch (error, stackTrace) {
+    _logger.error('password_reset_challenge_claim_failed', error, stackTrace);
+    await _json(request, HttpStatus.serviceUnavailable, {
+      'error': 'Password reset is temporarily unavailable',
     });
     return;
   }
-  if (DateTime.now().toUtc().isAfter(record.expiresAt)) {
-    _passwordResetStore.remove(key);
-    await _json(request, HttpStatus.badRequest, {
-      'error': 'Reset code expired',
-    });
-    return;
-  }
-  record.attempts += 1;
-  if (record.attempts > _maxAttempts) {
-    _passwordResetStore.remove(key);
-    await _json(request, HttpStatus.tooManyRequests, {
-      'error': 'Too many reset attempts',
-    });
-    return;
-  }
-  if (record.code != otp) {
-    await _json(request, HttpStatus.badRequest, {
-      'error': 'Incorrect reset code',
-    });
-    return;
+
+  switch (attempt.status) {
+    case PasswordResetAttemptStatus.valid:
+      break;
+    case PasswordResetAttemptStatus.notRequested:
+      await _json(request, HttpStatus.badRequest, {
+        'error': 'Reset not requested',
+      });
+      return;
+    case PasswordResetAttemptStatus.expired:
+      await _json(request, HttpStatus.badRequest, {
+        'error': 'Reset code expired',
+      });
+      return;
+    case PasswordResetAttemptStatus.tooManyAttempts:
+      await _json(request, HttpStatus.tooManyRequests, {
+        'error': 'Too many reset attempts',
+      });
+      return;
+    case PasswordResetAttemptStatus.incorrectCode:
+      await _json(request, HttpStatus.badRequest, {
+        'error': 'Incorrect reset code',
+      });
+      return;
+    case PasswordResetAttemptStatus.alreadyProcessing:
+      await _json(request, HttpStatus.conflict, {
+        'error':
+            'Password reset is already being processed. Try again shortly.',
+      });
+      return;
   }
 
   final verified = await _isPasswordResetEmailVerified(
@@ -147,7 +191,7 @@ Future<void> _completePasswordReset(HttpRequest request) async {
     email: email,
   );
   if (!verified) {
-    _passwordResetStore.remove(key);
+    await _removePasswordResetChallenge(username: username, email: email);
     await _json(request, HttpStatus.forbidden, {
       'error': 'Email is not verified',
     });
@@ -159,6 +203,7 @@ Future<void> _completePasswordReset(HttpRequest request) async {
       await _synapseResetPassword(_matrixUserId(username), newPassword);
     } catch (error, st) {
       _logger.error('password_reset_failed', error, st);
+      await _releasePasswordResetClaim(username: username, email: email);
       await _json(request, HttpStatus.badGateway, {
         'error': 'Could not reset password',
       });
@@ -174,6 +219,7 @@ Future<void> _completePasswordReset(HttpRequest request) async {
     );
   } catch (error, st) {
     _logger.error('authentik_password_sync_failed', error, st);
+    await _releasePasswordResetClaim(username: username, email: email);
     await _json(request, HttpStatus.badGateway, {
       'error': _passwordResetConfig.oidcOnlyAuthentication
           ? 'Could not update your password. Please retry.'
@@ -187,6 +233,7 @@ Future<void> _completePasswordReset(HttpRequest request) async {
     await _synapseDeleteAllDevices(_matrixUserId(username));
   } catch (error, st) {
     _logger.error('password_reset_session_revocation_failed', error, st);
+    await _releasePasswordResetClaim(username: username, email: email);
     await _json(request, HttpStatus.badGateway, {
       'error':
           'Password updated, but existing sessions could not be signed out. Retry with the same new password.',
@@ -194,9 +241,31 @@ Future<void> _completePasswordReset(HttpRequest request) async {
     return;
   }
 
-  _passwordResetStore.remove(key);
+  await _removePasswordResetChallenge(username: username, email: email);
   logInfo('password_reset_completed', {'usernameHash': username.hashCode});
   await _json(request, HttpStatus.ok, {'success': true});
+}
+
+Future<void> _removePasswordResetChallenge({
+  required String username,
+  required String email,
+}) async {
+  try {
+    await _passwordResetStore.remove(username: username, email: email);
+  } catch (error, stackTrace) {
+    _logger.error('password_reset_challenge_remove_failed', error, stackTrace);
+  }
+}
+
+Future<void> _releasePasswordResetClaim({
+  required String username,
+  required String email,
+}) async {
+  try {
+    await _passwordResetStore.releaseClaim(username: username, email: email);
+  } catch (error, stackTrace) {
+    _logger.error('password_reset_challenge_release_failed', error, stackTrace);
+  }
 }
 
 Future<bool> _isPasswordResetEmailVerified({
@@ -452,14 +521,6 @@ class PasswordResetConfig {
     }
     return File('/app/data/recovery_emails.json');
   }
-}
-
-class _PasswordResetRecord {
-  _PasswordResetRecord({required this.code, required this.expiresAt});
-
-  final String code;
-  final DateTime expiresAt;
-  int attempts = 0;
 }
 
 class _SynapseResponse {

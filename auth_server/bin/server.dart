@@ -16,6 +16,7 @@ import 'package:xmo_auth_server/src/email_service.dart';
 import 'package:xmo_auth_server/src/endpoint_modules.dart';
 import 'package:xmo_auth_server/src/health_status.dart';
 import 'package:xmo_auth_server/src/password_policy.dart';
+import 'package:xmo_auth_server/src/password_reset_store.dart';
 import 'package:xmo_auth_server/src/request_body.dart';
 import 'package:xmo_auth_server/src/request_guard.dart';
 import 'package:xmo_auth_server/src/recovery_email_store.dart';
@@ -63,7 +64,6 @@ final _secureLoginEnrollmentProofs = SecureLoginEnrollmentProofStore(
         '/app/data/secure_login_enrollment_proofs.json',
   ),
 );
-final _passwordResetStore = <String, _PasswordResetRecord>{};
 final _random = Random.secure();
 final _trustedProxyConfig = TrustedProxyConfig.fromEnvironment(
   Platform.environment,
@@ -76,6 +76,10 @@ final _emailService = EmailService(config: _emailConfig, logger: _logger);
 final _passwordResetConfig = PasswordResetConfig.fromEnvironment(
   Platform.environment,
 );
+final _passwordResetStore = PasswordResetStore(
+  config: PasswordResetStoreConfig.fromEnvironment(Platform.environment),
+);
+var _passwordResetStoreReady = false;
 final _recoveryEmailStore = RecoveryEmailStore(
   ttl: _secureLoginEnrollmentProofTtl,
   storageFile: _passwordResetConfig.recoveryEmailStorageFile,
@@ -170,6 +174,7 @@ const _endpointAuthorization = EndpointAuthorizationRegistry(
 const _otpTtl = Duration(minutes: 1);
 const _secureLoginEnrollmentProofTtl = Duration(minutes: 5);
 const _passwordResetTtl = Duration(minutes: 5);
+const _passwordResetClaimTtl = Duration(minutes: 2);
 const _maxAttempts = 5;
 const _thirdwebBaseUrl = 'https://api.thirdweb.com';
 const _baseUsdcAddress = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -181,6 +186,19 @@ const _firebaseMessagingScope =
     'https://www.googleapis.com/auth/firebase.messaging';
 
 Future<void> main() async {
+  if (_passwordResetStore.config.isConfigured) {
+    try {
+      await _passwordResetStore.initialize();
+      _passwordResetStoreReady = true;
+      logInfo('password_reset_store_ready');
+    } catch (error, stackTrace) {
+      _logger.error(
+        'password_reset_store_initialization_failed',
+        error,
+        stackTrace,
+      );
+    }
+  }
   if (_walletAccountStore.config.isConfigured &&
       _walletAuthService.config.isConfigured) {
     try {

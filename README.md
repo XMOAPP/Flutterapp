@@ -543,6 +543,28 @@ username availability, donation creation, invite operations, account deletion,
 and Azure chunk-signing authorization. Review logs for token, password, OTP,
 wallet signature, and media-secret leakage.
 
+Password-reset challenges are stored in PostgreSQL, so an auth-server restart
+does not invalidate a code that has already been emailed. Configure
+`XMO_PASSWORD_RESET_CODE_SECRET` with a distinct random secret of at least 32
+characters. The reset store accepts dedicated `XMO_PASSWORD_RESET_DB_*`
+settings; when they are not present it uses the existing `XMO_WALLET_DB_*`
+connection settings. The database user needs permission to create and use the
+`xmo_password_reset_challenges` table. Never log or persist raw reset codes.
+
+For an existing wallet-account deployment, only the separate reset-code secret
+is required:
+
+```bash
+openssl rand -hex 32
+# Add the generated value to /opt/xmo/auth.env as:
+XMO_PASSWORD_RESET_CODE_SECRET=<generated value>
+```
+
+After deployment, `xmo-auth` must log `password_reset_store_ready`. Request a
+reset code, restart only `xmo-auth`, then complete the reset with that same
+code to verify the operational path. The code remains valid for five minutes,
+permits five completion attempts, and is removed after a successful reset.
+
 New and reset passwords must be 15-256 characters. Existing passwords remain
 valid until changed. Mirror this policy in every Authentik enrollment,
 password-change, and recovery prompt; its API-created users are still checked
