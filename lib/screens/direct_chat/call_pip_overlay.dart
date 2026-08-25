@@ -157,18 +157,22 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
 
     // Clamp position within screen bounds
     final clampedX = _position.dx.clamp(0.0, screenSize.width - _pipWidth);
-    final clampedY =
-        _position.dy.clamp(0.0, screenSize.height - _pipHeight - 40);
+    final clampedY = _position.dy.clamp(
+      0.0,
+      screenSize.height - _pipHeight - 40,
+    );
 
     return Positioned(
       left: clampedX,
       top: clampedY,
       child: GestureDetector(
         onPanUpdate: (d) {
-          setState(() => _position = Offset(
-                _position.dx + d.delta.dx,
-                _position.dy + d.delta.dy,
-              ));
+          setState(
+            () => _position = Offset(
+              _position.dx + d.delta.dx,
+              _position.dy + d.delta.dy,
+            ),
+          );
         },
         onTap: _maximize,
         child: Material(
@@ -204,10 +208,7 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
             blurRadius: 16,
             spreadRadius: 2,
           ),
-          BoxShadow(
-            color: kLimeGreen.withValues(alpha: 0.08),
-            blurRadius: 20,
-          ),
+          BoxShadow(color: kLimeGreen.withValues(alpha: 0.08), blurRadius: 20),
         ],
       ),
       child: ClipRRect(
@@ -219,7 +220,8 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
                   ? webrtc.RTCVideoView(
                       renderer,
                       objectFit: webrtc
-                          .RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                          .RTCVideoViewObjectFit
+                          .RTCVideoViewObjectFitCover,
                     )
                   : Center(
                       child: StoryAvatar(
@@ -236,8 +238,10 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
               right: 0,
               child: Center(
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.65),
                     borderRadius: BorderRadius.circular(10),
@@ -326,10 +330,7 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
             blurRadius: 16,
             spreadRadius: 2,
           ),
-          BoxShadow(
-            color: kLimeGreen.withValues(alpha: 0.08),
-            blurRadius: 20,
-          ),
+          BoxShadow(color: kLimeGreen.withValues(alpha: 0.08), blurRadius: 20),
         ],
       ),
       child: ClipRRect(
@@ -342,17 +343,15 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
                   ? webrtc.RTCVideoView(
                       remoteRenderer,
                       objectFit: webrtc
-                          .RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                          .RTCVideoViewObjectFit
+                          .RTCVideoViewObjectFitCover,
                     )
                   : Container(
                       decoration: const BoxDecoration(
                         gradient: LinearGradient(
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
-                          colors: [
-                            Color(0xFF1A1A1A),
-                            Color(0xFF0A0A0A),
-                          ],
+                          colors: [Color(0xFF1A1A1A), Color(0xFF0A0A0A)],
                         ),
                       ),
                       child: Center(
@@ -372,8 +371,10 @@ class _CallPipOverlayState extends State<CallPipOverlay> {
               right: 0,
               child: Center(
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.65),
                     borderRadius: BorderRadius.circular(10),

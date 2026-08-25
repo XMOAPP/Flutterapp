@@ -56,8 +56,8 @@ class ChannelAnalyticsService {
     this._client, {
     http.Client? httpClient,
     String? serverUrl,
-  })  : _httpClient = httpClient,
-        _serverUrl = serverUrl ?? AppConfig.channelAnalyticsServerUrl;
+  }) : _httpClient = httpClient,
+       _serverUrl = serverUrl ?? AppConfig.channelAnalyticsServerUrl;
 
   final Client _client;
   final http.Client? _httpClient;

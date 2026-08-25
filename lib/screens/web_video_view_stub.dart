@@ -17,6 +17,8 @@ void disposeVideoView(String viewId) {}
 
 /// Stub — returns null on non-web platforms.
 Future<Uint8List?> generateVideoThumbnail(
-    Uint8List videoBytes, String mimeType) async {
+  Uint8List videoBytes,
+  String mimeType,
+) async {
   return null;
 }

@@ -9,8 +9,8 @@ class ChatComposerController {
   ChatComposerController({
     MessageDraftStore? draftStore,
     Duration draftSaveDelay = const Duration(milliseconds: 450),
-  })  : _draftStore = draftStore ?? MessageDraftService(),
-        _draftSaveDelay = draftSaveDelay {
+  }) : _draftStore = draftStore ?? MessageDraftService(),
+       _draftSaveDelay = draftSaveDelay {
     textController.addListener(_handleTextChanged);
   }
 

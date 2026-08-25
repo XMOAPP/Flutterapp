@@ -66,7 +66,8 @@ class _IncomingCallBannerState extends State<IncomingCallBanner> {
           valueListenable: VoipService().incomingCall,
           builder: (context, session, _) {
             final call = session;
-            final shouldShow = call != null &&
+            final shouldShow =
+                call != null &&
                 call.direction == CallDirection.kIncoming &&
                 call.state == CallState.kRinging &&
                 !VoipService().pipMode.value;

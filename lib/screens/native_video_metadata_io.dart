@@ -9,15 +9,12 @@ class NativeVideoMetadata {
   final int? height;
   final int? durationMs;
 
-  const NativeVideoMetadata({
-    this.width,
-    this.height,
-    this.durationMs,
-  });
+  const NativeVideoMetadata({this.width, this.height, this.durationMs});
 }
 
 Future<NativeVideoMetadata?> readNativeVideoMetadata(
-    List<int> videoBytes) async {
+  List<int> videoBytes,
+) async {
   if (videoBytes.isEmpty) return null;
 
   File? tempFile;

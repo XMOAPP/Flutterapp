@@ -33,10 +33,7 @@ class AvatarWidget extends StatelessWidget {
     return RepaintBoundary(
       child: Stack(
         clipBehavior: Clip.none,
-        children: [
-          _buildAvatar(context),
-          if (showOnlineDot) _buildOnlineDot(),
-        ],
+        children: [_buildAvatar(context), if (showOnlineDot) _buildOnlineDot()],
       ),
     );
   }

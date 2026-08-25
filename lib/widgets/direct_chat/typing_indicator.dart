@@ -6,10 +6,7 @@ import '../../theme.dart';
 class TypingIndicator extends StatefulWidget {
   final String userName;
 
-  const TypingIndicator({
-    super.key,
-    required this.userName,
-  });
+  const TypingIndicator({super.key, required this.userName});
 
   @override
   State<TypingIndicator> createState() => _TypingIndicatorState();

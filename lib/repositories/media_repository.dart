@@ -17,15 +17,14 @@ class MediaRepository {
     required String mimeType,
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
-  }) =>
-      matrixService.mediaRepository.sendFileWithProgress(
-        roomId: roomId,
-        bytes: bytes,
-        fileName: fileName,
-        mimeType: mimeType,
-        onUploadProgress: onUploadProgress,
-        isCancelled: isCancelled,
-      );
+  }) => matrixService.mediaRepository.sendFileWithProgress(
+    roomId: roomId,
+    bytes: bytes,
+    fileName: fileName,
+    mimeType: mimeType,
+    onUploadProgress: onUploadProgress,
+    isCancelled: isCancelled,
+  );
 
   Future<void> sendImageWithCaption({
     required String roomId,
@@ -38,17 +37,16 @@ class MediaRepository {
     int? thumbnailHeight,
     void Function(int uploadedBytes, int totalBytes)? onUploadProgress,
     bool Function()? isCancelled,
-  }) =>
-      matrixService.mediaRepository.sendImageWithCaption(
-        roomId: roomId,
-        bytes: bytes,
-        fileName: fileName,
-        mimeType: mimeType,
-        caption: caption,
-        thumbnailBytes: thumbnailBytes,
-        thumbnailWidth: thumbnailWidth,
-        thumbnailHeight: thumbnailHeight,
-        onUploadProgress: onUploadProgress,
-        isCancelled: isCancelled,
-      );
+  }) => matrixService.mediaRepository.sendImageWithCaption(
+    roomId: roomId,
+    bytes: bytes,
+    fileName: fileName,
+    mimeType: mimeType,
+    caption: caption,
+    thumbnailBytes: thumbnailBytes,
+    thumbnailWidth: thumbnailWidth,
+    thumbnailHeight: thumbnailHeight,
+    onUploadProgress: onUploadProgress,
+    isCancelled: isCancelled,
+  );
 }

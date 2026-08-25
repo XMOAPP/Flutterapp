@@ -88,11 +88,7 @@ class StoryRing extends StatelessWidget {
                           ),
                         ],
                       ),
-                      child: Icon(
-                        Icons.add,
-                        color: kWhite,
-                        size: size * 0.2,
-                      ),
+                      child: Icon(Icons.add, color: kWhite, size: size * 0.2),
                     ),
                   ),
                 ),
@@ -134,10 +130,7 @@ class StoryRing extends StatelessWidget {
       return ClipOval(
         child: StoryVideoThumbnail(
           story: story,
-          fallback: storyVideoFallback(
-            width: contentSize,
-            height: contentSize,
-          ),
+          fallback: storyVideoFallback(width: contentSize, height: contentSize),
           playIcon: const SizedBox.shrink(),
         ),
       );
@@ -289,11 +282,7 @@ class _SegmentedStoryRingPainter extends CustomPainter {
 
     if (segmentCount <= 1) return const Color(0xFF1686D9);
     final t = index / (segmentCount - 1);
-    return Color.lerp(
-          const Color(0xFF20D7A3),
-          const Color(0xFF1686D9),
-          t,
-        ) ??
+    return Color.lerp(const Color(0xFF20D7A3), const Color(0xFF1686D9), t) ??
         const Color(0xFF1686D9);
   }
 
@@ -368,11 +357,7 @@ class AddStoryButton extends StatelessWidget {
                         ),
                       ],
                     ),
-                    child: Icon(
-                      Icons.add,
-                      color: kBlack,
-                      size: size * 0.2,
-                    ),
+                    child: Icon(Icons.add, color: kBlack, size: size * 0.2),
                   ),
                 ),
               ],

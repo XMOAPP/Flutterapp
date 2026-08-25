@@ -49,7 +49,8 @@ class WalletService {
 
     final nonce = _generateNonce();
     final timestamp = DateTime.now().toUtc().toIso8601String();
-    final message = 'XMO wants you to sign in with your wallet.\n\n'
+    final message =
+        'XMO wants you to sign in with your wallet.\n\n'
         'Username: $username\n'
         'Wallet: $_connectedAddress\n'
         'Nonce: $nonce\n'

@@ -10,10 +10,7 @@ import '../../theme.dart';
 class StoryViewersSheet extends StatefulWidget {
   final String storyId;
 
-  const StoryViewersSheet({
-    super.key,
-    required this.storyId,
-  });
+  const StoryViewersSheet({super.key, required this.storyId});
 
   @override
   State<StoryViewersSheet> createState() => _StoryViewersSheetState();
@@ -31,8 +28,9 @@ class _StoryViewersSheetState extends State<StoryViewersSheet> {
 
   Future<void> _loadViewers() async {
     try {
-      final viewers =
-          await context.read<StoryProvider>().getStoryViewers(widget.storyId);
+      final viewers = await context.read<StoryProvider>().getStoryViewers(
+        widget.storyId,
+      );
       if (!mounted) return;
       setState(() {
         _viewers = viewers;
@@ -106,9 +104,7 @@ class _StoryViewersSheetState extends State<StoryViewersSheet> {
         slivers: const [
           SliverFillRemaining(
             hasScrollBody: false,
-            child: Center(
-              child: CircularProgressIndicator(color: kLimeGreen),
-            ),
+            child: Center(child: CircularProgressIndicator(color: kLimeGreen)),
           ),
         ],
       );
@@ -132,10 +128,7 @@ class _StoryViewersSheetState extends State<StoryViewersSheet> {
                   const SizedBox(height: 12),
                   Text(
                     'No views yet',
-                    style: GoogleFonts.inter(
-                      color: kLightGrey,
-                      fontSize: 14,
-                    ),
+                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 14),
                   ),
                 ],
               ),
@@ -149,11 +142,8 @@ class _StoryViewersSheetState extends State<StoryViewersSheet> {
       controller: scrollController,
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 20),
       itemCount: _viewers.length,
-      separatorBuilder: (_, __) => const Divider(
-        color: kDarkGrey,
-        height: 1,
-        indent: 64,
-      ),
+      separatorBuilder: (_, __) =>
+          const Divider(color: kDarkGrey, height: 1, indent: 64),
       itemBuilder: (context, index) => _buildViewerTile(_viewers[index]),
     );
   }
@@ -193,10 +183,7 @@ class _StoryViewersSheetState extends State<StoryViewersSheet> {
       ),
       subtitle: Text(
         _formatTimeAgo(viewer.viewedAt),
-        style: GoogleFonts.inter(
-          color: kLightGrey,
-          fontSize: 12,
-        ),
+        style: GoogleFonts.inter(color: kLightGrey, fontSize: 12),
       ),
     );
   }

@@ -73,30 +73,30 @@ class _ChannelStatisticsScreenState extends State<ChannelStatisticsScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: kLimeGreen))
           : _statistics == null
-              ? Center(
-                  child: Text(
-                    'No statistics available',
-                    style: GoogleFonts.inter(color: kLightGrey),
-                  ),
-                )
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Overview Stats
-                      _buildOverviewSection(),
-                      const SizedBox(height: 16),
+          ? Center(
+              child: Text(
+                'No statistics available',
+                style: GoogleFonts.inter(color: kLightGrey),
+              ),
+            )
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Overview Stats
+                  _buildOverviewSection(),
+                  const SizedBox(height: 16),
 
-                      // Post Activity
-                      _buildPostActivitySection(),
-                      const SizedBox(height: 16),
+                  // Post Activity
+                  _buildPostActivitySection(),
+                  const SizedBox(height: 16),
 
-                      // Channel Info
-                      _buildChannelInfoSection(),
-                    ],
-                  ),
-                ),
+                  // Channel Info
+                  _buildChannelInfoSection(),
+                ],
+              ),
+            ),
     );
   }
 
@@ -175,13 +175,19 @@ class _ChannelStatisticsScreenState extends State<ChannelStatisticsScreen> {
           ),
           const SizedBox(height: 14),
           _buildActivityRow(
-              'Last 24 hours', '${_statistics!.postsLast24h} posts'),
+            'Last 24 hours',
+            '${_statistics!.postsLast24h} posts',
+          ),
           const SizedBox(height: 12),
           _buildActivityRow(
-              'Last 7 days', '${_statistics!.postsLast7days} posts'),
+            'Last 7 days',
+            '${_statistics!.postsLast7days} posts',
+          ),
           const SizedBox(height: 12),
           _buildActivityRow(
-              'Average views', '${_statistics!.averageViews} per post'),
+            'Average views',
+            '${_statistics!.averageViews} per post',
+          ),
         ],
       ),
     );
@@ -218,8 +224,10 @@ class _ChannelStatisticsScreenState extends State<ChannelStatisticsScreen> {
           const SizedBox(height: 14),
           _buildInfoRow('Created on', formattedDate),
           const SizedBox(height: 12),
-          _buildInfoRow('Channel type',
-              widget.room.joinRules == JoinRules.public ? 'Public' : 'Private'),
+          _buildInfoRow(
+            'Channel type',
+            widget.room.joinRules == JoinRules.public ? 'Public' : 'Private',
+          ),
         ],
       ),
     );
@@ -247,10 +255,7 @@ class _ChannelStatisticsScreenState extends State<ChannelStatisticsScreen> {
           const SizedBox(height: 3),
           Text(
             label,
-            style: GoogleFonts.inter(
-              color: kLightGrey,
-              fontSize: 11,
-            ),
+            style: GoogleFonts.inter(color: kLightGrey, fontSize: 11),
             textAlign: TextAlign.center,
           ),
         ],
@@ -262,13 +267,7 @@ class _ChannelStatisticsScreenState extends State<ChannelStatisticsScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          label,
-          style: GoogleFonts.inter(
-            color: kLightGrey,
-            fontSize: 12,
-          ),
-        ),
+        Text(label, style: GoogleFonts.inter(color: kLightGrey, fontSize: 12)),
         Text(
           value,
           style: GoogleFonts.inter(
@@ -285,13 +284,7 @@ class _ChannelStatisticsScreenState extends State<ChannelStatisticsScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          label,
-          style: GoogleFonts.inter(
-            color: kLightGrey,
-            fontSize: 12,
-          ),
-        ),
+        Text(label, style: GoogleFonts.inter(color: kLightGrey, fontSize: 12)),
         Text(
           value,
           style: GoogleFonts.inter(

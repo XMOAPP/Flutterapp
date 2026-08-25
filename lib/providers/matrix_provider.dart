@@ -134,8 +134,7 @@ class MatrixProvider extends ChangeNotifier {
         _state != MatrixAuthState.error) {
       return true;
     }
-    if (_state == MatrixAuthState.error &&
-        _svc.clientReadyForAuthentication) {
+    if (_state == MatrixAuthState.error && _svc.clientReadyForAuthentication) {
       debugPrint(
         '[MatrixProvider] Recovering authentication after a non-fatal '
         'Matrix startup failure.',

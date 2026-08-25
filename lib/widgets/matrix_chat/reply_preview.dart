@@ -25,9 +25,7 @@ class ReplyPreview extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: const BoxDecoration(
         color: kDarkerGrey,
-        border: Border(
-          top: BorderSide(color: kMediumGrey, width: 1),
-        ),
+        border: Border(top: BorderSide(color: kMediumGrey, width: 1)),
       ),
       child: Row(
         children: [
@@ -56,10 +54,7 @@ class ReplyPreview extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   messagePreview,
-                  style: GoogleFonts.inter(
-                    color: kLightGrey,
-                    fontSize: 13,
-                  ),
+                  style: GoogleFonts.inter(color: kLightGrey, fontSize: 13),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),

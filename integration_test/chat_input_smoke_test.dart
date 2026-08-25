@@ -6,8 +6,9 @@ import 'package:xmo/screens/matrix_chat/chat_input_bar.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('composer interaction works on an Android device',
-      (tester) async {
+  testWidgets('composer interaction works on an Android device', (
+    tester,
+  ) async {
     final controller = TextEditingController();
     var sent = false;
     await tester.binding.setSurfaceSize(const Size(390, 844));

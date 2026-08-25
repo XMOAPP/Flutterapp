@@ -32,11 +32,7 @@ class ReadReceipt extends StatelessWidget {
   final ReadReceiptStatus status;
   final double size;
 
-  const ReadReceipt({
-    super.key,
-    required this.status,
-    this.size = 12,
-  });
+  const ReadReceipt({super.key, required this.status, this.size = 12});
 
   @override
   Widget build(BuildContext context) {
@@ -50,28 +46,25 @@ class ReadReceipt extends StatelessWidget {
       },
       child: switch (status) {
         ReadReceiptStatus.failed => Icon(
-            Icons.error_outline_rounded,
-            size: size + 1,
-            color: Colors.redAccent,
-          ),
+          Icons.error_outline_rounded,
+          size: size + 1,
+          color: Colors.redAccent,
+        ),
         ReadReceiptStatus.sending => Icon(
-            Icons.access_time,
-            size: size,
-            color: kLightGrey.withValues(alpha: 0.6),
-          ),
+          Icons.access_time,
+          size: size,
+          color: kLightGrey.withValues(alpha: 0.6),
+        ),
         ReadReceiptStatus.sent => Icon(
-            Icons.done,
-            size: size,
-            color: kLightGrey.withValues(alpha: 0.6),
-          ),
+          Icons.done,
+          size: size,
+          color: kLightGrey.withValues(alpha: 0.6),
+        ),
         ReadReceiptStatus.delivered => _DoubleCheck(
-            size: size,
-            color: kLightGrey.withValues(alpha: 0.72),
-          ),
-        ReadReceiptStatus.read => _DoubleCheck(
-            size: size,
-            color: kAudioBlue,
-          ),
+          size: size,
+          color: kLightGrey.withValues(alpha: 0.72),
+        ),
+        ReadReceiptStatus.read => _DoubleCheck(size: size, color: kAudioBlue),
       },
     );
   }
@@ -81,19 +74,14 @@ class _DoubleCheck extends StatelessWidget {
   final double size;
   final Color color;
 
-  const _DoubleCheck({
-    required this.size,
-    required this.color,
-  });
+  const _DoubleCheck({required this.size, required this.color});
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: size * 1.2,
       height: size * 0.72,
-      child: CustomPaint(
-        painter: _DoubleCheckPainter(color: color),
-      ),
+      child: CustomPaint(painter: _DoubleCheckPainter(color: color)),
     );
   }
 }

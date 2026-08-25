@@ -70,8 +70,8 @@ class AppLockService extends ChangeNotifier with WidgetsBindingObserver {
     final storedPinLength = int.tryParse(values[3] ?? '');
     _pinLength =
         storedPinLength != null && storedPinLength >= 4 && storedPinLength <= 8
-            ? storedPinLength
-            : null;
+        ? storedPinLength
+        : null;
     _locked = _enabled;
     _initialized = true;
     WidgetsBinding.instance.removeObserver(this);
@@ -100,14 +100,8 @@ class AppLockService extends ChangeNotifier with WidgetsBindingObserver {
       _storage.write(key: _key('salt'), value: base64Encode(salt)),
       _storage.write(key: _key('hash'), value: hash),
       _storage.write(key: _key('enabled'), value: 'true'),
-      _storage.write(
-        key: _key('biometric'),
-        value: useBiometrics.toString(),
-      ),
-      _storage.write(
-        key: _key('timeout'),
-        value: timeoutSeconds.toString(),
-      ),
+      _storage.write(key: _key('biometric'), value: useBiometrics.toString()),
+      _storage.write(key: _key('timeout'), value: timeoutSeconds.toString()),
       _storage.write(key: _key('pin_length'), value: pin.length.toString()),
     ]);
     _enabled = true;

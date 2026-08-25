@@ -291,9 +291,10 @@ class _AppLockScreenState extends State<_AppLockScreen>
   Widget _pinIndicator() {
     final expectedLength = AppLockService.instance.pinLength;
     final slotCount = expectedLength ?? (_pin.length > 4 ? _pin.length : 4);
-    final animation = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _shakeController, curve: Curves.easeOut),
-    );
+    final animation = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _shakeController, curve: Curves.easeOut));
     return AnimatedBuilder(
       animation: animation,
       builder: (context, child) {
@@ -301,14 +302,14 @@ class _AppLockScreenState extends State<_AppLockScreen>
         final offset = progress == 0
             ? 0.0
             : (1 - progress) *
-                8 *
-                (progress < 0.25
-                    ? 1
-                    : progress < 0.5
-                        ? -1
-                        : progress < 0.75
-                            ? 1
-                            : -1);
+                  8 *
+                  (progress < 0.25
+                      ? 1
+                      : progress < 0.5
+                      ? -1
+                      : progress < 0.75
+                      ? 1
+                      : -1);
         return Transform.translate(offset: Offset(offset, 0), child: child);
       },
       child: Row(
@@ -376,8 +377,9 @@ class _AppLockScreenState extends State<_AppLockScreen>
               width: buttonSize,
               height: buttonSize,
               child: IconButton(
-                onPressed:
-                    _working || _blocked || _pin.isEmpty ? null : _removeDigit,
+                onPressed: _working || _blocked || _pin.isEmpty
+                    ? null
+                    : _removeDigit,
                 icon: Icon(
                   Icons.backspace_rounded,
                   color: _pin.isEmpty
@@ -398,15 +400,15 @@ class _AppLockScreenState extends State<_AppLockScreen>
               height: buttonSize,
               child:
                   AppLockService.instance.pinLength == null && _pin.length >= 4
-                      ? IconButton(
-                          onPressed: _working || _blocked ? null : _verifyPin,
-                          icon: const Icon(
-                            Icons.check_rounded,
-                            color: kWhite,
-                            size: 26,
-                          ),
-                        )
-                      : null,
+                  ? IconButton(
+                      onPressed: _working || _blocked ? null : _verifyPin,
+                      icon: const Icon(
+                        Icons.check_rounded,
+                        color: kWhite,
+                        size: 26,
+                      ),
+                    )
+                  : null,
             ),
           ],
         ),
@@ -470,10 +472,12 @@ class _PinKeyState extends State<_PinKey> {
       button: true,
       label: widget.label,
       child: GestureDetector(
-        onTapDown:
-            widget.enabled ? (_) => setState(() => _pressed = true) : null,
-        onTapCancel:
-            widget.enabled ? () => setState(() => _pressed = false) : null,
+        onTapDown: widget.enabled
+            ? (_) => setState(() => _pressed = true)
+            : null,
+        onTapCancel: widget.enabled
+            ? () => setState(() => _pressed = false)
+            : null,
         onTapUp: widget.enabled
             ? (_) {
                 setState(() => _pressed = false);
@@ -491,8 +495,9 @@ class _PinKeyState extends State<_PinKey> {
             alignment: Alignment.center,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color:
-                  _pressed ? const Color(0xFF4A4D50) : const Color(0xFF303438),
+              color: _pressed
+                  ? const Color(0xFF4A4D50)
+                  : const Color(0xFF303438),
             ),
             child: Text(
               widget.label,

@@ -50,10 +50,12 @@ class TappableFileChip extends StatelessWidget {
 
     final detectedType = detectAttachmentType(event);
     final displayFileName = _eventFileName(event);
-    final resolvedIcon =
-        icon == Icons.insert_drive_file ? detectedType.icon : icon;
-    final resolvedTypeLabel =
-        typeLabel.isNotEmpty ? typeLabel : detectedType.label;
+    final resolvedIcon = icon == Icons.insert_drive_file
+        ? detectedType.icon
+        : icon;
+    final resolvedTypeLabel = typeLabel.isNotEmpty
+        ? typeLabel
+        : detectedType.label;
 
     return GestureDetector(
       onTap: onTap,
@@ -146,18 +148,42 @@ AttachmentType attachmentTypeFor({
   final extension = _fileExtension(fileName);
 
   if (normalizedMime.startsWith('image/') ||
-      const {'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif', 'svg'}
-          .contains(extension)) {
+      const {
+        'jpg',
+        'jpeg',
+        'png',
+        'gif',
+        'webp',
+        'bmp',
+        'heic',
+        'heif',
+        'svg',
+      }.contains(extension)) {
     return const AttachmentType('Photo', Icons.image);
   }
   if (normalizedMime.startsWith('video/') ||
-      const {'mp4', 'mkv', 'mov', 'avi', 'webm', '3gp', 'm4v'}
-          .contains(extension)) {
+      const {
+        'mp4',
+        'mkv',
+        'mov',
+        'avi',
+        'webm',
+        '3gp',
+        'm4v',
+      }.contains(extension)) {
     return const AttachmentType('Video', Icons.videocam);
   }
   if (normalizedMime.startsWith('audio/') ||
-      const {'mp3', 'm4a', 'aac', 'wav', 'ogg', 'opus', 'flac', 'amr'}
-          .contains(extension)) {
+      const {
+        'mp3',
+        'm4a',
+        'aac',
+        'wav',
+        'ogg',
+        'opus',
+        'flac',
+        'amr',
+      }.contains(extension)) {
     return const AttachmentType('Audio', Icons.headphones);
   }
 

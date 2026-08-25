@@ -46,9 +46,7 @@ class NewChatFAB extends StatelessWidget {
           child: InkWell(
             onTap: () => Navigator.push(
               context,
-              MaterialPageRoute(
-                builder: (_) => const UserSearchScreen(),
-              ),
+              MaterialPageRoute(builder: (_) => const UserSearchScreen()),
             ),
             child: Stack(
               fit: StackFit.expand,

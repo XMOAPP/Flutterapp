@@ -22,11 +22,7 @@ class MatrixMediaHelper {
     required this.accessToken,
   });
 
-  MatrixMediaRequest? fromMxc(
-    String? mxcUrl, {
-    int? width,
-    int? height,
-  }) {
+  MatrixMediaRequest? fromMxc(String? mxcUrl, {int? width, int? height}) {
     if (mxcUrl == null || !mxcUrl.startsWith('mxc://')) return null;
 
     final mxc = Uri.tryParse(mxcUrl);
@@ -76,10 +72,12 @@ class MatrixMediaHelper {
       );
     }
 
-    final isMatrixMedia = normalized.path.startsWith('/_matrix/client/') &&
+    final isMatrixMedia =
+        normalized.path.startsWith('/_matrix/client/') &&
         normalized.path.contains('/media/');
     final homeserver = Uri.parse(homeserverUrl);
-    final isOwnAzureChunkGateway = _sameOrigin(normalized, homeserver) &&
+    final isOwnAzureChunkGateway =
+        _sameOrigin(normalized, homeserver) &&
         normalized.path == '/auth/media/chunks/azure/download';
     return MatrixMediaRequest(
       uri: normalized,

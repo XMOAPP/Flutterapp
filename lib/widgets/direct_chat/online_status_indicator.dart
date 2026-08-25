@@ -35,10 +35,7 @@ class OnlineStatusIndicator extends StatelessWidget {
       decoration: BoxDecoration(
         color: isOnline ? kLimeGreen : kLightGrey,
         shape: BoxShape.circle,
-        border: Border.all(
-          color: kBlack,
-          width: 1.5,
-        ),
+        border: Border.all(color: kBlack, width: 1.5),
       ),
     );
   }

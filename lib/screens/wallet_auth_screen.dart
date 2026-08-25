@@ -402,8 +402,9 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
     return '${address.substring(0, 6)}...${address.substring(address.length - 4)}';
   }
 
-  String get _title =>
-      _isNewAccount && _step != 'connect' ? 'Create Wallet Account' : 'Connect Wallet';
+  String get _title => _isNewAccount && _step != 'connect'
+      ? 'Create Wallet Account'
+      : 'Connect Wallet';
 
   String get _signButtonLabel =>
       _isNewAccount ? 'Sign & Create Account' : 'Sign & Login';

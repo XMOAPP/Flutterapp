@@ -35,11 +35,7 @@ class PinnedMessagesBanner extends StatelessWidget {
         decoration: const BoxDecoration(color: Color(0xFF2C2C2E)),
         child: Row(
           children: [
-            const Icon(
-              Icons.push_pin,
-              color: kLimeGreen,
-              size: 16,
-            ),
+            const Icon(Icons.push_pin, color: kLimeGreen, size: 16),
             const SizedBox(width: 9),
             Expanded(
               child: Column(
@@ -58,21 +54,14 @@ class PinnedMessagesBanner extends StatelessWidget {
                   ),
                   Text(
                     '$senderName: $messagePreview',
-                    style: GoogleFonts.inter(
-                      color: kLightGrey,
-                      fontSize: 11.5,
-                    ),
+                    style: GoogleFonts.inter(color: kLightGrey, fontSize: 11.5),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
             ),
-            const Icon(
-              Icons.chevron_right,
-              color: kLightGrey,
-              size: 16,
-            ),
+            const Icon(Icons.chevron_right, color: kLightGrey, size: 16),
           ],
         ),
       ),

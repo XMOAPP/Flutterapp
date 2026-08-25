@@ -21,11 +21,14 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen>
   @override
   void initState() {
     super.initState();
-    _bgCtrl =
-        AnimationController(vsync: this, duration: const Duration(seconds: 4))
-          ..repeat();
+    _bgCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 4),
+    )..repeat();
     _fadeCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 800));
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
     _fadeCtrl.forward();
   }
@@ -44,9 +47,10 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen>
         pageBuilder: (_, __, ___) => const LoginScreen(),
         transitionDuration: const Duration(milliseconds: 450),
         transitionsBuilder: (_, anim, __, child) => SlideTransition(
-          position: Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero)
-              .animate(
-                  CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+          position: Tween<Offset>(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
           child: child,
         ),
       ),
@@ -60,9 +64,10 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen>
         pageBuilder: (_, __, ___) => const WalletAuthScreen(),
         transitionDuration: const Duration(milliseconds: 450),
         transitionsBuilder: (_, anim, __, child) => SlideTransition(
-          position: Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero)
-              .animate(
-                  CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+          position: Tween<Offset>(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
           child: child,
         ),
       ),
@@ -83,10 +88,7 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen>
             animation: _bgCtrl,
             builder: (_, __) {
               final t = _bgCtrl.value;
-              return CustomPaint(
-                painter: _OrbPainter(t),
-                size: size,
-              );
+              return CustomPaint(painter: _OrbPainter(t), size: size);
             },
           ),
 
@@ -113,8 +115,9 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen>
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final shortestSide = MediaQuery.sizeOf(context).shortestSide;
-                  final logoSize =
-                      (shortestSide * 0.44).clamp(120.0, 160.0).toDouble();
+                  final logoSize = (shortestSide * 0.44)
+                      .clamp(120.0, 160.0)
+                      .toDouble();
                   final horizontalPadding = (constraints.maxWidth * 0.08)
                       .clamp(20.0, 28.0)
                       .toDouble();
@@ -123,11 +126,13 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen>
                       .toDouble();
 
                   return SingleChildScrollView(
-                    padding:
-                        EdgeInsets.symmetric(horizontal: horizontalPadding),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: horizontalPadding,
+                    ),
                     child: ConstrainedBox(
-                      constraints:
-                          BoxConstraints(minHeight: constraints.maxHeight),
+                      constraints: BoxConstraints(
+                        minHeight: constraints.maxHeight,
+                      ),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -142,8 +147,9 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen>
 
                           // ── Option buttons ───────────────────────────────────────
                           Padding(
-                            padding:
-                                EdgeInsets.symmetric(horizontal: buttonPadding),
+                            padding: EdgeInsets.symmetric(
+                              horizontal: buttonPadding,
+                            ),
                             child: Column(
                               children: [
                                 _AuthButton(
@@ -220,7 +226,7 @@ class _AuthButtonState extends State<_AuthButton> {
                       blurRadius: 16,
                       spreadRadius: 1,
                       offset: const Offset(0, 4),
-                    )
+                    ),
                   ]
                 : [],
           ),

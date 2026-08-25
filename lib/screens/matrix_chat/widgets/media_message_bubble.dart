@@ -65,8 +65,9 @@ class MediaMessageBubble extends StatelessWidget {
     final mediaBorderRadius = BorderRadius.circular(isImage ? 20 : 16);
 
     return Column(
-      crossAxisAlignment:
-          isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      crossAxisAlignment: isMe
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
       children: [
         if (!isMe)
           Padding(
@@ -152,10 +153,7 @@ class MediaMessageBubble extends StatelessWidget {
               bottom: 8,
               right: 8,
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 6,
-                  vertical: 3,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                 decoration: BoxDecoration(
                   color: Colors.black.withValues(alpha: 0.6),
                   borderRadius: BorderRadius.circular(10),
@@ -213,10 +211,7 @@ class MediaMessageBubble extends StatelessWidget {
             bottomRight: Radius.circular(isMe ? 4 : 18),
           ),
         ),
-        child: _CaptionText(
-          caption: caption,
-          style: textStyle,
-        ),
+        child: _CaptionText(caption: caption, style: textStyle),
       ),
     );
   }
@@ -233,10 +228,7 @@ class MediaMessageBubble extends StatelessWidget {
             fontWeight: FontWeight.w500,
           ),
         ),
-        if (isMe) ...[
-          const SizedBox(width: 4),
-          buildMessageStatus(event),
-        ],
+        if (isMe) ...[const SizedBox(width: 4), buildMessageStatus(event)],
         if (isEdited) ...[
           const SizedBox(width: 4),
           Text(
@@ -257,10 +249,7 @@ class _CaptionText extends StatelessWidget {
   final String caption;
   final TextStyle style;
 
-  const _CaptionText({
-    required this.caption,
-    required this.style,
-  });
+  const _CaptionText({required this.caption, required this.style});
 
   @override
   Widget build(BuildContext context) {
@@ -345,9 +334,7 @@ class _MediaMessageMenu extends StatelessWidget {
       color: const Color(0xFF262728),
       elevation: 8,
       constraints: const BoxConstraints(minWidth: 168),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: const SizedBox(
         width: 24,
         height: 24,
@@ -415,10 +402,7 @@ class _MediaMessageMenu extends StatelessWidget {
             child: Icon(icon, color: color, size: 20),
           ),
           const SizedBox(width: 12),
-          Text(
-            label,
-            style: GoogleFonts.inter(color: color, fontSize: 14),
-          ),
+          Text(label, style: GoogleFonts.inter(color: color, fontSize: 14)),
         ],
       ),
     );

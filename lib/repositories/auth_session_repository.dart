@@ -25,11 +25,10 @@ class AuthSessionRepository {
     Uint8List? avatarBytes,
     String avatarFileName = 'avatar.jpg',
     bool removeAvatar = false,
-  }) =>
-      matrixService.sessionRepository.updateProfile(
-        displayName: displayName,
-        avatarBytes: avatarBytes,
-        avatarFileName: avatarFileName,
-        removeAvatar: removeAvatar,
-      );
+  }) => matrixService.sessionRepository.updateProfile(
+    displayName: displayName,
+    avatarBytes: avatarBytes,
+    avatarFileName: avatarFileName,
+    removeAvatar: removeAvatar,
+  );
 }

@@ -29,10 +29,10 @@ class StoryVideoPlayer extends StatefulWidget {
     this.enableTapToPause = true,
     this.onProgress,
     this.onCompleted,
-  })  : videoBytes = bytes,
-        videoUrl = null,
-        videoFilePath = null,
-        httpHeaders = const <String, String>{};
+  }) : videoBytes = bytes,
+       videoUrl = null,
+       videoFilePath = null,
+       httpHeaders = const <String, String>{};
 
   const StoryVideoPlayer.file({
     super.key,
@@ -43,10 +43,10 @@ class StoryVideoPlayer extends StatefulWidget {
     this.enableTapToPause = true,
     this.onProgress,
     this.onCompleted,
-  })  : videoBytes = null,
-        videoUrl = null,
-        videoFilePath = filePath,
-        httpHeaders = const <String, String>{};
+  }) : videoBytes = null,
+       videoUrl = null,
+       videoFilePath = filePath,
+       httpHeaders = const <String, String>{};
 
   const StoryVideoPlayer.url({
     super.key,
@@ -58,9 +58,9 @@ class StoryVideoPlayer extends StatefulWidget {
     this.enableTapToPause = true,
     this.onProgress,
     this.onCompleted,
-  })  : videoBytes = null,
-        videoUrl = url,
-        videoFilePath = null;
+  }) : videoBytes = null,
+       videoUrl = url,
+       videoFilePath = null;
 
   @override
   State<StoryVideoPlayer> createState() => _StoryVideoPlayerState();
@@ -186,7 +186,8 @@ class _StoryVideoPlayerState extends State<StoryVideoPlayer> {
     final progress = position.inMilliseconds / duration.inMilliseconds;
     widget.onProgress?.call(progress.clamp(0.0, 1.0));
 
-    final isComplete = !widget.looping &&
+    final isComplete =
+        !widget.looping &&
         position.inMilliseconds >= duration.inMilliseconds - 150;
     if (isComplete && !_completedNotified) {
       _completedNotified = true;
@@ -294,10 +295,7 @@ class _StoryVideoPlayerState extends State<StoryVideoPlayer> {
         children: [
           const Icon(Icons.play_circle_outline, color: kLimeGreen, size: 64),
           const SizedBox(height: 12),
-          Text(
-            message,
-            style: GoogleFonts.inter(color: kWhite, fontSize: 14),
-          ),
+          Text(message, style: GoogleFonts.inter(color: kWhite, fontSize: 14)),
         ],
       ),
     );

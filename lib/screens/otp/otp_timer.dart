@@ -10,11 +10,7 @@ class OtpTimer extends StatelessWidget {
   final int remaining;
   final VoidCallback onResend;
 
-  const OtpTimer({
-    super.key,
-    required this.remaining,
-    required this.onResend,
-  });
+  const OtpTimer({super.key, required this.remaining, required this.onResend});
 
   @override
   Widget build(BuildContext context) {

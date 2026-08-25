@@ -60,8 +60,8 @@ class StreamingPlaybackDecisionService {
   const StreamingPlaybackDecisionService({
     required MatrixMediaHelper mediaHelper,
     bool isWeb = false,
-  })  : _mediaHelper = mediaHelper,
-        _isWeb = isWeb;
+  }) : _mediaHelper = mediaHelper,
+       _isWeb = isWeb;
 
   final MatrixMediaHelper _mediaHelper;
   final bool _isWeb;
@@ -109,9 +109,7 @@ class StreamingPlaybackDecisionService {
         quality: quality,
       );
     } catch (e) {
-      return XmoStreamingPlaybackDecision.matrixFallback(
-        'invalid-xmo-stream',
-      );
+      return XmoStreamingPlaybackDecision.matrixFallback('invalid-xmo-stream');
     }
   }
 

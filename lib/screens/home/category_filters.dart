@@ -16,18 +16,24 @@ class CategoryFilters extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     CallHistoryService().ensureLoaded();
-    return Selector3<ChatFilterProvider, MatrixProvider, StoryProvider,
-        FilterData>(
+    return Selector3<
+      ChatFilterProvider,
+      MatrixProvider,
+      StoryProvider,
+      FilterData
+    >(
       selector: (_, filterProvider, matrixProvider, storyProvider) {
         final activeRooms = matrixProvider.rooms.where((room) {
-          final active = room.membership == Membership.join ||
+          final active =
+              room.membership == Membership.join ||
               room.membership == Membership.invite;
           return active && !ChatArchiveService.isArchived(room);
         }).toList();
 
         // Count stories (my stories + contact stories with unviewed)
         final myUserId = matrixProvider.userId ?? '';
-        final storiesCount = (storyProvider.hasMyStories ? 1 : 0) +
+        final storiesCount =
+            (storyProvider.hasMyStories ? 1 : 0) +
             storyProvider.contactStories
                 .where((us) => !us.allViewedBy(myUserId))
                 .length;
@@ -54,45 +60,45 @@ class CategoryFilters extends StatelessWidget {
                       label: 'All',
                       badge: data.allCount.toString(),
                       isSelected: data.filter == ChatFilter.all,
-                      onTap: () => context
-                          .read<ChatFilterProvider>()
-                          .setFilter(ChatFilter.all),
+                      onTap: () => context.read<ChatFilterProvider>().setFilter(
+                        ChatFilter.all,
+                      ),
                     ),
                     const SizedBox(width: 8),
                     FilterChip(
                       label: 'Stories',
                       badge: data.storiesCount.toString(),
                       isSelected: data.filter == ChatFilter.stories,
-                      onTap: () => context
-                          .read<ChatFilterProvider>()
-                          .setFilter(ChatFilter.stories),
+                      onTap: () => context.read<ChatFilterProvider>().setFilter(
+                        ChatFilter.stories,
+                      ),
                     ),
                     const SizedBox(width: 8),
                     FilterChip(
                       label: 'Groups',
                       badge: data.groupCount.toString(),
                       isSelected: data.filter == ChatFilter.groups,
-                      onTap: () => context
-                          .read<ChatFilterProvider>()
-                          .setFilter(ChatFilter.groups),
+                      onTap: () => context.read<ChatFilterProvider>().setFilter(
+                        ChatFilter.groups,
+                      ),
                     ),
                     const SizedBox(width: 8),
                     FilterChip(
                       label: 'Channels',
                       badge: data.channelCount.toString(),
                       isSelected: data.filter == ChatFilter.channels,
-                      onTap: () => context
-                          .read<ChatFilterProvider>()
-                          .setFilter(ChatFilter.channels),
+                      onTap: () => context.read<ChatFilterProvider>().setFilter(
+                        ChatFilter.channels,
+                      ),
                     ),
                     const SizedBox(width: 8),
                     FilterChip(
                       label: 'Calls',
                       badge: calls.length.toString(),
                       isSelected: data.filter == ChatFilter.calls,
-                      onTap: () => context
-                          .read<ChatFilterProvider>()
-                          .setFilter(ChatFilter.calls),
+                      onTap: () => context.read<ChatFilterProvider>().setFilter(
+                        ChatFilter.calls,
+                      ),
                     ),
                   ],
                 ),
