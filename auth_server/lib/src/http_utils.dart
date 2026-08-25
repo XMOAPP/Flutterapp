@@ -24,11 +24,7 @@ Future<Map<String, Object?>> readJsonObject(
   return decoded.cast<String, Object?>();
 }
 
-void sendJson(
-  HttpRequest request,
-  int statusCode,
-  Map<String, Object?> body,
-) {
+void sendJson(HttpRequest request, int statusCode, Map<String, Object?> body) {
   request.response
     ..statusCode = statusCode
     ..headers.contentType = ContentType.json

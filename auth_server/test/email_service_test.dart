@@ -58,20 +58,16 @@ void main() {
     await service.sendOtpEmail(email: 'user@example.com', otp: '123456');
 
     expect(
-        capturedRequest.url.toString(), 'https://api.brevo.com/v3/smtp/email');
+      capturedRequest.url.toString(),
+      'https://api.brevo.com/v3/smtp/email',
+    );
     expect(capturedRequest.headers['api-key'], 'test-key');
     expect(capturedRequest.headers['content-type'], 'application/json');
     final body = jsonDecode(capturedRequest.body) as Map<String, dynamic>;
-    expect(body['sender'], {
-      'name': 'XMO',
-      'email': 'noreply@xmo.dpdns.org',
-    });
-    expect(body['replyTo'], {
-      'name': 'XMO',
-      'email': 'support@xmo.dpdns.org',
-    });
+    expect(body['sender'], {'name': 'XMO', 'email': 'noreply@xmo.dpdns.org'});
+    expect(body['replyTo'], {'name': 'XMO', 'email': 'support@xmo.dpdns.org'});
     expect(body['to'], [
-      {'email': 'user@example.com'}
+      {'email': 'user@example.com'},
     ]);
     expect(body['subject'], 'Your XMO verification code');
     expect(body['htmlContent'].toString(), contains('123456'));
@@ -83,48 +79,52 @@ void main() {
     expect(body['tags'], ['otp']);
   });
 
-  test('sendGenericEmail throws clear error when provider is not configured',
-      () {
-    final service = EmailService(
-      config: EmailConfig.fromEnvironment({'EMAIL_PROVIDER': 'brevo'}),
-      httpClient: MockClient((request) async => http.Response('{}', 201)),
-    );
+  test(
+    'sendGenericEmail throws clear error when provider is not configured',
+    () {
+      final service = EmailService(
+        config: EmailConfig.fromEnvironment({'EMAIL_PROVIDER': 'brevo'}),
+        httpClient: MockClient((request) async => http.Response('{}', 201)),
+      );
 
-    expect(
-      () => service.sendGenericEmail(
-        to: 'user@example.com',
-        subject: 'Test',
-        htmlContent: '<p>Test</p>',
-      ),
-      throwsA(isA<EmailDeliveryException>()),
-    );
-  });
-
-  test('sendGenericEmail fails without exposing Brevo API key in error',
-      () async {
-    final service = EmailService(
-      config: EmailConfig.fromEnvironment({
-        'EMAIL_PROVIDER': 'brevo',
-        'BREVO_API_KEY': 'secret-test-key',
-      }),
-      httpClient: MockClient((request) async {
-        return http.Response('{"message":"bad key"}', 401);
-      }),
-      requestTimeout: const Duration(seconds: 1),
-      maxAttempts: 1,
-    );
-
-    await expectLater(
-      service.sendGenericEmail(
-        to: 'user@example.com',
-        subject: 'Test',
-        htmlContent: '<p>Test</p>',
-      ),
-      throwsA(
-        predicate<EmailDeliveryException>(
-          (error) => !error.toString().contains('secret-test-key'),
+      expect(
+        () => service.sendGenericEmail(
+          to: 'user@example.com',
+          subject: 'Test',
+          htmlContent: '<p>Test</p>',
         ),
-      ),
-    );
-  });
+        throwsA(isA<EmailDeliveryException>()),
+      );
+    },
+  );
+
+  test(
+    'sendGenericEmail fails without exposing Brevo API key in error',
+    () async {
+      final service = EmailService(
+        config: EmailConfig.fromEnvironment({
+          'EMAIL_PROVIDER': 'brevo',
+          'BREVO_API_KEY': 'secret-test-key',
+        }),
+        httpClient: MockClient((request) async {
+          return http.Response('{"message":"bad key"}', 401);
+        }),
+        requestTimeout: const Duration(seconds: 1),
+        maxAttempts: 1,
+      );
+
+      await expectLater(
+        service.sendGenericEmail(
+          to: 'user@example.com',
+          subject: 'Test',
+          htmlContent: '<p>Test</p>',
+        ),
+        throwsA(
+          predicate<EmailDeliveryException>(
+            (error) => !error.toString().contains('secret-test-key'),
+          ),
+        ),
+      );
+    },
+  );
 }

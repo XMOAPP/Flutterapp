@@ -10,11 +10,9 @@ Future<void> _sendOtp(HttpRequest request) async {
   }
 
   if (!_emailService.isConfigured) {
-    await _json(
-      request,
-      HttpStatus.internalServerError,
-      {'error': 'Email provider is not configured'},
-    );
+    await _json(request, HttpStatus.internalServerError, {
+      'error': 'Email provider is not configured',
+    });
     return;
   }
 
@@ -27,11 +25,7 @@ Future<void> _sendOtp(HttpRequest request) async {
   try {
     await _emailService.sendOtpEmail(email: email, otp: otp);
   } on EmailDeliveryException catch (error) {
-    await _json(
-      request,
-      HttpStatus.badGateway,
-      {'error': error.message},
-    );
+    await _json(request, HttpStatus.badGateway, {'error': error.message});
     return;
   }
   logInfo('otp_sent', {'emailHash': email.hashCode});
@@ -59,11 +53,9 @@ Future<void> _verifyOtp(HttpRequest request) async {
   record.attempts += 1;
   if (record.attempts > _maxAttempts) {
     _otpStore.remove(email);
-    await _json(
-      request,
-      HttpStatus.tooManyRequests,
-      {'error': 'Too many OTP attempts'},
-    );
+    await _json(request, HttpStatus.tooManyRequests, {
+      'error': 'Too many OTP attempts',
+    });
     return;
   }
 
@@ -89,8 +81,7 @@ Future<void> _verifyOtp(HttpRequest request) async {
 SecureLoginEnrollmentProofClaim? _claimEnrollmentProof({
   required String proof,
   required String email,
-}) =>
-    _secureLoginEnrollmentProofs.claim(proof: proof, email: email);
+}) => _secureLoginEnrollmentProofs.claim(proof: proof, email: email);
 
 void _restoreEnrollmentProof(
   String proof,
@@ -115,12 +106,11 @@ bool _wasEnrollmentProofCompleted({
   required String proof,
   required String email,
   required String username,
-}) =>
-    _secureLoginEnrollmentProofs.wasCompleted(
-      proof: proof,
-      email: email,
-      username: username,
-    );
+}) => _secureLoginEnrollmentProofs.wasCompleted(
+  proof: proof,
+  email: email,
+  username: username,
+);
 
 String _normalizeEmail(Object? value) =>
     value?.toString().trim().toLowerCase() ?? '';
@@ -133,8 +123,5 @@ class _OtpRecord {
   final DateTime expiresAt;
   int attempts = 0;
 
-  _OtpRecord({
-    required this.code,
-    required this.expiresAt,
-  });
+  _OtpRecord({required this.code, required this.expiresAt});
 }

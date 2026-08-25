@@ -20,14 +20,8 @@ void main() {
   });
 
   test('matches external account deletion routes', () {
-    expect(
-      module.handlesExternalRequest('/account-deletion/request'),
-      isTrue,
-    );
-    expect(
-      module.handlesExternalConfirm('/account-deletion/confirm'),
-      isTrue,
-    );
+    expect(module.handlesExternalRequest('/account-deletion/request'), isTrue);
+    expect(module.handlesExternalConfirm('/account-deletion/confirm'), isTrue);
     expect(module.handlesExternalRequest('/account-deletion/confirm'), isFalse);
   });
 }

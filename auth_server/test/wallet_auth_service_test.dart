@@ -55,9 +55,9 @@ void main() {
     final token = service.issueMatrixLoginToken('alice');
     final parts = token.split('.');
     expect(parts, hasLength(3));
-    final claims = jsonDecode(
-      utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
-    ) as Map<String, dynamic>;
+    final claims =
+        jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))))
+            as Map<String, dynamic>;
     expect(claims['sub'], 'alice');
     expect(claims['iss'], 'xmo-wallet-auth');
     expect(claims['aud'], 'xmo-matrix');
@@ -76,10 +76,9 @@ void main() {
       ),
     );
     final ed25519 = Ed25519();
-    final keyPair = await ed25519.newKeyPairFromSeed(List<int>.generate(
-      32,
-      (index) => index + 1,
-    ));
+    final keyPair = await ed25519.newKeyPairFromSeed(
+      List<int>.generate(32, (index) => index + 1),
+    );
     final publicKey = await keyPair.extractPublicKey();
     final address = base58.encode(Uint8List.fromList(publicKey.bytes));
 
@@ -104,7 +103,6 @@ void main() {
       mode: 'login',
       walletType: WalletAuthTypes.solana,
     );
-
   });
 
   test('requires a strong server secret', () {

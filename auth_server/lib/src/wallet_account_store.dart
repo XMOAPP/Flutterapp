@@ -93,10 +93,7 @@ class WalletAccountStore {
             ${includePending ? '' : "AND status = 'active'"}
           LIMIT 1
         '''),
-        parameters: {
-          'walletType': walletType,
-          'walletAddress': walletAddress,
-        },
+        parameters: {'walletType': walletType, 'walletAddress': walletAddress},
       );
       if (result.isEmpty) return null;
       return WalletAccount.fromColumns(result.first.toColumnMap());
@@ -266,10 +263,7 @@ class WalletAccountStore {
             AND wallet_address = @walletAddress
             AND status = 'pending'
         '''),
-        parameters: {
-          'walletType': walletType,
-          'walletAddress': walletAddress,
-        },
+        parameters: {'walletType': walletType, 'walletAddress': walletAddress},
       );
     } finally {
       await connection.close();
@@ -282,12 +276,14 @@ class WalletAccountStore {
       await connection.runTx((transaction) async {
         await transaction.execute(
           Sql.named(
-              'DELETE FROM xmo_wallet_challenges WHERE username = @username'),
+            'DELETE FROM xmo_wallet_challenges WHERE username = @username',
+          ),
           parameters: {'username': username},
         );
         await transaction.execute(
           Sql.named(
-              'DELETE FROM xmo_wallet_accounts WHERE username = @username'),
+            'DELETE FROM xmo_wallet_accounts WHERE username = @username',
+          ),
           parameters: {'username': username},
         );
       });
@@ -342,13 +338,13 @@ class WalletAccount {
   bool get isActive => status == 'active';
 
   Map<String, Object?> toParameters() => {
-        'walletType': walletType,
-        'walletAddress': walletAddress,
-        'username': username,
-        'matrixUserId': matrixUserId,
-        'chainId': chainId,
-        'createdAt': createdAt,
-      };
+    'walletType': walletType,
+    'walletAddress': walletAddress,
+    'username': username,
+    'matrixUserId': matrixUserId,
+    'chainId': chainId,
+    'createdAt': createdAt,
+  };
 
   factory WalletAccount.fromColumns(Map<String, dynamic> columns) {
     return WalletAccount(
@@ -387,15 +383,15 @@ class WalletStoredChallenge {
   final DateTime? consumedAt;
 
   Map<String, Object?> toParameters() => {
-        'nonce': nonce,
-        'username': username,
-        'walletType': walletType,
-        'walletAddress': walletAddress,
-        'chainId': chainId,
-        'mode': mode,
-        'message': message,
-        'expiresAt': expiresAt,
-      };
+    'nonce': nonce,
+    'username': username,
+    'walletType': walletType,
+    'walletAddress': walletAddress,
+    'chainId': chainId,
+    'mode': mode,
+    'message': message,
+    'expiresAt': expiresAt,
+  };
 
   factory WalletStoredChallenge.fromColumns(Map<String, dynamic> columns) {
     return WalletStoredChallenge(

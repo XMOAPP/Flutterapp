@@ -1,7 +1,8 @@
 part of xmo_auth_server;
 
-final _userDirectoryConfig =
-    UserDirectoryConfig.fromEnvironment(Platform.environment);
+final _userDirectoryConfig = UserDirectoryConfig.fromEnvironment(
+  Platform.environment,
+);
 final _userDirectoryMemoryStore = <String, _UserDirectoryEntry>{};
 
 Future<void> _upsertUserDirectoryEntry(HttpRequest request) async {
@@ -43,7 +44,8 @@ Future<void> _upsertUserDirectoryEntry(HttpRequest request) async {
     _userDirectoryCleanText(body['displayName']) ??
         _userDirectoryCleanText(body['display_name']),
   );
-  final avatarUrl = _userDirectoryCleanText(body['avatarUrl']) ??
+  final avatarUrl =
+      _userDirectoryCleanText(body['avatarUrl']) ??
       _userDirectoryCleanText(body['avatar_url']);
 
   final entries = await _readUserDirectoryEntries();
@@ -235,10 +237,12 @@ class UserDirectoryConfig {
   });
 
   factory UserDirectoryConfig.fromEnvironment(Map<String, String> env) {
-    final homeserverUrl = env['XMO_HOMESERVER_URL'] ??
+    final homeserverUrl =
+        env['XMO_HOMESERVER_URL'] ??
         env['MATRIX_HOMESERVER_URL'] ??
         'http://synapse:8008';
-    final serverName = env['XMO_MATRIX_SERVER_NAME'] ??
+    final serverName =
+        env['XMO_MATRIX_SERVER_NAME'] ??
         env['MATRIX_SERVER_NAME'] ??
         'localhost';
     final explicitDataFile = env['XMO_USER_DIRECTORY_DATA_FILE'];
@@ -290,7 +294,8 @@ class _UserDirectoryEntry {
       ),
       avatarUrl: json['avatarUrl']?.toString(),
       isPublic: json['public'] == true,
-      updatedAt: DateTime.tryParse(json['updatedAt']?.toString() ?? '') ??
+      updatedAt:
+          DateTime.tryParse(json['updatedAt']?.toString() ?? '') ??
           DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
     );
   }
@@ -303,17 +308,17 @@ class _UserDirectoryEntry {
   final DateTime updatedAt;
 
   Map<String, dynamic> toJson() => {
-        'userId': userId,
-        'localpart': localpart,
-        'displayName': displayName,
-        'avatarUrl': avatarUrl,
-        'public': isPublic,
-        'updatedAt': updatedAt.toIso8601String(),
-      };
+    'userId': userId,
+    'localpart': localpart,
+    'displayName': displayName,
+    'avatarUrl': avatarUrl,
+    'public': isPublic,
+    'updatedAt': updatedAt.toIso8601String(),
+  };
 
   Map<String, dynamic> toPublicJson() => {
-        'userId': userId,
-        'displayName': displayName,
-        'avatarUrl': avatarUrl,
-      };
+    'userId': userId,
+    'displayName': displayName,
+    'avatarUrl': avatarUrl,
+  };
 }

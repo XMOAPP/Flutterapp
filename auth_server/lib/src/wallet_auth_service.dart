@@ -22,11 +22,14 @@ class WalletAuthConfig {
       jwtSecret: env['XMO_WALLET_JWT_SECRET'] ?? '',
       jwtIssuer: env['XMO_WALLET_JWT_ISSUER'] ?? 'xmo-wallet-auth',
       jwtAudience: env['XMO_WALLET_JWT_AUDIENCE'] ?? 'xmo-matrix',
-      domain: env['XMO_WALLET_AUTH_DOMAIN'] ??
+      domain:
+          env['XMO_WALLET_AUTH_DOMAIN'] ??
           'xmo-matrix.centralindia.cloudapp.azure.com',
-      uri: env['XMO_WALLET_AUTH_URI'] ??
+      uri:
+          env['XMO_WALLET_AUTH_URI'] ??
           'https://xmo-matrix.centralindia.cloudapp.azure.com',
-      statement: env['XMO_WALLET_AUTH_STATEMENT'] ??
+      statement:
+          env['XMO_WALLET_AUTH_STATEMENT'] ??
           'Sign in to XMO Messenger. This request will not trigger a blockchain transaction.',
     );
   }
@@ -49,8 +52,8 @@ class WalletAuthService {
     required this.config,
     DateTime Function()? now,
     Random? random,
-  })  : _now = now ?? (() => DateTime.now().toUtc()),
-        _random = random ?? Random.secure();
+  }) : _now = now ?? (() => DateTime.now().toUtc()),
+       _random = random ?? Random.secure();
 
   final WalletAuthConfig config;
   final DateTime Function() _now;
@@ -67,15 +70,18 @@ class WalletAuthService {
   }) {
     if (!config.isConfigured) {
       throw const WalletAuthException(
-          'Wallet authentication is not configured');
+        'Wallet authentication is not configured',
+      );
     }
 
     final cleanUsername = normalizeUsername(username);
     final cleanWalletType = normalizeWalletType(walletType);
     final cleanAddress = normalizeAddress(address, walletType: cleanWalletType);
     final cleanMode = mode == 'create' ? 'create' : 'login';
-    final cleanChainId =
-        _normalizeChainId(chainId, walletType: cleanWalletType);
+    final cleanChainId = _normalizeChainId(
+      chainId,
+      walletType: cleanWalletType,
+    );
     final issuedAt = _now();
     final expiresAt = issuedAt.add(challengeTtl);
     final nonce = _nonce();
@@ -112,7 +118,8 @@ class WalletAuthService {
   }) async {
     if (!config.isConfigured) {
       throw const WalletAuthException(
-          'Wallet authentication is not configured');
+        'Wallet authentication is not configured',
+      );
     }
 
     final cleanUsername = normalizeUsername(username);
@@ -137,7 +144,8 @@ class WalletAuthService {
       );
       if (recoveredAddress != cleanAddress) {
         throw const WalletAuthException(
-            'Wallet signature verification failed.');
+          'Wallet signature verification failed.',
+        );
       }
     } else if (cleanWalletType == WalletAuthTypes.solana) {
       final verified = await verifySolanaSignature(
@@ -147,7 +155,8 @@ class WalletAuthService {
       );
       if (!verified) {
         throw const WalletAuthException(
-            'Wallet signature verification failed.');
+          'Wallet signature verification failed.',
+        );
       }
     }
   }
@@ -165,7 +174,8 @@ class WalletAuthService {
       'iss': config.jwtIssuer,
       'aud': config.jwtAudience,
       'iat': now.millisecondsSinceEpoch ~/ 1000,
-      'nbf': now.subtract(const Duration(seconds: 2)).millisecondsSinceEpoch ~/
+      'nbf':
+          now.subtract(const Duration(seconds: 2)).millisecondsSinceEpoch ~/
           1000,
       'exp': now.add(loginTokenTtl).millisecondsSinceEpoch ~/ 1000,
       'jti': _nonce(),
@@ -173,8 +183,10 @@ class WalletAuthService {
     final encodedHeader = _base64UrlJson(header);
     final encodedClaims = _base64UrlJson(claims);
     final signingInput = '$encodedHeader.$encodedClaims';
-    final signature = Hmac(sha256, utf8.encode(config.jwtSecret))
-        .convert(utf8.encode(signingInput));
+    final signature = Hmac(
+      sha256,
+      utf8.encode(config.jwtSecret),
+    ).convert(utf8.encode(signingInput));
     return '$signingInput.${base64UrlEncode(signature.bytes).replaceAll('=', '')}';
   }
 
@@ -243,8 +255,9 @@ class WalletAuthService {
         v,
       );
       final messageBytes = Uint8List.fromList(utf8.encode(message));
-      final prefix =
-          utf8.encode('\u0019Ethereum Signed Message:\n${messageBytes.length}');
+      final prefix = utf8.encode(
+        '\u0019Ethereum Signed Message:\n${messageBytes.length}',
+      );
       final hash = keccak256(Uint8List.fromList([...prefix, ...messageBytes]));
       final recoveredPublicKey = _padLeft(ecRecover(hash, sig), 64);
       final recoveredAddress = publicKeyToAddress(recoveredPublicKey);
@@ -309,8 +322,9 @@ class WalletAuthService {
     required DateTime issuedAt,
     required DateTime expiresAt,
   }) {
-    final accountLabel =
-        walletType == WalletAuthTypes.solana ? 'Solana' : 'Ethereum';
+    final accountLabel = walletType == WalletAuthTypes.solana
+        ? 'Solana'
+        : 'Ethereum';
     return '${config.domain} wants you to sign in with your $accountLabel account:\n'
         '$address\n\n'
         '${config.statement}\n\n'
@@ -379,16 +393,16 @@ class WalletAuthChallenge {
   final DateTime expiresAt;
 
   Map<String, dynamic> toJson() => {
-        'success': true,
-        'username': username,
-        'address': address,
-        'mode': mode,
-        'walletType': walletType,
-        'chainId': chainId,
-        'nonce': nonce,
-        'message': message,
-        'expiresAt': expiresAt.toIso8601String(),
-      };
+    'success': true,
+    'username': username,
+    'address': address,
+    'mode': mode,
+    'walletType': walletType,
+    'chainId': chainId,
+    'nonce': nonce,
+    'message': message,
+    'expiresAt': expiresAt.toIso8601String(),
+  };
 }
 
 class WalletAuthException implements Exception {
