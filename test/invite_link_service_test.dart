@@ -15,17 +15,12 @@ void main() {
     });
 
     test('extracts tokens from the XMO fallback scheme', () {
-      expect(
-        InviteLinkService.extractSecureToken('xmo://join/$token'),
-        token,
-      );
+      expect(InviteLinkService.extractSecureToken('xmo://join/$token'), token);
     });
 
     test('rejects another host and malformed tokens', () {
       expect(
-        InviteLinkService.extractSecureToken(
-          'https://example.com/join/$token',
-        ),
+        InviteLinkService.extractSecureToken('https://example.com/join/$token'),
         isNull,
       );
       expect(
@@ -50,7 +45,9 @@ void main() {
         isTrue,
       );
       expect(
-          service.isInviteLink('https://example.com/not-an-invite'), isFalse);
+        service.isInviteLink('https://example.com/not-an-invite'),
+        isFalse,
+      );
     });
   });
 }

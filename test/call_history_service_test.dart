@@ -41,35 +41,34 @@ void main() {
     expect(restored.duration, const Duration(minutes: 2, seconds: 5));
   });
 
-  test('call subtitles distinguish missed, rejected, direct, and group calls',
-      () {
-    expect(
-      entry(status: CallHistoryStatus.missed).subtitle,
-      'Missed voice call',
-    );
-    expect(
-      entry(status: CallHistoryStatus.rejected).subtitle,
-      'Rejected voice call',
-    );
-    expect(
-      entry(
-        kind: CallHistoryKind.group,
-        direction: CallHistoryDirection.outgoing,
-        status: CallHistoryStatus.rejected,
-        video: true,
-      ).subtitle,
-      'Declined group video call',
-    );
-  });
+  test(
+    'call subtitles distinguish missed, rejected, direct, and group calls',
+    () {
+      expect(
+        entry(status: CallHistoryStatus.missed).subtitle,
+        'Missed voice call',
+      );
+      expect(
+        entry(status: CallHistoryStatus.rejected).subtitle,
+        'Rejected voice call',
+      );
+      expect(
+        entry(
+          kind: CallHistoryKind.group,
+          direction: CallHistoryDirection.outgoing,
+          status: CallHistoryStatus.rejected,
+          video: true,
+        ).subtitle,
+        'Declined group video call',
+      );
+    },
+  );
 
   test('call subtitles include positive duration', () {
     expect(
       entry(duration: const Duration(minutes: 2, seconds: 5)).subtitle,
       contains('02:05'),
     );
-    expect(
-      entry(duration: Duration.zero).subtitle,
-      isNot(contains('00:00')),
-    );
+    expect(entry(duration: Duration.zero).subtitle, isNot(contains('00:00')));
   });
 }

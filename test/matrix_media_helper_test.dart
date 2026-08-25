@@ -8,8 +8,7 @@ void main() {
       accessToken: 'secret-token',
     );
 
-    test('builds authenticated download requests without token query params',
-        () {
+    test('builds authenticated download requests without token query params', () {
       final request = helper.fromMxc('mxc://example.org/media-id');
 
       expect(request, isNotNull);

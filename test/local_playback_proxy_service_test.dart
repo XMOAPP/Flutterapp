@@ -53,19 +53,20 @@ void main() {
     });
 
     test('serves the full decrypted media body', () async {
-      final handle = await _openHandle(
-        proxy,
-        tempRoot,
-        encryptedMediaHelper,
-        ['abcd', 'efgh', 'ij'],
-      );
+      final handle = await _openHandle(proxy, tempRoot, encryptedMediaHelper, [
+        'abcd',
+        'efgh',
+        'ij',
+      ]);
 
       final response = await _get(handle.uri);
 
       expect(response.statusCode, HttpStatus.ok);
       expect(response.headers.value(HttpHeaders.acceptRangesHeader), 'bytes');
       expect(
-          response.headers.value(HttpHeaders.cacheControlHeader), 'no-store');
+        response.headers.value(HttpHeaders.cacheControlHeader),
+        'no-store',
+      );
       expect(response.headers.contentLength, 10);
       expect(utf8.decode(response.body), 'abcdefghij');
 
@@ -73,12 +74,9 @@ void main() {
     });
 
     test('uses an unguessable local stream token', () async {
-      final handle = await _openHandle(
-        proxy,
-        tempRoot,
-        encryptedMediaHelper,
-        ['abcd'],
-      );
+      final handle = await _openHandle(proxy, tempRoot, encryptedMediaHelper, [
+        'abcd',
+      ]);
 
       final token = handle.uri.pathSegments.last;
       expect(token, hasLength(43));
@@ -89,12 +87,11 @@ void main() {
     });
 
     test('serves partial byte ranges across chunk boundaries', () async {
-      final handle = await _openHandle(
-        proxy,
-        tempRoot,
-        encryptedMediaHelper,
-        ['abcd', 'efgh', 'ij'],
-      );
+      final handle = await _openHandle(proxy, tempRoot, encryptedMediaHelper, [
+        'abcd',
+        'efgh',
+        'ij',
+      ]);
 
       final response = await _get(
         handle.uri,
@@ -113,12 +110,11 @@ void main() {
     });
 
     test('serves suffix byte ranges', () async {
-      final handle = await _openHandle(
-        proxy,
-        tempRoot,
-        encryptedMediaHelper,
-        ['abcd', 'efgh', 'ij'],
-      );
+      final handle = await _openHandle(proxy, tempRoot, encryptedMediaHelper, [
+        'abcd',
+        'efgh',
+        'ij',
+      ]);
 
       final response = await _get(
         handle.uri,
@@ -136,14 +132,14 @@ void main() {
     });
 
     test('serves selected lower quality using its own byte size', () async {
-      final sourceFixture = await _buildFixture(
-        encryptedMediaHelper,
-        ['source', '-video'],
-      );
-      final lowFixture = await _buildFixture(
-        encryptedMediaHelper,
-        ['low', '-q'],
-      );
+      final sourceFixture = await _buildFixture(encryptedMediaHelper, [
+        'source',
+        '-video',
+      ]);
+      final lowFixture = await _buildFixture(encryptedMediaHelper, [
+        'low',
+        '-q',
+      ]);
       final manifest = XmoStreamManifest(
         version: XmoStreamManifest.supportedVersion,
         mimeType: 'video/mp4',
@@ -182,12 +178,11 @@ void main() {
     });
 
     test('rejects invalid ranges', () async {
-      final handle = await _openHandle(
-        proxy,
-        tempRoot,
-        encryptedMediaHelper,
-        ['abcd', 'efgh', 'ij'],
-      );
+      final handle = await _openHandle(proxy, tempRoot, encryptedMediaHelper, [
+        'abcd',
+        'efgh',
+        'ij',
+      ]);
 
       final response = await _get(
         handle.uri,
@@ -204,12 +199,9 @@ void main() {
     });
 
     test('rejects unsupported HTTP methods', () async {
-      final handle = await _openHandle(
-        proxy,
-        tempRoot,
-        encryptedMediaHelper,
-        ['abcd'],
-      );
+      final handle = await _openHandle(proxy, tempRoot, encryptedMediaHelper, [
+        'abcd',
+      ]);
 
       final response = await _request(handle.uri, 'POST');
 
@@ -220,12 +212,9 @@ void main() {
     });
 
     test('rejects invalid stream tokens', () async {
-      final handle = await _openHandle(
-        proxy,
-        tempRoot,
-        encryptedMediaHelper,
-        ['abcd'],
-      );
+      final handle = await _openHandle(proxy, tempRoot, encryptedMediaHelper, [
+        'abcd',
+      ]);
 
       final response = await _get(
         handle.uri.replace(pathSegments: <String>['stream', 'short']),
@@ -237,12 +226,10 @@ void main() {
     });
 
     test('serves HEAD metadata without a response body', () async {
-      final handle = await _openHandle(
-        proxy,
-        tempRoot,
-        encryptedMediaHelper,
-        ['abcd', 'efgh'],
-      );
+      final handle = await _openHandle(proxy, tempRoot, encryptedMediaHelper, [
+        'abcd',
+        'efgh',
+      ]);
 
       final response = await _request(handle.uri, 'HEAD');
 
@@ -254,10 +241,10 @@ void main() {
     });
 
     test('waits for a requested chunk while it downloads', () async {
-      final fixture = await _buildFixture(
-        encryptedMediaHelper,
-        ['abcd', 'efgh'],
-      );
+      final fixture = await _buildFixture(encryptedMediaHelper, [
+        'abcd',
+        'efgh',
+      ]);
       final delayedChunk = Completer<Uint8List>();
       final streamingService = _streamingService(
         tempRoot,
@@ -291,12 +278,9 @@ void main() {
     });
 
     test('closing a handle cancels the session and stops the server', () async {
-      final handle = await _openHandle(
-        proxy,
-        tempRoot,
-        encryptedMediaHelper,
-        ['abcd'],
-      );
+      final handle = await _openHandle(proxy, tempRoot, encryptedMediaHelper, [
+        'abcd',
+      ]);
 
       expect(proxy.isRunning, isTrue);
       await handle.close();
@@ -306,12 +290,9 @@ void main() {
     });
 
     test('stopping the proxy cancels active sessions', () async {
-      final handle = await _openHandle(
-        proxy,
-        tempRoot,
-        encryptedMediaHelper,
-        ['abcd'],
-      );
+      final handle = await _openHandle(proxy, tempRoot, encryptedMediaHelper, [
+        'abcd',
+      ]);
 
       await proxy.stop();
 
@@ -435,18 +416,13 @@ Future<_StreamFixture> _buildFixture(
         (total, chunk) => total + utf8.encode(chunk).length,
       ),
       chunkSize: clearChunks.first.length,
-      qualities: {
-        'source': XmoStreamQuality(chunks: streamChunks),
-      },
+      qualities: {'source': XmoStreamQuality(chunks: streamChunks)},
     ),
   );
 }
 
 class _StreamFixture {
-  const _StreamFixture({
-    required this.encryptedChunks,
-    required this.manifest,
-  });
+  const _StreamFixture({required this.encryptedChunks, required this.manifest});
 
   final Map<int, Uint8List> encryptedChunks;
   final XmoStreamManifest manifest;

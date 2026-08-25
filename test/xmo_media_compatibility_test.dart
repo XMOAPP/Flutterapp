@@ -11,10 +11,7 @@ void main() {
           'msgtype': 'm.video',
           'body': 'video.mp4',
           'url': 'mxc://server/media',
-          'info': {
-            'mimetype': 'video/mp4',
-            'size': 42,
-          },
+          'info': {'mimetype': 'video/mp4', 'size': 42},
         },
       );
 
@@ -32,10 +29,7 @@ void main() {
           'msgtype': 'm.video',
           'body': 'video.mp4',
           'url': 'mxc://server/fallback',
-          'info': {
-            'mimetype': 'video/mp4',
-            'size': 104857600,
-          },
+          'info': {'mimetype': 'video/mp4', 'size': 104857600},
         },
         xmoStream: _validManifest(),
       );
@@ -54,14 +48,8 @@ void main() {
         matrixContent: {
           'msgtype': 'm.video',
           'body': 'video.mp4',
-          'file': {
-            'url': 'mxc://server/encrypted',
-            'v': 'v2',
-          },
-          'info': {
-            'mimetype': 'video/mp4',
-            'size': 104857600,
-          },
+          'file': {'url': 'mxc://server/encrypted', 'v': 'v2'},
+          'info': {'mimetype': 'video/mp4', 'size': 104857600},
         },
         xmoStream: {'version': 1},
       );
@@ -75,10 +63,7 @@ void main() {
       final content = {
         'msgtype': 'm.video',
         'body': 'video.mp4',
-        'info': {
-          'mimetype': 'video/mp4',
-          'size': 104857600,
-        },
+        'info': {'mimetype': 'video/mp4', 'size': 104857600},
         xmoStreamContentKey: _validManifest(),
       };
 

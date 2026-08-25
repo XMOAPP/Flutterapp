@@ -47,47 +47,51 @@ void main() {
       }
     });
 
-    test('downloads chunk 0 first, decrypts it, then prefetches next chunks',
-        () async {
-      final fixture = await _buildFixture(
-        encryptedMediaHelper,
-        ['first chunk', 'second chunk', 'third chunk'],
-      );
-      final requestedIndexes = <int>[];
-      final service = _service(
-        tempRoot,
-        encryptedMediaHelper,
-        downloader: (request, chunk) async {
-          requestedIndexes.add(chunk.index);
-          expect(request.headers['Authorization'], 'Bearer test-token');
-          return fixture.encryptedChunks[chunk.index]!;
-        },
-      );
+    test(
+      'downloads chunk 0 first, decrypts it, then prefetches next chunks',
+      () async {
+        final fixture = await _buildFixture(encryptedMediaHelper, [
+          'first chunk',
+          'second chunk',
+          'third chunk',
+        ]);
+        final requestedIndexes = <int>[];
+        final service = _service(
+          tempRoot,
+          encryptedMediaHelper,
+          downloader: (request, chunk) async {
+            requestedIndexes.add(chunk.index);
+            expect(request.headers['Authorization'], 'Bearer test-token');
+            return fixture.encryptedChunks[chunk.index]!;
+          },
+        );
 
-      final session = await service.openFromEventContent(
-        eventId: r'$event/one',
-        content: {xmoStreamContentKey: fixture.manifest.toJson()},
-      );
+        final session = await service.openFromEventContent(
+          eventId: r'$event/one',
+          content: {xmoStreamContentKey: fixture.manifest.toJson()},
+        );
 
-      expect(requestedIndexes.first, 0);
-      expect(await session.chunkFile(0).readAsString(), 'first chunk');
+        expect(requestedIndexes.first, 0);
+        expect(await session.chunkFile(0).readAsString(), 'first chunk');
 
-      await session.states
-          .firstWhere((state) => state.phase == XmoStreamingMediaPhase.complete)
-          .timeout(const Duration(seconds: 3));
+        await session.states
+            .firstWhere(
+              (state) => state.phase == XmoStreamingMediaPhase.complete,
+            )
+            .timeout(const Duration(seconds: 3));
 
-      expect(await session.chunkFile(1).readAsString(), 'second chunk');
-      expect(await session.chunkFile(2).readAsString(), 'third chunk');
-      expect(requestedIndexes, [0, 1, 2]);
+        expect(await session.chunkFile(1).readAsString(), 'second chunk');
+        expect(await session.chunkFile(2).readAsString(), 'third chunk');
+        expect(requestedIndexes, [0, 1, 2]);
 
-      await session.cleanup();
-    });
+        await session.cleanup();
+      },
+    );
 
     test('retries failed chunk downloads', () async {
-      final fixture = await _buildFixture(
-        encryptedMediaHelper,
-        ['retry chunk'],
-      );
+      final fixture = await _buildFixture(encryptedMediaHelper, [
+        'retry chunk',
+      ]);
       var attempts = 0;
       final service = _service(
         tempRoot,
@@ -114,10 +118,9 @@ void main() {
     });
 
     test('rejects corrupted encrypted chunks', () async {
-      final fixture = await _buildFixture(
-        encryptedMediaHelper,
-        ['valid chunk'],
-      );
+      final fixture = await _buildFixture(encryptedMediaHelper, [
+        'valid chunk',
+      ]);
       final service = _service(
         tempRoot,
         encryptedMediaHelper,
@@ -128,19 +131,17 @@ void main() {
       );
 
       expect(
-        () => service.open(
-          eventId: 'bad-hash-event',
-          manifest: fixture.manifest,
-        ),
+        () =>
+            service.open(eventId: 'bad-hash-event', manifest: fixture.manifest),
         throwsA(isA<XmoStreamingMediaException>()),
       );
     });
 
     test('can recover a failed chunk by retrying it', () async {
-      final fixture = await _buildFixture(
-        encryptedMediaHelper,
-        ['first chunk', 'second chunk'],
-      );
+      final fixture = await _buildFixture(encryptedMediaHelper, [
+        'first chunk',
+        'second chunk',
+      ]);
       var failSecondChunk = true;
       final service = _service(
         tempRoot,
@@ -172,10 +173,10 @@ void main() {
     });
 
     test('cancels future chunk work', () async {
-      final fixture = await _buildFixture(
-        encryptedMediaHelper,
-        ['first chunk', 'second chunk'],
-      );
+      final fixture = await _buildFixture(encryptedMediaHelper, [
+        'first chunk',
+        'second chunk',
+      ]);
       final service = _service(
         tempRoot,
         encryptedMediaHelper,
@@ -199,10 +200,9 @@ void main() {
     });
 
     test('reuses the same active session for duplicate opens', () async {
-      final fixture = await _buildFixture(
-        encryptedMediaHelper,
-        ['first chunk'],
-      );
+      final fixture = await _buildFixture(encryptedMediaHelper, [
+        'first chunk',
+      ]);
       var downloadCount = 0;
       final service = _service(
         tempRoot,
@@ -228,71 +228,87 @@ void main() {
       await first.cleanup();
     });
 
-    test('enforces cache size limit without deleting the protected chunk',
-        () async {
-      final fixture = await _buildFixture(
-        encryptedMediaHelper,
-        ['1111', '2222', '3333'],
-      );
-      final service = _service(
-        tempRoot,
-        encryptedMediaHelper,
-        maxCacheBytes: 5,
-        downloader: (request, chunk) async =>
-            fixture.encryptedChunks[chunk.index]!,
-      );
+    test(
+      'enforces cache size limit without deleting the protected chunk',
+      () async {
+        final fixture = await _buildFixture(encryptedMediaHelper, [
+          '1111',
+          '2222',
+          '3333',
+        ]);
+        final service = _service(
+          tempRoot,
+          encryptedMediaHelper,
+          maxCacheBytes: 5,
+          downloader: (request, chunk) async =>
+              fixture.encryptedChunks[chunk.index]!,
+        );
 
-      final session = await service.open(
-        eventId: 'cache-limit-event',
-        manifest: fixture.manifest,
-      );
-      await session.ensureChunk(1);
-      await session.ensureChunk(2);
+        final session = await service.open(
+          eventId: 'cache-limit-event',
+          manifest: fixture.manifest,
+        );
+        await session.ensureChunk(1);
+        await session.ensureChunk(2);
 
-      expect(await session.chunkFile(2).exists(), isTrue);
-      expect(session.cachedBytes <= 5, isTrue);
+        expect(await session.chunkFile(2).exists(), isTrue);
+        expect(session.cachedBytes <= 5, isTrue);
 
-      await session.cleanup();
-      expect(await session.cacheDirectory.exists(), isFalse);
-    });
+        await session.cleanup();
+        expect(await session.cacheDirectory.exists(), isFalse);
+      },
+    );
 
-    test('cleans expired cache directories and trims total cache size',
-        () async {
-      final oldDir = Directory('${tempRoot.path}${Platform.pathSeparator}old');
-      final mediumDir =
-          Directory('${tempRoot.path}${Platform.pathSeparator}medium');
-      final newestDir =
-          Directory('${tempRoot.path}${Platform.pathSeparator}newest');
-      await oldDir.create(recursive: true);
-      await mediumDir.create(recursive: true);
-      await newestDir.create(recursive: true);
+    test(
+      'cleans expired cache directories and trims total cache size',
+      () async {
+        final oldDir = Directory(
+          '${tempRoot.path}${Platform.pathSeparator}old',
+        );
+        final mediumDir = Directory(
+          '${tempRoot.path}${Platform.pathSeparator}medium',
+        );
+        final newestDir = Directory(
+          '${tempRoot.path}${Platform.pathSeparator}newest',
+        );
+        await oldDir.create(recursive: true);
+        await mediumDir.create(recursive: true);
+        await newestDir.create(recursive: true);
 
-      final oldFile = File('${oldDir.path}${Platform.pathSeparator}chunk.bin');
-      final mediumFile =
-          File('${mediumDir.path}${Platform.pathSeparator}chunk.bin');
-      final newestFile =
-          File('${newestDir.path}${Platform.pathSeparator}chunk.bin');
-      await oldFile.writeAsBytes(List<int>.filled(4, 1));
-      await mediumFile.writeAsBytes(List<int>.filled(4, 2));
-      await newestFile.writeAsBytes(List<int>.filled(4, 3));
+        final oldFile = File(
+          '${oldDir.path}${Platform.pathSeparator}chunk.bin',
+        );
+        final mediumFile = File(
+          '${mediumDir.path}${Platform.pathSeparator}chunk.bin',
+        );
+        final newestFile = File(
+          '${newestDir.path}${Platform.pathSeparator}chunk.bin',
+        );
+        await oldFile.writeAsBytes(List<int>.filled(4, 1));
+        await mediumFile.writeAsBytes(List<int>.filled(4, 2));
+        await newestFile.writeAsBytes(List<int>.filled(4, 3));
 
-      final now = DateTime(2026, 7, 5, 12);
-      await oldFile.setLastModified(now.subtract(const Duration(days: 2)));
-      await mediumFile.setLastModified(now.subtract(const Duration(hours: 2)));
-      await newestFile
-          .setLastModified(now.subtract(const Duration(minutes: 5)));
+        final now = DateTime(2026, 7, 5, 12);
+        await oldFile.setLastModified(now.subtract(const Duration(days: 2)));
+        await mediumFile.setLastModified(
+          now.subtract(const Duration(hours: 2)),
+        );
+        await newestFile.setLastModified(
+          now.subtract(const Duration(minutes: 5)),
+        );
 
-      await StreamingMediaService.cleanupCacheDirectory(
-        tempRoot,
-        maxAge: const Duration(days: 1),
-        maxTotalBytes: 5,
-        now: now,
-      );
+        await StreamingMediaService.cleanupCacheDirectory(
+          tempRoot,
+          maxAge: const Duration(days: 1),
+          maxTotalBytes: 5,
+          now: now,
+        );
 
-      expect(await oldDir.exists(), isFalse);
-      expect(await mediumDir.exists(), isFalse);
-      expect(await newestDir.exists(), isTrue);
-    });
+        expect(await oldDir.exists(), isFalse);
+        expect(await mediumDir.exists(), isFalse);
+        expect(await newestDir.exists(), isTrue);
+      },
+    );
   });
 }
 
@@ -348,20 +364,16 @@ Future<_StreamFixture> _buildFixture(
         0,
         (total, chunk) => total + utf8.encode(chunk).length,
       ),
-      chunkSize:
-          clearChunks.map((chunk) => utf8.encode(chunk).length).reduce(max),
-      qualities: {
-        'source': XmoStreamQuality(chunks: streamChunks),
-      },
+      chunkSize: clearChunks
+          .map((chunk) => utf8.encode(chunk).length)
+          .reduce(max),
+      qualities: {'source': XmoStreamQuality(chunks: streamChunks)},
     ),
   );
 }
 
 class _StreamFixture {
-  const _StreamFixture({
-    required this.encryptedChunks,
-    required this.manifest,
-  });
+  const _StreamFixture({required this.encryptedChunks, required this.manifest});
 
   final Map<int, Uint8List> encryptedChunks;
   final XmoStreamManifest manifest;

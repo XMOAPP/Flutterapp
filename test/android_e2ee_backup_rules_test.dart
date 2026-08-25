@@ -26,9 +26,6 @@ void main() {
     }
 
     expect(legacy, contains('path="matrix_xmo_recovery/"'));
-    expect(
-      RegExp('path="matrix_xmo_recovery/"').allMatches(modern).length,
-      2,
-    );
+    expect(RegExp('path="matrix_xmo_recovery/"').allMatches(modern).length, 2);
   });
 }

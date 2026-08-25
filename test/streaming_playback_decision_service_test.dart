@@ -30,10 +30,9 @@ void main() {
         decision.directMediaRequest!.uri.toString(),
         'https://matrix.example.org/_matrix/client/v1/media/download/matrix.example.org/video-id',
       );
-      expect(
-        decision.directMediaRequest!.headers,
-        {'Authorization': 'Bearer access-token'},
-      );
+      expect(decision.directMediaRequest!.headers, {
+        'Authorization': 'Bearer access-token',
+      });
     });
 
     test('does not stream encrypted Matrix media URLs directly', () {
@@ -75,10 +74,7 @@ void main() {
         isAttachmentEncrypted: true,
         content: {
           'msgtype': 'm.video',
-          xmoStreamContentKey: {
-            ..._manifestJson(),
-            'version': 999,
-          },
+          xmoStreamContentKey: {..._manifestJson(), 'version': 999},
         },
       );
 

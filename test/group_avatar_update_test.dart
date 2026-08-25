@@ -31,9 +31,8 @@ void main() {
 
     test('rejects HTTP and incomplete Matrix content URIs', () {
       expect(
-        () => GroupService.parseAvatarMxcUrl(
-          'https://matrix.example/avatar.jpg',
-        ),
+        () =>
+            GroupService.parseAvatarMxcUrl('https://matrix.example/avatar.jpg'),
         throwsFormatException,
       );
       expect(

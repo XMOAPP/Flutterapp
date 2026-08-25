@@ -81,9 +81,7 @@ void main() {
     });
 
     test('non-direct unknown rooms can remain unknown without fallback', () {
-      final kind = MatrixService.classifyRoomKind(
-        isDirectChat: false,
-      );
+      final kind = MatrixService.classifyRoomKind(isDirectChat: false);
 
       expect(kind, isNull);
     });

@@ -3,8 +3,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:xmo/widgets/matrix_chat/swipe_to_reply.dart';
 
 void main() {
-  testWidgets('right swipe past threshold starts reply and snaps back',
-      (tester) async {
+  testWidgets('right swipe past threshold starts reply and snaps back', (
+    tester,
+  ) async {
     var replies = 0;
     await tester.pumpWidget(
       MaterialApp(
@@ -56,14 +57,13 @@ void main() {
     expect(replies, 0);
   });
 
-  testWidgets('null callback leaves child without a swipe gesture',
-      (tester) async {
+  testWidgets('null callback leaves child without a swipe gesture', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       const MaterialApp(
         home: Scaffold(
-          body: SwipeToReply(
-            child: SizedBox(key: ValueKey('message')),
-          ),
+          body: SwipeToReply(child: SizedBox(key: ValueKey('message'))),
         ),
       ),
     );

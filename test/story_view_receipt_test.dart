@@ -33,10 +33,7 @@ void main() {
 
     test('rejects a forged viewer id', () {
       final receipt = parseStoryViewReceipt(
-        content: const {
-          'story_id': 'story-1',
-          'viewer_id': '@victim:xmo.test',
-        },
+        content: const {'story_id': 'story-1', 'viewer_id': '@victim:xmo.test'},
         senderId: '@attacker:xmo.test',
         receivedAt: serverTime,
       );
@@ -65,10 +62,7 @@ void main() {
 
     test('uses the server timestamp instead of client supplied time', () {
       final receipt = parseStoryViewReceipt(
-        content: const {
-          'story_id': 'story-1',
-          'viewed_at': 999999999,
-        },
+        content: const {'story_id': 'story-1', 'viewed_at': 999999999},
         senderId: '@viewer:xmo.test',
         receivedAt: serverTime,
       );
@@ -87,10 +81,7 @@ void main() {
       );
       expect(
         parseStoryViewReceipt(
-          content: const {
-            'story_id': 'story-1',
-            'viewer_id': 42,
-          },
+          content: const {'story_id': 'story-1', 'viewer_id': 42},
           senderId: '@viewer:xmo.test',
           receivedAt: serverTime,
         ),

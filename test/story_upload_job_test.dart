@@ -68,10 +68,7 @@ void main() {
   });
 
   test('publishing phases expose useful global progress', () {
-    expect(
-      job(phase: StoryCreationPhase.uploadingThumbnail).progress,
-      0.9,
-    );
+    expect(job(phase: StoryCreationPhase.uploadingThumbnail).progress, 0.9);
     expect(job(phase: StoryCreationPhase.publishing).progress, 0.95);
     expect(job().progress, isNull);
   });
