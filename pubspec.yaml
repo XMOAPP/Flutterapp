@@ -20,7 +20,6 @@ dependencies:
   sqflite_sqlcipher: ^3.4.0
   firebase_core: ^4.7.0
   firebase_crashlytics: ^5.0.0
-  firebase_auth: ^6.4.0
   mailer: ^7.1.0
   http: ^1.6.0
   file_picker: ^8.0.0

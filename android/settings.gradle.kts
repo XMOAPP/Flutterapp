@@ -23,7 +23,8 @@ plugins {
     id("com.google.gms.google-services") version("4.4.1") apply false
     id("com.google.firebase.crashlytics") version("3.0.6") apply false
     // END: FlutterFire Configuration
-    id("org.jetbrains.kotlin.android") version "2.3.0" apply false
+    // Keep this aligned with Android plugins that compile with Kotlin 2.1.
+    id("org.jetbrains.kotlin.android") version "2.1.10" apply false
 }
 
 include(":app")
