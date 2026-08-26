@@ -5,6 +5,14 @@
         <exclude domain="root" path="files/matrix_xmo/" />
         <exclude domain="file" path="matrix_xmo/" />
         <exclude domain="file" path="matrix_xmo_recovery/" />
+        <!-- getApplicationSupportDirectory() resolves to filesDir on Android. -->
+        <exclude domain="file" path="matrix_xmo_vodozemac_v1.db" />
+        <exclude domain="file" path="matrix_xmo_vodozemac_v1.db-wal" />
+        <exclude domain="file" path="matrix_xmo_vodozemac_v1.db-shm" />
+        <exclude domain="file" path="matrix_xmo_vodozemac_v1.db.plaintext-backup" />
+        <exclude domain="file" path="matrix_xmo_vodozemac_v1.db.encrypted" />
+        <exclude domain="file" path="matrix_xmo_vodozemac_v1.db.encrypted-wal" />
+        <exclude domain="file" path="matrix_xmo_vodozemac_v1.db.encrypted-shm" />
         <exclude domain="database" path="matrix_xmo" />
         <exclude domain="database" path="matrix_xmo_vodozemac_v1.db" />
         <exclude domain="database" path="matrix_xmo_vodozemac_v1.db-wal" />
@@ -41,6 +49,14 @@
         <exclude domain="root" path="files/matrix_xmo/" />
         <exclude domain="file" path="matrix_xmo/" />
         <exclude domain="file" path="matrix_xmo_recovery/" />
+        <!-- getApplicationSupportDirectory() resolves to filesDir on Android. -->
+        <exclude domain="file" path="matrix_xmo_vodozemac_v1.db" />
+        <exclude domain="file" path="matrix_xmo_vodozemac_v1.db-wal" />
+        <exclude domain="file" path="matrix_xmo_vodozemac_v1.db-shm" />
+        <exclude domain="file" path="matrix_xmo_vodozemac_v1.db.plaintext-backup" />
+        <exclude domain="file" path="matrix_xmo_vodozemac_v1.db.encrypted" />
+        <exclude domain="file" path="matrix_xmo_vodozemac_v1.db.encrypted-wal" />
+        <exclude domain="file" path="matrix_xmo_vodozemac_v1.db.encrypted-shm" />
         <exclude domain="database" path="matrix_xmo" />
         <exclude domain="database" path="matrix_xmo_vodozemac_v1.db" />
         <exclude domain="database" path="matrix_xmo_vodozemac_v1.db-wal" />
