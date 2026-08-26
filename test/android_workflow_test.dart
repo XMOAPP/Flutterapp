@@ -74,16 +74,41 @@ void main() {
     );
   });
 
-  test('merge workflow checks whitespace and gates internal changes on a signed bundle', () {
-    expect(workflow, contains('git diff --check'));
-    expect(
-      workflow,
-      contains('github.event.pull_request.head.repo.full_name == github.repository'),
+  test(
+    'merge workflow checks whitespace and gates internal changes on a signed bundle',
+    () {
+      expect(workflow, contains('git diff --check'));
+      expect(workflow, contains('flutter build appbundle --release'));
+      expect(
+        workflow,
+        contains('--dart-define=XMO_OIDC_ONLY_AUTHENTICATION=true'),
+      );
+    },
+  );
+
+  test('signed release job is protected from pull requests', () {
+    final releaseJob = workflow.substring(
+      workflow.indexOf('  release-bundle:'),
     );
-    expect(workflow, contains('flutter build appbundle --release'));
+
+    expect(workflow, contains("tags: ['v*']"));
+    expect(releaseJob, contains('environment: production-release'));
+    expect(releaseJob, contains("github.ref == 'refs/heads/main'"));
+    expect(releaseJob, contains("startsWith(github.ref, 'refs/tags/v')"));
     expect(
-      workflow,
-      contains('--dart-define=XMO_OIDC_ONLY_AUTHENTICATION=true'),
+      releaseJob,
+      contains(
+        "github.event_name == 'workflow_dispatch' && inputs.build_release",
+      ),
+    );
+    expect(releaseJob, isNot(contains("github.event_name == 'pull_request'")));
+    expect(
+      releaseJob,
+      isNot(
+        contains(
+          'github.event.pull_request.head.repo.full_name == github.repository',
+        ),
+      ),
     );
   });
 
@@ -91,7 +116,9 @@ void main() {
     expect(workflow, contains(r'"$DART_BIN" test --reporter expanded'));
     expect(
       workflow,
-      contains('uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'),
+      contains(
+        'uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
+      ),
     );
     expect(workflow, contains('if: always()'));
     expect(workflow, contains('tools/ci/redact_logs.sh'));
