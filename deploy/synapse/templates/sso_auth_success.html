@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Confirmation complete | XMO</title>
+    <script>
+      if (window.onAuthDone) {
+        window.onAuthDone();
+      } else if (window.opener && window.opener.postMessage) {
+        window.opener.postMessage("authDone", "*");
+      }
+    </script>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #050a0d;
+        --panel: #11171d;
+        --text: #ffffff;
+        --muted: #9ca3af;
+        --accent: #a3f22b;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          linear-gradient(rgba(5, 10, 13, 0.86), rgba(5, 10, 13, 0.94)),
+          url("https://xmo.dpdns.org/img/xmo-chat-pattern.svg"),
+          var(--bg);
+        background-size: cover;
+        background-position: center;
+        color: var(--text);
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      .card {
+        width: min(100%, 420px);
+        background: var(--panel);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 20px;
+        padding: 28px 24px;
+        text-align: center;
+      }
+
+      .logo {
+        width: 56px;
+        height: 56px;
+        margin-bottom: 22px;
+        border-radius: 18px;
+        object-fit: cover;
+      }
+
+      .check {
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        margin: 0 auto 18px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #101708;
+        font-size: 22px;
+        font-weight: 900;
+      }
+
+      h1 { margin: 0; font-size: 24px; line-height: 1.2; }
+      p { margin: 12px 0 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="card" aria-labelledby="title">
+        <img class="logo" src="https://xmo.dpdns.org/img/cropped_circle_image%281%29%281%29.png" alt="XMO" />
+        <div class="check" aria-hidden="true">&#10003;</div>
+        <h1 id="title">Confirmation complete</h1>
+        <p>You can close this window and return to XMO.</p>
+      </section>
+    </main>
+  </body>
+</html>

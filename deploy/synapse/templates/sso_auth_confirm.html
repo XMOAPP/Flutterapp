@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Confirm secure action | XMO</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #050a0d;
+        --panel: #11171d;
+        --panel-soft: #18222a;
+        --text: #ffffff;
+        --muted: #9ca3af;
+        --accent: #5542ff;
+        --accent-hover: #6c5cff;
+        --warning: #ff8b8b;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          linear-gradient(rgba(5, 10, 13, 0.86), rgba(5, 10, 13, 0.94)),
+          url("https://xmo.dpdns.org/img/xmo-chat-pattern.svg"),
+          var(--bg);
+        background-size: cover;
+        background-position: center;
+        color: var(--text);
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      .card {
+        width: min(100%, 420px);
+        background: var(--panel);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 20px;
+        padding: 28px 24px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 28px;
+      }
+
+      .logo {
+        width: 48px;
+        height: 48px;
+        border-radius: 16px;
+        object-fit: cover;
+      }
+
+      .name { font-size: 28px; font-weight: 800; }
+      h1 { margin: 0; font-size: 24px; line-height: 1.2; }
+      p { margin: 12px 0 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
+
+      .notice {
+        margin: 22px 0;
+        padding: 14px;
+        background: var(--panel-soft);
+        border-radius: 14px;
+        color: var(--warning);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .continue {
+        display: grid;
+        place-items: center;
+        width: 100%;
+        min-height: 48px;
+        border: 0;
+        border-radius: 999px;
+        background: var(--accent);
+        color: #ffffff;
+        font: inherit;
+        font-weight: 800;
+        text-decoration: none;
+      }
+
+      .continue:hover { background: var(--accent-hover); }
+      .continue:focus-visible { outline: 3px solid rgba(85, 66, 255, 0.35); outline-offset: 3px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="card" aria-labelledby="title">
+        <div class="brand">
+          <img class="logo" src="https://xmo.dpdns.org/img/cropped_circle_image%281%29%281%29.png" alt="XMO" />
+          <div class="name">xmo</div>
+        </div>
+        <h1 id="title">Confirm it is you</h1>
+        <p>Confirm this secure account action using XMO secure sign-in.</p>
+        <div class="notice">Only continue if you started this action in XMO.</div>
+        <a class="continue" href="{{ redirect_url }}">Continue with XMO secure sign-in</a>
+      </section>
+    </main>
+  </body>
+</html>

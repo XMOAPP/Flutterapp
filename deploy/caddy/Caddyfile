@@ -1,0 +1,76 @@
+(xmo_auth) {
+    # Limit only auth-service JSON endpoints. Synapse media remains uncapped.
+    request_body {
+        max_size 1MiB
+    }
+
+    reverse_proxy xmo-auth:3000 {
+        # Replace client-supplied forwarding values with the Caddy peer address.
+        header_up -X-Forwarded-For
+        header_up -X-Real-IP
+        header_up X-Real-IP {remote_host}
+    }
+}
+
+xmo-matrix.centralindia.cloudapp.azure.com {
+    handle /health {
+        import xmo_auth
+    }
+
+    # Do not expose Synapse's default static landing page to XMO users. This
+    # exact matcher leaves Matrix APIs and other static resources untouched.
+    handle /_matrix/static {
+        redir https://xmo.dpdns.org/ 302
+    }
+
+    handle /_matrix/static/ {
+        redir https://xmo.dpdns.org/ 302
+    }
+
+    # Pushes are submitted by Synapse only. Synapse resolves this public
+    # hostname to the Caddy container on the Docker network.
+    @trusted_matrix_push {
+        path /_matrix/push/v1/notify
+        remote_ip 172.18.0.3
+    }
+
+    @matrix_push path /_matrix/push/v1/notify
+
+    # Retired public aliases. `handle_path /auth/otp/*` would otherwise strip
+    # the prefix and expose the standard gateway route again.
+    @legacy_matrix_push path /push /auth/otp/push /auth/push/_matrix/push/v1/notify /auth/otp/_matrix/push/v1/notify
+
+    handle @legacy_matrix_push {
+        respond "Not Found" 404
+    }
+
+    handle @trusted_matrix_push {
+        import xmo_auth
+    }
+
+    handle @matrix_push {
+        respond "Forbidden" 403
+    }
+
+    handle_path /auth/otp/* {
+        import xmo_auth
+    }
+
+    handle /auth/wallet/* {
+        import xmo_auth
+    }
+
+    handle /auth/media/* {
+        import xmo_auth
+    }
+
+    handle /account-deletion* {
+        import xmo_auth
+    }
+
+    reverse_proxy synapse:8008
+}
+
+auth.xmo.dpdns.org {
+    reverse_proxy authentik-server:9000
+}
