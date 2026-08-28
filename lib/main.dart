@@ -18,6 +18,7 @@ import '../services/call_link_service.dart';
 import '../services/crash_reporting_service.dart';
 import '../services/device_verification_coordinator.dart';
 import '../services/invite_link_service.dart';
+import '../services/matrix_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/streaming_media_service.dart';
 import '../services/story_service.dart';
@@ -62,7 +63,14 @@ Future<void> main() async {
     ),
   );
 
-  final matrixProvider = MatrixProvider();
+  final matrixProvider = MatrixProvider(
+    onAuthenticatedSessionReady: () {
+      VoipService().init(
+        matrixService: MatrixService(),
+        navigatorKey: xmoNavigatorKey,
+      );
+    },
+  );
   AccountDeletionCompletionService.instance.init(
     navigatorKey: xmoNavigatorKey,
     matrixProvider: matrixProvider,
@@ -100,14 +108,7 @@ Future<void> _bootstrapServices(MatrixProvider matrixProvider) async {
     debugPrint("Firebase init failed (expected if not configured yet): $e");
   }
 
-  await matrixProvider.init(
-    beforeStartSync: () {
-      VoipService().init(
-        matrixService: matrixProvider.service,
-        navigatorKey: xmoNavigatorKey,
-      );
-    },
-  );
+  await matrixProvider.init();
   if (matrixProvider.state == MatrixAuthState.error) {
     debugPrint(
       '[main] Matrix startup stopped before dependent services: '

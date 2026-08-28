@@ -78,10 +78,15 @@ extension RoomXmoExtension on Room {
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 class MatrixProvider extends ChangeNotifier {
-  MatrixProvider({MatrixService? service}) : _svc = service ?? MatrixService();
+  MatrixProvider({
+    MatrixService? service,
+    VoidCallback? onAuthenticatedSessionReady,
+  }) : _svc = service ?? MatrixService(),
+       _onAuthenticatedSessionReady = onAuthenticatedSessionReady;
 
   /// Injectable for integration tests and alternate deployment wiring.
   final MatrixService _svc;
+  final VoidCallback? _onAuthenticatedSessionReady;
   MatrixService get service => _svc;
 
   MatrixAuthState _state = MatrixAuthState.uninitialized;
@@ -167,8 +172,7 @@ class MatrixProvider extends ChangeNotifier {
         await _syncPublicAccountDirectory();
         await _ensureSavedMessagesReady();
         beforeStartSync?.call();
-        _listenSync();
-        _svc.startSync();
+        _startAuthenticatedSession();
         await PushNotificationService().registerCurrentUser();
       }
     } catch (e, stack) {
@@ -200,9 +204,7 @@ class MatrixProvider extends ChangeNotifier {
       await _svc.refreshProfile();
       await _syncPublicAccountDirectory();
       await _ensureSavedMessagesReady();
-      _state = MatrixAuthState.loggedIn;
-      _listenSync();
-      _svc.startSync();
+      _startAuthenticatedSession();
       await PushNotificationService().registerCurrentUser();
       notifyListeners();
       return true;
@@ -232,9 +234,7 @@ class MatrixProvider extends ChangeNotifier {
       await _svc.refreshProfile();
       await _syncPublicAccountDirectory();
       await _ensureSavedMessagesReady();
-      _state = MatrixAuthState.loggedIn;
-      _listenSync();
-      _svc.startSync();
+      _startAuthenticatedSession();
       await PushNotificationService().registerCurrentUser();
       notifyListeners();
       return true;
@@ -262,9 +262,7 @@ class MatrixProvider extends ChangeNotifier {
       await _svc.refreshProfile();
       await _syncPublicAccountDirectory();
       await _ensureSavedMessagesReady();
-      _state = MatrixAuthState.loggedIn;
-      _listenSync();
-      _svc.startSync();
+      _startAuthenticatedSession();
       await PushNotificationService().registerCurrentUser();
       notifyListeners();
       return true;
@@ -290,9 +288,7 @@ class MatrixProvider extends ChangeNotifier {
 
     try {
       await _svc.loginWithWalletToken(token);
-      _state = MatrixAuthState.loggedIn;
-      _listenSync();
-      _svc.startSync();
+      _startAuthenticatedSession();
       notifyListeners();
       unawaited(_completeWalletLoginSetup());
       return true;
@@ -351,9 +347,7 @@ class MatrixProvider extends ChangeNotifier {
       await _svc.refreshProfile();
       await _syncPublicAccountDirectory();
       await _ensureSavedMessagesReady();
-      _state = MatrixAuthState.loggedIn;
-      _listenSync();
-      _svc.startSync();
+      _startAuthenticatedSession();
       await PushNotificationService().registerCurrentUser();
       notifyListeners();
       return true;
@@ -366,11 +360,48 @@ class MatrixProvider extends ChangeNotifier {
   }
 
   Future<void> logout() async {
-    await PushNotificationService().unregisterCurrentUser();
-    await _svc.logout();
-    await CallHistoryService().setCurrentUser(null);
-    await TransferQueueService.instance.setCurrentUser(null);
-    await _setStoryUploadOwner(null);
+    // Logout must finish locally even when a best-effort remote cleanup is
+    // unavailable. Otherwise one failed push or logout request leaves the UI
+    // authenticated with stale local credentials.
+    try {
+      await PushNotificationService().unregisterCurrentUser();
+    } catch (error, stack) {
+      debugPrint('[MatrixProvider] Push logout cleanup failed: $error');
+      debugPrintStack(stackTrace: stack);
+    }
+
+    await _syncSubscription?.cancel();
+    _syncSubscription = null;
+    _connectionWatchdog?.cancel();
+    _connectionWatchdog = null;
+
+    try {
+      await _svc.logout();
+    } catch (error, stack) {
+      // MatrixService clears the local SDK session in its logout finally
+      // block, even when the homeserver request cannot be completed.
+      debugPrint('[MatrixProvider] Remote logout failed: $error');
+      debugPrintStack(stackTrace: stack);
+    }
+
+    try {
+      await CallHistoryService().setCurrentUser(null);
+    } catch (error) {
+      debugPrint('[MatrixProvider] Call history logout cleanup failed: $error');
+    }
+    try {
+      await TransferQueueService.instance.setCurrentUser(null);
+    } catch (error) {
+      debugPrint(
+        '[MatrixProvider] Transfer queue logout cleanup failed: $error',
+      );
+    }
+    try {
+      await _setStoryUploadOwner(null);
+    } catch (error) {
+      debugPrint('[MatrixProvider] Story upload logout cleanup failed: $error');
+    }
+
     _state = MatrixAuthState.loggedOut;
     _connectionStatus = MatrixConnectionStatus.offline;
     notifyListeners();
@@ -738,6 +769,15 @@ class MatrixProvider extends ChangeNotifier {
     } catch (error) {
       debugPrint('[MatrixProvider] Failed to discard Story uploads: $error');
     }
+  }
+
+  /// Starts services that require an authenticated Matrix client before sync
+  /// can surface incoming call events or the call UI becomes available.
+  void _startAuthenticatedSession() {
+    _state = MatrixAuthState.loggedIn;
+    _onAuthenticatedSessionReady?.call();
+    _listenSync();
+    _svc.startSync();
   }
 
   void _listenSync() {

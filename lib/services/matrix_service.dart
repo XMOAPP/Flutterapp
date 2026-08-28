@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:matrix/encryption.dart';
@@ -37,12 +38,34 @@ import 'xmo_chunked_media_upload_service.dart';
 import 'xmo_media_compatibility.dart';
 import 'package:flutter_vodozemac/flutter_vodozemac.dart' as vodozemac;
 
+const _matrixDeviceIdStorageKey = 'xmo_matrix_device_id_v1';
+const _matrixDeviceIdLength = 16;
+const _matrixDeviceIdAlphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+final _matrixDeviceIdPattern = RegExp('^[A-Z0-9]{$_matrixDeviceIdLength}\$');
+
+Future<String> _getOrCreateMatrixDeviceId() async {
+  const secureStorage = FlutterSecureStorage();
+  final stored = await secureStorage.read(key: _matrixDeviceIdStorageKey);
+  if (stored != null && _matrixDeviceIdPattern.hasMatch(stored)) {
+    return stored;
+  }
+
+  final random = Random.secure();
+  final deviceId = List<String>.generate(
+    _matrixDeviceIdLength,
+    (_) =>
+        _matrixDeviceIdAlphabet[random.nextInt(_matrixDeviceIdAlphabet.length)],
+  ).join();
+  await secureStorage.write(key: _matrixDeviceIdStorageKey, value: deviceId);
+  return deviceId;
+}
+
 Future<sqflite.Database> _openMatrixDatabase() async {
   final directory = await getApplicationSupportDirectory();
   final path = p.join(directory.path, 'matrix_xmo_vodozemac_v1.db');
   const secureStorage = FlutterSecureStorage();
-  const storageKey = 'xmo_matrix_database_key_v1';
 
+  const storageKey = 'xmo_matrix_database_key_v1';
   var cipher = await secureStorage.read(key: storageKey);
   if (cipher == null || cipher.isEmpty) {
     cipher = base64UrlEncode(Hive.generateSecureKey());
@@ -241,6 +264,16 @@ class MatrixAccountDeactivationException implements Exception {
 
 class MatrixWalletLoginException implements Exception {
   const MatrixWalletLoginException(this.message, {this.statusCode});
+
+  final String message;
+  final int? statusCode;
+
+  @override
+  String toString() => message;
+}
+
+class MatrixSessionLogoutException implements Exception {
+  const MatrixSessionLogoutException(this.message, {this.statusCode});
 
   final String message;
   final int? statusCode;
@@ -725,9 +758,11 @@ class MatrixService implements MatrixRepositoryApi {
       throw ArgumentError.value(token, 'token', 'SSO login token is required');
     }
     await _client.checkHomeserver(Uri.parse(homeserverUrl));
+    final deviceId = await _getOrCreateMatrixDeviceId();
     await _client.login(
       LoginType.mLoginToken,
       token: token,
+      deviceId: deviceId,
       initialDeviceDisplayName: 'XMO Android',
     );
   }
@@ -756,12 +791,14 @@ class MatrixService implements MatrixRepositoryApi {
     final httpClient = io.HttpClient()
       ..connectionTimeout = const Duration(seconds: 12);
     try {
+      final requestedDeviceId = await _getOrCreateMatrixDeviceId();
       final request = await httpClient.postUrl(loginUri);
       request.headers.contentType = io.ContentType.json;
       request.write(
         jsonEncode({
           'type': 'org.matrix.login.jwt',
           'token': token.trim(),
+          'device_id': requestedDeviceId,
           'initial_device_display_name': 'XMO Android',
         }),
       );
@@ -797,16 +834,25 @@ class MatrixService implements MatrixRepositoryApi {
         );
       }
 
-      // Wallet login is a new account transition. Clear the SDK's local
-      // account record before init so a failed restore, a previous account,
-      // or a stale logged-out token cannot block the replacement JWT session.
-      // The server session and wallet account remain intact; only local SDK
-      // state is removed. This is also important when switching wallet-only
-      // accounts on the same device.
-      debugPrint(
-        '[MatrixService] Resetting local Matrix state before wallet login.',
-      );
-      await _client.clear();
+      // A valid in-memory session for the same wallet account already has the
+      // Matrix token and E2EE state needed by this device. Keep it intact.
+      // Clearing on every wallet login used to erase local state even when no
+      // account switch had occurred.
+      if (_client.isLogged() && _client.userID == userId) {
+        debugPrint(
+          '[MatrixService] Reusing the current Matrix session for wallet login.',
+        );
+        return;
+      }
+
+      // Local SDK state belongs to exactly one Matrix account. Clear it only
+      // when the user explicitly changes to a different wallet account.
+      if (_client.isLogged()) {
+        debugPrint(
+          '[MatrixService] Switching Matrix account for wallet login.',
+        );
+        await _client.clear();
+      }
 
       final expiresInMs = decoded['expires_in_ms'];
       final expiresAt = expiresInMs is num
@@ -892,8 +938,54 @@ class MatrixService implements MatrixRepositoryApi {
   Future<void> logout() async {
     final accountUserId = userId;
     _invalidateMediaConfig();
-    await _client.logout();
-    await _clearLocalDrafts(accountUserId);
+    final token = accessToken;
+
+    try {
+      // The SDK uploads inbound keys before its logout request. That is useful
+      // when it succeeds, but a transient upload failure prevents Synapse from
+      // revoking the current access token and deleting its device entry. Send
+      // the standard Matrix logout request first, then always clear local data.
+      await _logoutRemoteSession(token);
+    } finally {
+      await _client.clear();
+      await _clearLocalDrafts(accountUserId);
+    }
+  }
+
+  Future<void> _logoutRemoteSession(String? token) async {
+    if (token == null || token.isEmpty) return;
+
+    final homeserver = Uri.tryParse(homeserverUrl);
+    if (homeserver == null ||
+        (homeserver.scheme != 'http' && homeserver.scheme != 'https')) {
+      throw const MatrixSessionLogoutException(
+        'XMO could not reach the account server to end this session.',
+      );
+    }
+
+    final logoutUri = homeserver.replace(
+      path: '/_matrix/client/v3/logout',
+      query: null,
+      fragment: null,
+    );
+    final httpClient = io.HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10);
+    try {
+      final request = await httpClient.postUrl(logoutUri);
+      request.headers.set(io.HttpHeaders.authorizationHeader, 'Bearer $token');
+      final response = await request.close().timeout(
+        const Duration(seconds: 15),
+      );
+      await response.drain<void>();
+      if (response.statusCode != 200) {
+        throw MatrixSessionLogoutException(
+          'XMO could not end this server session.',
+          statusCode: response.statusCode,
+        );
+      }
+    } finally {
+      httpClient.close(force: true);
+    }
   }
 
   Future<void> deactivateAccount() async {
