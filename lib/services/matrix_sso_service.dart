@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../config/app_config.dart';
@@ -19,13 +21,20 @@ class MatrixSsoException implements Exception {
 /// Coordinates a Synapse SSO browser flow and verifies the app callback before
 /// exposing its one-time Matrix login token to the sign-in screen.
 class MatrixSsoService {
-  MatrixSsoService._();
+  MatrixSsoService._({FlutterSecureStorage? secureStorage})
+    : _secureStorage = secureStorage ?? const FlutterSecureStorage();
 
   static final MatrixSsoService instance = MatrixSsoService._();
   static final Uri _legacyCallback = Uri.parse('xmo://auth/callback');
+  static const _pendingStateStorageKey = 'xmo_matrix_sso_pending_state_v1';
+  static const _signInLifetime = Duration(minutes: 5);
+
+  final FlutterSecureStorage _secureStorage;
 
   Completer<String>? _pendingToken;
   String? _state;
+  String? _recoveredToken;
+  Future<bool> Function(String token)? _recoveredTokenHandler;
 
   bool get isAwaitingCallback => _pendingToken != null;
 
@@ -33,11 +42,17 @@ class MatrixSsoService {
     String message = 'Secure sign-in was cancelled. Please try again.',
   }) {
     final pending = _pendingToken;
+    _clearPendingMemory();
+    unawaited(_clearPersistedState());
     if (pending == null) return;
-    _clearPending();
     if (!pending.isCompleted) {
       pending.completeError(MatrixSsoException(message));
     }
+  }
+
+  void setRecoveredTokenHandler(Future<bool> Function(String token) handler) {
+    _recoveredTokenHandler = handler;
+    unawaited(_drainRecoveredToken());
   }
 
   Future<String> startSignIn() async {
@@ -56,6 +71,13 @@ class MatrixSsoService {
     }
 
     final state = _newState();
+    try {
+      await _persistState(state);
+    } catch (_) {
+      throw const MatrixSsoException(
+        'Could not prepare secure sign-in. Please try again.',
+      );
+    }
     final configuredCallback = Uri.parse(AppConfig.ssoCallbackUrl.trim());
     final callback = configuredCallback.replace(
       queryParameters: {'state': state},
@@ -85,17 +107,22 @@ class MatrixSsoService {
         mode: LaunchMode.externalApplication,
       );
     } catch (_) {
-      _clearPending();
+      _clearPendingMemory();
+      await _clearPersistedState();
       throw const MatrixSsoException('Could not open secure sign-in.');
     }
     if (!launched) {
-      _clearPending();
+      _clearPendingMemory();
+      await _clearPersistedState();
       throw const MatrixSsoException('Could not open secure sign-in.');
     }
     return pending.future.timeout(
-      const Duration(minutes: 5),
+      _signInLifetime,
       onTimeout: () {
-        if (identical(_pendingToken, pending)) _clearPending();
+        if (identical(_pendingToken, pending)) {
+          _clearPendingMemory();
+          unawaited(_clearPersistedState());
+        }
         throw const MatrixSsoException(
           'Secure sign-in timed out. Please try again.',
         );
@@ -105,40 +132,53 @@ class MatrixSsoService {
 
   /// Called by the existing app-link dispatcher. Returns true for SSO links
   /// even if they are stale, preventing the token from reaching other handlers.
-  bool handleLink(String value) {
+  Future<bool> handleLink(String value) async {
     final uri = Uri.tryParse(value);
     if (uri == null || !isSupportedCallbackUri(uri)) {
       return false;
     }
 
     final pending = _pendingToken;
-    final expectedState = _state;
-    if (pending == null || expectedState == null) return true;
+    final expectedState = _state ?? await _readPersistedState();
+    if (expectedState == null) {
+      await _clearPersistedState();
+      return true;
+    }
 
     final returnedState = uri.queryParameters['state'];
     final token =
         uri.queryParameters['loginToken'] ?? uri.queryParameters['login_token'];
     final error = uri.queryParameters['error'];
     if (!_constantTimeEquals(returnedState, expectedState)) {
-      pending.completeError(
-        const MatrixSsoException(
-          'Secure sign-in verification failed. Please try again.',
-        ),
-      );
+      if (pending != null && !pending.isCompleted) {
+        pending.completeError(
+          const MatrixSsoException(
+            'Secure sign-in verification failed. Please try again.',
+          ),
+        );
+      }
     } else if (error != null && error.isNotEmpty) {
-      pending.completeError(
-        const MatrixSsoException('Secure sign-in was cancelled.'),
-      );
+      if (pending != null && !pending.isCompleted) {
+        pending.completeError(
+          const MatrixSsoException('Secure sign-in was cancelled.'),
+        );
+      }
     } else if (token == null || token.isEmpty) {
-      pending.completeError(
-        const MatrixSsoException(
-          'Secure sign-in did not return a login token.',
-        ),
-      );
-    } else {
+      if (pending != null && !pending.isCompleted) {
+        pending.completeError(
+          const MatrixSsoException(
+            'Secure sign-in did not return a login token.',
+          ),
+        );
+      }
+    } else if (pending != null && !pending.isCompleted) {
       pending.complete(token);
+    } else {
+      _recoveredToken = token;
+      unawaited(_drainRecoveredToken());
     }
-    _clearPending();
+    _clearPendingMemory();
+    await _clearPersistedState();
     return true;
   }
 
@@ -185,7 +225,62 @@ class MatrixSsoService {
     return difference == 0;
   }
 
-  void _clearPending() {
+  Future<void> _persistState(String state) async {
+    final expiresAt = DateTime.now()
+        .add(_signInLifetime)
+        .millisecondsSinceEpoch;
+    await _secureStorage.write(
+      key: _pendingStateStorageKey,
+      value: jsonEncode({'state': state, 'expiresAt': expiresAt}),
+    );
+  }
+
+  Future<String?> _readPersistedState() async {
+    try {
+      final encoded = await _secureStorage.read(key: _pendingStateStorageKey);
+      if (encoded == null || encoded.isEmpty) return null;
+      final decoded = jsonDecode(encoded);
+      if (decoded is! Map<String, dynamic>) return null;
+      final state = decoded['state'];
+      final expiresAt = decoded['expiresAt'];
+      if (state is! String ||
+          state.isEmpty ||
+          expiresAt is! int ||
+          DateTime.now().millisecondsSinceEpoch >= expiresAt) {
+        return null;
+      }
+      return state;
+    } catch (error) {
+      debugPrint('[MatrixSsoService] Could not restore pending sign-in state.');
+      return null;
+    }
+  }
+
+  Future<void> _clearPersistedState() async {
+    try {
+      await _secureStorage.delete(key: _pendingStateStorageKey);
+    } catch (_) {
+      debugPrint('[MatrixSsoService] Could not clear pending sign-in state.');
+    }
+  }
+
+  Future<void> _drainRecoveredToken() async {
+    final token = _recoveredToken;
+    final handler = _recoveredTokenHandler;
+    if (token == null || handler == null) return;
+    _recoveredToken = null;
+    try {
+      final handled = await handler(token);
+      if (!handled) {
+        debugPrint('[MatrixSsoService] Recovered secure sign-in was rejected.');
+      }
+    } catch (error, stack) {
+      debugPrint('[MatrixSsoService] Recovered secure sign-in failed.');
+      debugPrintStack(stackTrace: stack);
+    }
+  }
+
+  void _clearPendingMemory() {
     _pendingToken = null;
     _state = null;
   }

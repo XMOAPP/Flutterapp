@@ -19,6 +19,7 @@ import '../services/crash_reporting_service.dart';
 import '../services/device_verification_coordinator.dart';
 import '../services/invite_link_service.dart';
 import '../services/matrix_service.dart';
+import '../services/matrix_sso_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/streaming_media_service.dart';
 import '../services/story_service.dart';
@@ -116,6 +117,9 @@ Future<void> _bootstrapServices(MatrixProvider matrixProvider) async {
     );
     return;
   }
+  MatrixSsoService.instance.setRecoveredTokenHandler(
+    matrixProvider.loginWithSsoToken,
+  );
   await DeviceVerificationCoordinator.instance.init(
     navigatorKey: xmoNavigatorKey,
     matrixProvider: matrixProvider,
