@@ -941,14 +941,35 @@ class MatrixService implements MatrixRepositoryApi {
     final token = accessToken;
 
     try {
-      // The SDK uploads inbound keys before its logout request. That is useful
-      // when it succeeds, but a transient upload failure prevents Synapse from
-      // revoking the current access token and deleting its device entry. Send
-      // the standard Matrix logout request first, then always clear local data.
+      await _flushEncryptionKeyBackupBeforeLogout();
       await _logoutRemoteSession(token);
     } finally {
       await _client.clear();
       await _clearLocalDrafts(accountUserId);
+    }
+  }
+
+  Future<void> _flushEncryptionKeyBackupBeforeLogout() async {
+    final encryption = _client.encryption;
+    if (encryption == null ||
+        !encryption.enabled ||
+        !encryption.keyManager.enabled) {
+      return;
+    }
+
+    try {
+      await encryption.keyManager.uploadInboundGroupSessions().timeout(
+        const Duration(seconds: 12),
+      );
+    } on TimeoutException {
+      debugPrint(
+        '[MatrixService] Timed out while backing up encryption keys before logout.',
+      );
+    } catch (error, stack) {
+      debugPrint(
+        '[MatrixService] Encryption key backup before logout failed: $error',
+      );
+      debugPrintStack(stackTrace: stack);
     }
   }
 
@@ -3466,7 +3487,9 @@ class MatrixService implements MatrixRepositoryApi {
   Future<Timeline?> getTimeline(String roomId) async {
     final room = _client.getRoomById(roomId);
     if (room == null) return null;
-    return await room.getTimeline();
+    final timeline = await room.getTimeline();
+    timeline.requestKeys(onlineKeyBackupOnly: false);
+    return timeline;
   }
 
   // ─── Real-time sync ───────────────────────────────────────────────────────

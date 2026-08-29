@@ -85,28 +85,45 @@ void main() {
   });
 
   test(
-    'logout revokes the Matrix device even when encryption key upload fails',
+    'logout backs up room keys and still revokes and clears the session',
     () {
       final service = File(
         'lib/services/matrix_service.dart',
       ).readAsStringSync();
       final logout = service.indexOf('Future<void> logout() async');
+      final backup = service.indexOf(
+        'await _flushEncryptionKeyBackupBeforeLogout();',
+        logout,
+      );
+      final revoke = service.indexOf(
+        'await _logoutRemoteSession(token);',
+        logout,
+      );
+      final clear = service.indexOf('await _client.clear();', logout);
 
       expect(logout, greaterThanOrEqualTo(0));
-      expect(
-        service.indexOf('await _logoutRemoteSession(token);', logout),
-        greaterThan(logout),
-      );
+      expect(backup, greaterThan(logout));
+      expect(revoke, greaterThan(backup));
+      expect(clear, greaterThan(revoke));
+      expect(service, contains('uploadInboundGroupSessions()'));
+      expect(service, contains('const Duration(seconds: 12)'));
       expect(
         service.indexOf("path: '/_matrix/client/v3/logout'"),
         greaterThanOrEqualTo(0),
       );
-      expect(
-        service.indexOf('await _client.clear();', logout),
-        greaterThan(logout),
-      );
     },
   );
+
+  test('room timelines request missing keys from backup and devices', () {
+    final service = File('lib/services/matrix_service.dart').readAsStringSync();
+    final chat = File('lib/screens/matrix_chat_screen.dart').readAsStringSync();
+
+    expect(
+      service,
+      contains('timeline.requestKeys(onlineKeyBackupOnly: false);'),
+    );
+    expect(chat, contains('timeline.requestKeys(onlineKeyBackupOnly: false);'));
+  });
 
   test('wallet post-login setup cannot invalidate authentication', () {
     final provider = File(

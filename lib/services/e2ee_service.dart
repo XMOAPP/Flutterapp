@@ -292,6 +292,7 @@ class E2eeService {
             await bootstrap.askSetupOnlineKeyBackup(true);
             continue;
           case BootstrapState.done:
+            await encryption.keyManager.uploadInboundGroupSessions();
             return E2eeBootstrapResult.success(
               recoveryKey: bootstrap.newSsssKey?.recoveryKey,
             );
