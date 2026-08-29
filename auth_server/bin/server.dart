@@ -139,6 +139,7 @@ const _userDirectoryEndpoints = UserDirectoryEndpointModule(
   registerOidcAccount: _registerOidcAccount,
   prepareSecureRegistration: _prepareSecureRegistration,
   provisionSecureLogin: _provisionSecureLogin,
+  mfaStatus: _getMfaStatus,
 );
 const _reportEndpoints = ReportEndpointModule(
   submit: _submitReport,
@@ -466,6 +467,12 @@ Future<void> _handleRequest(HttpRequest request) async {
     if (request.method == 'GET' &&
         _azureBlobEndpoints.handlesDownload(request.uri.path)) {
       await _azureBlobEndpoints.download(request);
+      return;
+    }
+
+    if (request.method == 'GET' &&
+        _userDirectoryEndpoints.handlesMfaStatus(request.uri.path)) {
+      await _userDirectoryEndpoints.mfaStatus(request);
       return;
     }
 
