@@ -22,21 +22,6 @@ class DonationScreen extends StatefulWidget {
 class _DonationScreenState extends State<DonationScreen> {
   static const _rabbyWalletId =
       '18388be9ac2d02726dbac9777c96efaac06d744b2f6d580fccdd4127a6d01fd1';
-  static const _baseUsdcAbi = '''[
-    {
-      "constant": false,
-      "inputs": [
-        {"name": "to", "type": "address"},
-        {"name": "value", "type": "uint256"}
-      ],
-      "name": "transfer",
-      "outputs": [{"name": "", "type": "bool"}],
-      "payable": false,
-      "stateMutability": "nonpayable",
-      "type": "function"
-    }
-  ]''';
-
   final _amountCtrl = TextEditingController(text: '5');
   final _donationService = const ThirdwebDonationService();
   ReownAppKitModal? _walletModal;
@@ -163,13 +148,9 @@ class _DonationScreenState extends State<DonationScreen> {
       _error = null;
     });
     try {
-      final transfer = await _donationService.createWalletDonationTransfer(
-        amountUsdcSmallestUnit: amount,
-        accessToken: accessToken,
-      );
       final baseNetwork = ReownAppKitModalNetworks.getNetworkInfo(
         'eip155',
-        transfer.chainId.toString(),
+        '8453',
       );
       if (baseNetwork == null) {
         throw StateError('Base network is unavailable.');
@@ -185,24 +166,56 @@ class _DonationScreenState extends State<DonationScreen> {
           topic == null) {
         throw StateError('Reconnect your wallet and try again.');
       }
-
-      final contract = DeployedContract(
-        ContractAbi.fromJson(_baseUsdcAbi, 'USD Coin'),
-        EthereumAddress.fromHex(transfer.tokenAddress),
+      final donation = await _donationService.createNativeDonationPayment(
+        amountUsdcSmallestUnit: amount,
+        accessToken: accessToken,
+        walletAddress: sender,
       );
-      final result = await walletModal.requestWriteContract(
-        topic: topic,
-        chainId: 'eip155:${transfer.chainId}',
-        deployedContract: contract,
-        functionName: 'transfer',
-        transaction: Transaction(from: EthereumAddress.fromHex(sender)),
-        parameters: [
-          EthereumAddress.fromHex(transfer.recipient),
-          transfer.amount,
-        ],
-      );
+      String? settlementHash;
+      for (final transaction in donation.transactions) {
+        if (!DateTime.now().toUtc().isBefore(donation.expiresAt)) {
+          throw StateError('The Thirdweb quote expired. Please try again.');
+        }
+        final result = await walletModal.request(
+          topic: topic,
+          chainId: 'eip155:${transaction.chainId}',
+          request: SessionRequestParams(
+            method: 'eth_sendTransaction',
+            params: [
+              {
+                'from': sender,
+                'to': transaction.to,
+                'data': transaction.data,
+                'value': '0x${transaction.value.toRadixString(16)}',
+              },
+            ],
+          ),
+        );
+        final transactionHash = result?.toString() ?? '';
+        await _recordTransactionWithRetry(
+          donation: donation,
+          transaction: transaction,
+          transactionHash: transactionHash,
+          accessToken: accessToken,
+        );
+        if (transaction.action != 'approval') settlementHash = transactionHash;
+      }
+      var status = 'submitted';
+      for (var attempt = 0; attempt < 8; attempt++) {
+        try {
+          status = await _donationService.getNativeDonationStatus(
+            donationId: donation.id,
+            accessToken: accessToken,
+          );
+        } catch (_) {
+          status = 'submitted';
+          break;
+        }
+        if (status == 'confirmed' || status == 'failed') break;
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
       if (!mounted) return;
-      await _showTransactionSubmitted(result?.toString() ?? '');
+      await _showDonationStatus(status, settlementHash ?? '');
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -214,6 +227,34 @@ class _DonationScreenState extends State<DonationScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _recordTransactionWithRetry({
+    required ThirdwebNativeDonation donation,
+    required ThirdwebNativeTransaction transaction,
+    required String transactionHash,
+    required String accessToken,
+  }) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        await _donationService.submitNativeTransaction(
+          donationId: donation.id,
+          transaction: transaction,
+          transactionHash: transactionHash,
+          accessToken: accessToken,
+        );
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) {
+          await Future<void>.delayed(
+            Duration(milliseconds: 500 * (attempt + 1)),
+          );
+        }
+      }
+    }
+    throw lastError ?? StateError('Could not record the wallet transaction.');
   }
 
   Future<void> _openHostedCheckout() async {
@@ -256,7 +297,10 @@ class _DonationScreenState extends State<DonationScreen> {
     }
   }
 
-  Future<void> _showTransactionSubmitted(String transactionHash) async {
+  Future<void> _showDonationStatus(
+    String status,
+    String transactionHash,
+  ) async {
     final normalizedHash =
         RegExp(r'^0x[0-9a-fA-F]{64}$').hasMatch(transactionHash)
         ? transactionHash
@@ -266,13 +310,21 @@ class _DonationScreenState extends State<DonationScreen> {
       builder: (dialogContext) => AlertDialog(
         backgroundColor: const Color(0xFF1B1B1D),
         title: Text(
-          'Transaction submitted',
+          status == 'confirmed'
+              ? 'Payment completed'
+              : status == 'failed'
+              ? 'Payment failed'
+              : 'Payment submitted',
           style: GoogleFonts.inter(color: kWhite, fontWeight: FontWeight.w700),
         ),
         content: Text(
-          normalizedHash.isEmpty
-              ? 'Your wallet accepted the request. XMO does not confirm payment completion.'
-              : 'Transaction ${normalizedHash.substring(0, 10)}...${normalizedHash.substring(58)} was submitted. XMO does not confirm payment completion.',
+          status == 'confirmed'
+              ? 'Thirdweb verified that your donation was completed.'
+              : status == 'failed'
+              ? 'Thirdweb reported that the payment failed. No donation benefit was granted.'
+              : normalizedHash.isEmpty
+              ? 'Your wallet submitted the payment. Thirdweb is still confirming it.'
+              : 'Transaction ${normalizedHash.substring(0, 10)}...${normalizedHash.substring(58)} was submitted. Thirdweb is still confirming it.',
           style: GoogleFonts.inter(color: kLightGrey, height: 1.4),
         ),
         actions: [
@@ -444,7 +496,7 @@ class _DonationScreenState extends State<DonationScreen> {
                 ],
                 const SizedBox(height: 28),
                 Text(
-                  'Pay directly with Base USDC, or use browser checkout for other payment methods. XMO does not confirm payment completion.',
+                  'Thirdweb processes the payment. Reown connects your wallet for Base USDC, or use browser checkout for other methods.',
                   textAlign: TextAlign.center,
                   style: GoogleFonts.inter(
                     color: kLightGrey,
@@ -512,7 +564,7 @@ class _DonationScreenState extends State<DonationScreen> {
                       onPressed: _busy ? null : _openHostedCheckout,
                       icon: const Icon(Icons.open_in_browser, size: 19),
                       label: Text(
-                        'Browser checkout',
+                        'Thirdweb browser checkout',
                         style: GoogleFonts.inter(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,

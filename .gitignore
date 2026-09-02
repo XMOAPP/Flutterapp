@@ -55,6 +55,7 @@ app.*.map.json
 # Local environment and secrets
 .env
 .env.*
+!auth_server/.env.example
 *.key
 *.pem
 *.p12

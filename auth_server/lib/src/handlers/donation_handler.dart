@@ -1,9 +1,9 @@
 part of xmo_auth_server;
 
+const _donationPlanTtl = Duration(minutes: 5);
+const _thirdwebWebhookBodyLimit = 256 * 1024;
+
 Future<void> _createDonationPayment(HttpRequest request) async {
-  // The authorization boundary resolves this from a Matrix access token before
-  // this handler is reached. Never accept donor identity from the request
-  // body: Thirdweb preserves purchaseData in payment history and webhooks.
   final principal = _matrixRequestPrincipals[request];
   if (principal == null) {
     await _json(request, HttpStatus.unauthorized, {
@@ -11,193 +11,381 @@ Future<void> _createDonationPayment(HttpRequest request) async {
     });
     return;
   }
-
   final body = await _readJson(request);
-  final amount = _parseAmount(body['amountUsdcSmallestUnit']);
-  final checkoutMode = body['checkoutMode']?.toString().trim().toLowerCase();
-
-  if (checkoutMode != null &&
-      checkoutMode.isNotEmpty &&
-      checkoutMode != 'hosted' &&
-      checkoutMode != 'wallet') {
-    await _json(request, HttpStatus.badRequest, {
-      'error': 'Invalid donation checkout mode',
-    });
-    return;
-  }
-
-  if (checkoutMode != 'wallet' && _thirdwebSecretKey.isEmpty) {
-    await _json(request, HttpStatus.internalServerError, {
-      'error': 'Thirdweb secret key is not configured',
-    });
-    return;
-  }
-
-  if (_donationRecipientAddress.isEmpty) {
-    await _json(request, HttpStatus.internalServerError, {
-      'error': 'Donation recipient wallet is not configured',
-    });
-    return;
-  }
-
-  if (amount == null || amount <= BigInt.zero) {
-    await _json(request, HttpStatus.badRequest, {
-      'error': 'Invalid donation amount',
-    });
-    return;
-  }
-
-  final minSmallestUnit = BigInt.from((_minDonationUsd * 1000000).round());
-  if (amount < minSmallestUnit) {
+  final amount = _parseDonationAmount(body['amountUsdcSmallestUnit']);
+  final mode = body['checkoutMode']?.toString().trim().toLowerCase();
+  if (amount == null || amount < BigInt.from(5000000)) {
     await _json(request, HttpStatus.badRequest, {
       'error': 'Minimum donation is \$5',
     });
     return;
   }
-
-  if (checkoutMode == 'wallet') {
+  if (mode != null && mode.isNotEmpty && mode != 'hosted' && mode != 'native') {
+    await _json(request, HttpStatus.badRequest, {
+      'error': 'Invalid donation checkout mode',
+    });
+    return;
+  }
+  if (!_thirdwebGateway.isConfigured ||
+      !_isDonationAddress(_donationRecipientAddress)) {
+    await _json(request, HttpStatus.serviceUnavailable, {
+      'error': 'Donation checkout is not configured',
+    });
+    return;
+  }
+  if (mode == 'native') {
+    await _createNativeDonation(request, principal.userId, body, amount);
+    return;
+  }
+  try {
+    final payment = await _thirdwebGateway.createPaymentLink(
+      amount: amount,
+      recipient: _donationRecipientAddress,
+      purchaseData: const {'source': 'xmo_app'},
+    );
     await _json(request, HttpStatus.ok, {
       'success': true,
-      'transfer': {
-        'chainId': _baseChainId,
-        'tokenAddress': _baseUsdcAddress,
-        'recipient': _donationRecipientAddress,
-        'amount': amount.toString(),
-      },
+      'payment': {'id': payment.id, 'link': payment.link.toString()},
     });
-    return;
-  }
-
-  late final _ThirdwebResponse response;
-  try {
-    response = await _postThirdwebPayment(
-      amountUsdcSmallestUnit: amount,
-      donorUserId: principal.userId,
-    );
-  } on TimeoutException catch (error, stackTrace) {
-    _logger.error('thirdweb_payment_timeout', error, stackTrace);
-    await _json(request, HttpStatus.badGateway, {
-      'error':
-          'Donation checkout is temporarily unavailable. Please try again.',
-    });
-    return;
-  } on SocketException catch (error, stackTrace) {
-    _logger.error('thirdweb_payment_connection_failed', error, stackTrace);
-    await _json(request, HttpStatus.badGateway, {
-      'error':
-          'Donation checkout is temporarily unavailable. Please try again.',
-    });
-    return;
-  } on HttpException catch (error, stackTrace) {
-    _logger.error('thirdweb_payment_request_failed', error, stackTrace);
-    await _json(request, HttpStatus.badGateway, {
-      'error':
-          'Donation checkout is temporarily unavailable. Please try again.',
-    });
-    return;
   } catch (error, stackTrace) {
-    _logger.error('thirdweb_payment_unexpected_failure', error, stackTrace);
+    _logger.error('thirdweb_payment_creation_failed', error, stackTrace);
     await _json(request, HttpStatus.badGateway, {
       'error':
           'Donation checkout is temporarily unavailable. Please try again.',
     });
+  }
+}
+
+Future<void> _createNativeDonation(
+  HttpRequest request,
+  String matrixUserId,
+  Map<String, dynamic> body,
+  BigInt amount,
+) async {
+  final walletAddress = body['walletAddress']?.toString().trim() ?? '';
+  if (!_isDonationAddress(walletAddress)) {
+    await _json(request, HttpStatus.badRequest, {
+      'error': 'Connect a valid wallet before starting payment',
+    });
     return;
   }
-
-  if (response.statusCode < 200 || response.statusCode >= 300) {
-    logWarning('thirdweb_payment_rejected', {
-      'statusCode': response.statusCode,
-      'providerError': _thirdwebErrorMessage(response.body),
+  if (!_donationStoreReady || !_thirdwebWebhookConfigured) {
+    await _json(request, HttpStatus.serviceUnavailable, {
+      'error': 'In-app donation checkout is temporarily unavailable',
     });
+    return;
+  }
+  final donationId = _randomDonationId();
+  final purchaseData = <String, Object?>{
+    'source': 'xmo_app',
+    'donationId': donationId,
+  };
+  try {
+    final link = await _thirdwebGateway.createPaymentLink(
+      amount: amount,
+      recipient: _donationRecipientAddress,
+      purchaseData: purchaseData,
+    );
+    final prepared = await _thirdwebGateway.prepareBaseUsdcPayment(
+      paymentLinkId: link.id,
+      amount: amount,
+      sender: walletAddress,
+      receiver: _donationRecipientAddress,
+      purchaseData: purchaseData,
+    );
+    final now = DateTime.now().toUtc();
+    final maximumExpiration = now.add(_donationPlanTtl);
+    final expiresAt = prepared.expiresAt.isBefore(maximumExpiration)
+        ? prepared.expiresAt
+        : maximumExpiration;
+    final plan = <String, dynamic>{
+      ...prepared.toJson(),
+      'chainId': thirdwebBaseChainId,
+      'tokenAddress': thirdwebBaseUsdcAddress,
+      'recipient': _donationRecipientAddress,
+      'amount': amount.toString(),
+      'expiresAt': expiresAt.toIso8601String(),
+    };
+    await _donationStore.create(
+      DonationRecord(
+        donationId: donationId,
+        thirdwebPaymentId: link.id,
+        matrixUserId: matrixUserId,
+        walletAddress: walletAddress.toLowerCase(),
+        destinationChainId: thirdwebBaseChainId,
+        destinationTokenAddress: thirdwebBaseUsdcAddress.toLowerCase(),
+        recipientAddress: _donationRecipientAddress.toLowerCase(),
+        destinationAmount: amount,
+        plan: plan,
+        status: 'awaiting_signature',
+        createdAt: now,
+        expiresAt: expiresAt,
+        updatedAt: now,
+      ),
+    );
+    await _json(request, HttpStatus.ok, {
+      'success': true,
+      'donation': {'id': donationId, 'status': 'awaiting_signature', ...plan},
+    });
+  } catch (error, stackTrace) {
+    _logger.error('thirdweb_native_payment_creation_failed', error, stackTrace);
     await _json(request, HttpStatus.badGateway, {
       'error':
-          'Donation checkout is temporarily unavailable. Please try again.',
+          'In-app donation checkout is temporarily unavailable. Try browser checkout.',
+    });
+  }
+}
+
+Future<void> _submitDonationTransaction(HttpRequest request) async {
+  final principal = _matrixRequestPrincipals[request];
+  if (principal == null || !_donationStoreReady) {
+    await _json(request, HttpStatus.serviceUnavailable, {
+      'error': 'Donation tracking is temporarily unavailable',
     });
     return;
   }
-
-  final decoded = _decodeJsonMap(response.body);
-  final result = decoded['result'];
-  if (result is! Map<String, dynamic>) {
-    await _json(request, HttpStatus.badGateway, {
-      'error': 'Thirdweb did not return payment details',
+  final body = await _readJson(request);
+  final donationId = body['donationId']?.toString().trim() ?? '';
+  final transactionId = body['transactionId']?.toString().trim() ?? '';
+  final transactionHash = body['transactionHash']?.toString().trim() ?? '';
+  final action = body['action']?.toString().trim().toLowerCase() ?? '';
+  final chainId = int.tryParse(body['chainId']?.toString() ?? '');
+  if (!_isDonationId(donationId) ||
+      transactionId.isEmpty ||
+      !_isDonationTransactionHash(transactionHash) ||
+      action.isEmpty ||
+      chainId != thirdwebBaseChainId) {
+    await _json(request, HttpStatus.badRequest, {
+      'error': 'Invalid donation transaction',
     });
     return;
   }
-
-  final id = result['id']?.toString() ?? '';
-  final link = result['link']?.toString() ?? '';
-  if (id.isEmpty || Uri.tryParse(link) == null) {
-    await _json(request, HttpStatus.badGateway, {
-      'error': 'Thirdweb did not return a checkout link',
+  final donation = await _donationStore.findOwned(
+    donationId: donationId,
+    matrixUserId: principal.userId,
+  );
+  if (donation == null) {
+    await _json(request, HttpStatus.notFound, {'error': 'Donation not found'});
+    return;
+  }
+  if (donation.isExpired && donation.status == 'awaiting_signature') {
+    await _donationStore.updateStatus(
+      donationId: donationId,
+      status: 'expired',
+    );
+    await _json(request, HttpStatus.gone, {'error': 'Donation quote expired'});
+    return;
+  }
+  final accepted = await _donationStore.recordSubmission(
+    donation: donation,
+    transactionId: transactionId,
+    transactionHash: transactionHash.toLowerCase(),
+    action: action,
+    chainId: chainId!,
+  );
+  if (!accepted) {
+    await _json(request, HttpStatus.conflict, {
+      'error': 'Transaction does not match this donation',
     });
     return;
   }
+  await _json(request, HttpStatus.ok, {'success': true, 'status': 'submitted'});
+}
 
+Future<void> _getDonationStatus(HttpRequest request) async {
+  final principal = _matrixRequestPrincipals[request];
+  if (principal == null || !_donationStoreReady) {
+    await _json(request, HttpStatus.serviceUnavailable, {
+      'error': 'Donation tracking is temporarily unavailable',
+    });
+    return;
+  }
+  final donationId = request.uri.queryParameters['id']?.trim() ?? '';
+  if (!_isDonationId(donationId)) {
+    await _json(request, HttpStatus.badRequest, {
+      'error': 'Invalid donation id',
+    });
+    return;
+  }
+  final donation = await _donationStore.findOwned(
+    donationId: donationId,
+    matrixUserId: principal.userId,
+  );
+  if (donation == null) {
+    await _json(request, HttpStatus.notFound, {'error': 'Donation not found'});
+    return;
+  }
+  final status = await _refreshDonationStatus(donation);
   await _json(request, HttpStatus.ok, {
     'success': true,
-    'payment': {'id': id, 'link': link},
+    'donation': {'id': donationId, 'status': status},
   });
 }
 
-Future<_ThirdwebResponse> _postThirdwebPayment({
-  required BigInt amountUsdcSmallestUnit,
-  required String donorUserId,
-}) async {
-  final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
-  try {
-    final request = await client.postUrl(
-      Uri.parse('$_thirdwebBaseUrl/v1/bridge/payments'),
-    );
-    request.headers.contentType = ContentType.json;
-    request.headers.add('x-secret-key', _thirdwebSecretKey);
-    request.write(
-      jsonEncode({
-        'name': 'XMO Donation',
-        'description': 'Support XMO development',
-        'token': {
-          'address': _baseUsdcAddress,
-          'chainId': _baseChainId,
-          'amount': amountUsdcSmallestUnit.toString(),
-        },
-        'recipient': _donationRecipientAddress,
-        'purchaseData': {'source': 'xmo_app', 'donorUserId': donorUserId},
-      }),
-    );
-
-    final response = await request.close().timeout(const Duration(seconds: 15));
-    final body = await utf8.decoder.bind(response).join();
-    return _ThirdwebResponse(statusCode: response.statusCode, body: body);
-  } finally {
-    client.close(force: true);
+Future<void> _handleThirdwebDonationWebhook(HttpRequest request) async {
+  if (!_donationStoreReady || !_thirdwebWebhookConfigured) {
+    await _json(request, HttpStatus.serviceUnavailable, {
+      'error': 'Webhook is not configured',
+    });
+    return;
   }
-}
-
-BigInt? _parseAmount(Object? value) {
-  if (value == null) return null;
-  return BigInt.tryParse(value.toString().trim());
-}
-
-String _thirdwebErrorMessage(String body) {
   try {
-    final decoded = _decodeJsonMap(body);
-    final direct = decoded['message'] ?? decoded['error'];
-    if (direct != null) return direct.toString();
-
-    final result = decoded['result'];
-    if (result is Map<String, dynamic>) {
-      final nested = result['message'] ?? result['error'];
-      if (nested != null) return nested.toString();
+    final rawBody = await _readBoundedText(request, _thirdwebWebhookBodyLimit);
+    final headers = <String, String>{};
+    request.headers.forEach((name, values) {
+      if (values.isNotEmpty) headers[name.toLowerCase()] = values.first;
+    });
+    final webhook = verifyThirdwebWebhook(
+      rawBody: rawBody,
+      headers: headers,
+      secret: _thirdwebWebhookSecret,
+    );
+    if (!await _donationStore.claimWebhookEvent(webhook.digest)) {
+      await _json(request, HttpStatus.ok, {'success': true});
+      return;
     }
-  } catch (_) {
-    // Fall through to a generic message.
+    try {
+      final donationId = _findNestedString(webhook.payload, 'donationId');
+      if (donationId != null && _isDonationId(donationId)) {
+        final donation = await _donationStore.findById(donationId);
+        if (donation != null) {
+          final transactionHash = _findNestedString(
+            webhook.payload,
+            'transactionHash',
+          );
+          if (transactionHash != null &&
+              _isDonationTransactionHash(transactionHash)) {
+            await _refreshDonationStatusForTransaction(
+              donation,
+              transactionHash.toLowerCase(),
+            );
+          } else {
+            await _refreshDonationStatus(donation);
+          }
+        }
+      }
+    } catch (_) {
+      await _donationStore.releaseWebhookEvent(webhook.digest);
+      rethrow;
+    }
+    await _json(request, HttpStatus.ok, {'success': true});
+  } on FormatException {
+    await _json(request, HttpStatus.unauthorized, {'error': 'Invalid webhook'});
+  } catch (error, stackTrace) {
+    _logger.error('thirdweb_webhook_processing_failed', error, stackTrace);
+    await _json(request, HttpStatus.internalServerError, {
+      'error': 'Webhook processing failed',
+    });
   }
-  return 'Unable to create donation checkout link';
 }
 
-class _ThirdwebResponse {
-  final int statusCode;
-  final String body;
-
-  const _ThirdwebResponse({required this.statusCode, required this.body});
+Future<String> _refreshDonationStatus(DonationRecord donation) async {
+  if (const {'confirmed', 'failed', 'expired'}.contains(donation.status)) {
+    return donation.status;
+  }
+  if (donation.isExpired && donation.status == 'awaiting_signature') {
+    await _donationStore.updateStatus(
+      donationId: donation.donationId,
+      status: 'expired',
+    );
+    return 'expired';
+  }
+  final transaction = await _donationStore.settlementTransaction(
+    donation.donationId,
+  );
+  if (transaction == null) return donation.status;
+  return _refreshDonationStatusForTransaction(
+    donation,
+    transaction.transactionHash,
+    transactionId: transaction.transactionId,
+  );
 }
+
+Future<String> _refreshDonationStatusForTransaction(
+  DonationRecord donation,
+  String transactionHash, {
+  String? transactionId,
+}) async {
+  final provider = await _thirdwebGateway.paymentStatus(
+    chainId: thirdwebBaseChainId,
+    transactionHash: transactionHash,
+    transactionId: transactionId,
+  );
+  if (!_statusMatchesDonation(provider, donation)) {
+    logWarning('thirdweb_donation_status_mismatch', {
+      'donationId': donation.donationId,
+    });
+    return donation.status;
+  }
+  final status = switch (provider.status) {
+    'COMPLETED' => 'confirmed',
+    'FAILED' => 'failed',
+    _ => 'submitted',
+  };
+  await _donationStore.updateStatus(
+    donationId: donation.donationId,
+    status: status,
+  );
+  return status;
+}
+
+bool _statusMatchesDonation(
+  ThirdwebPaymentStatus provider,
+  DonationRecord donation,
+) {
+  final purchaseData = provider.purchaseData;
+  final identityMatches =
+      provider.paymentId == donation.thirdwebPaymentId &&
+      purchaseData?['donationId']?.toString() == donation.donationId;
+  if (!identityMatches) return false;
+  if (provider.status == 'FAILED') return true;
+  return provider.status == 'COMPLETED' &&
+      provider.sender?.toLowerCase() == donation.walletAddress &&
+      provider.receiver?.toLowerCase() == donation.recipientAddress &&
+      provider.destinationChainId == donation.destinationChainId &&
+      provider.destinationTokenAddress?.toLowerCase() ==
+          donation.destinationTokenAddress &&
+      provider.destinationAmount == donation.destinationAmount;
+}
+
+Future<String> _readBoundedText(HttpRequest request, int maxBytes) async {
+  final builder = BytesBuilder(copy: false);
+  await for (final chunk in request) {
+    if (builder.length + chunk.length > maxBytes) {
+      throw const FormatException('Request body is too large');
+    }
+    builder.add(chunk);
+  }
+  return utf8.decode(builder.takeBytes());
+}
+
+String? _findNestedString(Object? value, String key) {
+  if (value is Map) {
+    final direct = value[key];
+    if (direct != null) return direct.toString();
+    for (final nested in value.values) {
+      final found = _findNestedString(nested, key);
+      if (found != null) return found;
+    }
+  } else if (value is List) {
+    for (final nested in value) {
+      final found = _findNestedString(nested, key);
+      if (found != null) return found;
+    }
+  }
+  return null;
+}
+
+BigInt? _parseDonationAmount(Object? value) =>
+    BigInt.tryParse(value?.toString().trim() ?? '');
+
+String _randomDonationId() {
+  final bytes = List<int>.generate(16, (_) => _random.nextInt(256));
+  return bytes.map((value) => value.toRadixString(16).padLeft(2, '0')).join();
+}
+
+bool _isDonationId(String value) => RegExp(r'^[0-9a-f]{32}$').hasMatch(value);
+bool _isDonationAddress(String value) =>
+    RegExp(r'^0x[0-9a-fA-F]{40}$').hasMatch(value);
+bool _isDonationTransactionHash(String value) =>
+    RegExp(r'^0x[0-9a-fA-F]{64}$').hasMatch(value);

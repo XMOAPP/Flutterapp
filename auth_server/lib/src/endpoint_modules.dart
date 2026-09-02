@@ -91,13 +91,36 @@ class RecoveryEmailEndpointModule {
 }
 
 class DonationEndpointModule {
-  const DonationEndpointModule(this.create);
+  const DonationEndpointModule({
+    required this.create,
+    required this.submit,
+    required this.status,
+    required this.webhook,
+  });
   final EndpointHandler create;
+  final EndpointHandler submit;
+  final EndpointHandler status;
+  final EndpointHandler webhook;
 
-  bool handles(String path) =>
+  bool handlesCreate(String path) =>
       path == '/donations/create' ||
       path == '/auth/donations/create' ||
       path == '/auth/otp/donations/create';
+
+  bool handlesSubmit(String path) =>
+      path == '/donations/native/submit' ||
+      path == '/auth/donations/native/submit' ||
+      path == '/auth/otp/donations/native/submit';
+
+  bool handlesStatus(String path) =>
+      path == '/donations/native/status' ||
+      path == '/auth/donations/native/status' ||
+      path == '/auth/otp/donations/native/status';
+
+  bool handlesWebhook(String path) =>
+      path == '/donations/thirdweb/webhook' ||
+      path == '/auth/donations/thirdweb/webhook' ||
+      path == '/auth/otp/donations/thirdweb/webhook';
 }
 
 class InviteEndpointModule {
@@ -390,7 +413,8 @@ class EndpointAuthorizationRegistry {
     if (method == 'GET' &&
         (wallet.handlesSession(path) ||
             azureBlob.handlesDownload(path) ||
-            userDirectory.handlesMfaStatus(path))) {
+            userDirectory.handlesMfaStatus(path) ||
+            donation.handlesStatus(path))) {
       return EndpointAuthorizationPolicy.matrixUser;
     }
 
@@ -400,7 +424,8 @@ class EndpointAuthorizationRegistry {
         recoveryEmail.handlesCompleteLocalEnrollment(path) ||
         recoveryEmail.handlesStartChange(path) ||
         recoveryEmail.handlesConfirmChange(path) ||
-        donation.handles(path) ||
+        donation.handlesCreate(path) ||
+        donation.handlesSubmit(path) ||
         invite.handlesCreate(path) ||
         invite.handlesList(path) ||
         invite.handlesRevoke(path) ||
@@ -418,6 +443,10 @@ class EndpointAuthorizationRegistry {
     }
 
     if (push.handles(path)) return EndpointAuthorizationPolicy.internalService;
+
+    if (donation.handlesWebhook(path)) {
+      return EndpointAuthorizationPolicy.public;
+    }
 
     if (otp.handlesSend(path) ||
         otp.handlesVerify(path) ||

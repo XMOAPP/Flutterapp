@@ -12,6 +12,7 @@ import 'package:googleapis_auth/auth_io.dart';
 
 import 'package:xmo_auth_server/src/account_deletion_job_store.dart';
 import 'package:xmo_auth_server/src/cors_policy.dart';
+import 'package:xmo_auth_server/src/donation_store.dart';
 import 'package:xmo_auth_server/src/email_service.dart';
 import 'package:xmo_auth_server/src/email_otp_challenge_store.dart';
 import 'package:xmo_auth_server/src/endpoint_modules.dart';
@@ -24,6 +25,8 @@ import 'package:xmo_auth_server/src/recovery_email_store.dart';
 import 'package:xmo_auth_server/src/room_capacity_policy.dart';
 import 'package:xmo_auth_server/src/secure_login_enrollment_proof_store.dart';
 import 'package:xmo_auth_server/src/structured_logger.dart';
+import 'package:xmo_auth_server/src/thirdweb_payment_gateway.dart';
+import 'package:xmo_auth_server/src/thirdweb_webhook.dart';
 import 'package:xmo_auth_server/src/wallet_auth_service.dart';
 import 'package:xmo_auth_server/src/wallet_account_store.dart';
 
@@ -45,9 +48,10 @@ part '../lib/src/request_authorization.dart';
 final int _port = int.tryParse(Platform.environment['PORT'] ?? '') ?? 3000;
 final String _thirdwebSecretKey =
     Platform.environment['XMO_THIRDWEB_SECRET_KEY'] ?? '';
+final String _thirdwebWebhookSecret =
+    Platform.environment['XMO_THIRDWEB_WEBHOOK_SECRET'] ?? '';
 final String _donationRecipientAddress =
-    Platform.environment['XMO_DONATION_RECIPIENT_ADDRESS'] ??
-    _defaultDonationRecipientAddress;
+    Platform.environment['XMO_DONATION_RECIPIENT_ADDRESS']?.trim() ?? '';
 final String _firebaseServiceAccountJson =
     Platform.environment['XMO_FIREBASE_SERVICE_ACCOUNT_JSON'] ?? '';
 final String _firebaseServiceAccountBase64 =
@@ -103,6 +107,14 @@ final _walletAccountStore = WalletAccountStore(
   config: WalletAccountStoreConfig.fromEnvironment(Platform.environment),
 );
 var _walletAccountStoreReady = false;
+final _thirdwebGateway = ThirdwebPaymentGateway(secretKey: _thirdwebSecretKey);
+final _donationStore = DonationStore(
+  config: DonationStoreConfig.fromEnvironment(Platform.environment),
+);
+var _donationStoreReady = false;
+bool get _thirdwebWebhookConfigured =>
+    _thirdwebWebhookSecret.trim().length >= 32 &&
+    _thirdwebWebhookSecret != _thirdwebSecretKey;
 final _azureBlobConfig = AzureBlobConfig.fromEnvironment(Platform.environment);
 final _reportConfig = ReportConfig.fromEnvironment(Platform.environment);
 final _accountDeletionJobs = AccountDeletionJobStore(
@@ -123,7 +135,12 @@ const _recoveryEmailEndpoints = RecoveryEmailEndpointModule(
   startChange: _startRecoveryEmailChange,
   confirmChange: _confirmRecoveryEmailChange,
 );
-const _donationEndpoints = DonationEndpointModule(_createDonationPayment);
+const _donationEndpoints = DonationEndpointModule(
+  create: _createDonationPayment,
+  submit: _submitDonationTransaction,
+  status: _getDonationStatus,
+  webhook: _handleThirdwebDonationWebhook,
+);
 const _inviteEndpoints = InviteEndpointModule(
   create: _createInviteLink,
   list: _listInviteLinks,
@@ -193,12 +210,6 @@ const _emailOtpSendTargetLimit = 3;
 const _emailOtpSendIpLimit = 10;
 const _emailOtpVerifyIpLimit = 20;
 const _emailOtpQuotaWindow = Duration(hours: 1);
-const _thirdwebBaseUrl = 'https://api.thirdweb.com';
-const _baseUsdcAddress = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-const _defaultDonationRecipientAddress =
-    '0xc1a4BF16f64f5eE26b7C73831eF8bc70f200EacB';
-const _baseChainId = 8453;
-const _minDonationUsd = 5.0;
 const _firebaseMessagingScope =
     'https://www.googleapis.com/auth/firebase.messaging';
 
@@ -248,6 +259,20 @@ Future<void> main() async {
         stackTrace,
       );
     }
+  }
+  if (_donationStore.config.isConfigured && _thirdwebGateway.isConfigured) {
+    try {
+      await _donationStore.initialize();
+      _donationStoreReady = true;
+      logInfo('donation_store_ready');
+    } catch (error, stackTrace) {
+      _logger.error('donation_store_initialization_failed', error, stackTrace);
+    }
+  }
+  if (_thirdwebWebhookConfigured) {
+    logInfo('thirdweb_webhook_ready');
+  } else {
+    logWarning('thirdweb_webhook_not_configured');
   }
   final server = await HttpServer.bind(InternetAddress.anyIPv4, _port);
   stdout.writeln('XMO auth server listening on 0.0.0.0:$_port');
@@ -486,8 +511,23 @@ Future<void> _handleRequest(HttpRequest request) async {
     }
 
     if (request.method == 'POST' &&
-        _donationEndpoints.handles(request.uri.path)) {
+        _donationEndpoints.handlesCreate(request.uri.path)) {
       await _donationEndpoints.create(request);
+      return;
+    }
+    if (request.method == 'POST' &&
+        _donationEndpoints.handlesSubmit(request.uri.path)) {
+      await _donationEndpoints.submit(request);
+      return;
+    }
+    if (request.method == 'GET' &&
+        _donationEndpoints.handlesStatus(request.uri.path)) {
+      await _donationEndpoints.status(request);
+      return;
+    }
+    if (request.method == 'POST' &&
+        _donationEndpoints.handlesWebhook(request.uri.path)) {
+      await _donationEndpoints.webhook(request);
       return;
     }
 
