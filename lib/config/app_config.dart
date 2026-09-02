@@ -166,11 +166,6 @@ class AppConfig {
     defaultValue: '81d97ee5ab262c8d202bc75ca83cc6f5',
   );
 
-  static const donationRecipientAddress = String.fromEnvironment(
-    'XMO_DONATION_RECIPIENT_ADDRESS',
-    defaultValue: '0xc1a4BF16f64f5eE26b7C73831eF8bc70f200EacB',
-  );
-
   static const pushGatewayUrl = String.fromEnvironment(
     'XMO_PUSH_GATEWAY_URL',
     defaultValue:

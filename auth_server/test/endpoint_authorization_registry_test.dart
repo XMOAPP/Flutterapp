@@ -60,7 +60,12 @@ const _registry = EndpointAuthorizationRegistry(
   otp: _otp,
   passwordReset: _passwordReset,
   recoveryEmail: _recoveryEmail,
-  donation: DonationEndpointModule(_noop),
+  donation: DonationEndpointModule(
+    create: _noop,
+    submit: _noop,
+    status: _noop,
+    webhook: _noop,
+  ),
   invite: _invite,
   wallet: _wallet,
   azureBlob: _azureBlob,
@@ -81,6 +86,7 @@ void main() {
       '/donations/create',
       '/auth/donations/create',
       '/auth/otp/donations/create',
+      '/auth/donations/native/submit',
       '/auth/invites/create',
       '/auth/otp/invites/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/redeem',
       '/auth/channel/analytics/view',
@@ -102,6 +108,10 @@ void main() {
     );
     expect(
       policy('GET', '/auth/otp/security/mfa-status'),
+      EndpointAuthorizationPolicy.matrixUser,
+    );
+    expect(
+      policy('GET', '/auth/donations/native/status'),
       EndpointAuthorizationPolicy.matrixUser,
     );
   });
@@ -139,6 +149,14 @@ void main() {
       expect(
         policy('POST', '/_matrix/push/v1/notify'),
         EndpointAuthorizationPolicy.internalService,
+      );
+      expect(
+        policy('POST', '/auth/donations/thirdweb/webhook'),
+        EndpointAuthorizationPolicy.public,
+      );
+      expect(
+        policy('POST', '/donations/thirdweb/webhook'),
+        EndpointAuthorizationPolicy.public,
       );
     },
   );

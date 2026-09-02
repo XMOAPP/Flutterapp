@@ -635,9 +635,30 @@ the wallet-signing domain. It must be a hostname that the reverse proxy
 actually serves for `/auth/media/*`; the current deployment uses the Matrix
 hostname for that route.
 
-Donations open a Thirdweb checkout outside XMO. Until a signed Thirdweb
-webhook, verified transaction store, and idempotent benefit model are deployed,
-the app must not claim that a payment completed or grant donation benefits.
+Donations use Thirdweb as the payment gateway. For in-app Base USDC payments,
+Reown connects the user's wallet and submits only the short-lived transaction
+plan prepared by Thirdweb. Browser checkout remains available for other payment
+methods. Configure a distinct `XMO_THIRDWEB_WEBHOOK_SECRET` of at least 32
+characters from Thirdweb Bridge > Webhooks, pointing to
+`https://xmo-matrix.centralindia.cloudapp.azure.com/auth/otp/donations/thirdweb/webhook`.
+This uses the auth route already forwarded by the production Caddy config.
+Donation records use `XMO_DONATION_DB_*`,
+falling back to `XMO_WALLET_DB_*` when omitted. The webhook secret must differ
+from `XMO_THIRDWEB_SECRET_KEY`. The service must log both
+`donation_store_ready` and `thirdweb_webhook_ready` before in-app checkout is
+enabled.
+
+`XMO_DONATION_RECIPIENT_ADDRESS` is mandatory server configuration. It has no
+compiled fallback and must not be supplied as a Flutter dart-define. Confirm
+the configured address out of band before deployment without exposing any
+secret values.
+
+XMO reports a donation as completed only after Thirdweb status matches the
+stored payment ID, random donation ID, wallet, recipient, Base chain, USDC
+token, and amount. Matrix user IDs are not sent as Thirdweb purchase metadata.
+Webhooks are HMAC verified, timestamp limited, and deduplicated. Do not grant
+donation benefits unless that confirmed state is used idempotently on the
+server.
 
 ### Deterministic quality gates
 
