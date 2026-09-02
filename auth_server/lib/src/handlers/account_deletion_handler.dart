@@ -57,6 +57,14 @@ Future<void> _requestExternalAccountDeletion(HttpRequest request) async {
     });
     return;
   }
+  final subject = _passwordResetKey(username, email);
+  if (!await _consumeEmailOtpSendQuota(
+    request,
+    purpose: EmailOtpPurpose.externalAccountDeletion,
+    subject: subject,
+  )) {
+    return;
+  }
 
   final verified = await _isPasswordResetEmailVerified(
     username: username,
@@ -68,13 +76,18 @@ Future<void> _requestExternalAccountDeletion(HttpRequest request) async {
   }
 
   final otp = (_random.nextInt(900000) + 100000).toString();
-  _accountDeletionStore[_passwordResetKey(
-    username,
-    email,
-  )] = _AccountDeletionRecord(
-    code: otp,
-    expiresAt: DateTime.now().toUtc().add(_accountDeletionTtl),
-  );
+  try {
+    await _emailOtpStore.issue(
+      purpose: EmailOtpPurpose.externalAccountDeletion,
+      subject: subject,
+      code: otp,
+      expiresAt: DateTime.now().toUtc().add(_accountDeletionTtl),
+    );
+  } catch (error, stackTrace) {
+    _logger.error('account_deletion_otp_issue_failed', error, stackTrace);
+    await _json(request, HttpStatus.ok, genericResponse);
+    return;
+  }
   try {
     await _emailService.sendGenericEmail(
       to: email,
@@ -97,7 +110,10 @@ Future<void> _requestExternalAccountDeletion(HttpRequest request) async {
       tag: 'account-deletion',
     );
   } on EmailDeliveryException catch (error) {
-    _accountDeletionStore.remove(_passwordResetKey(username, email));
+    await _removeEmailOtpChallenge(
+      purpose: EmailOtpPurpose.externalAccountDeletion,
+      subject: subject,
+    );
     await _json(request, HttpStatus.badGateway, {'error': error.message});
     return;
   }
@@ -112,42 +128,69 @@ Future<void> _confirmExternalAccountDeletion(HttpRequest request) async {
   final otp = body['otp']?.toString().trim() ?? '';
   if (!_isValidMatrixLocalpart(username) ||
       !_isValidEmail(email) ||
-      otp.length != 6) {
+      !RegExp(r'^\d{6}$').hasMatch(otp)) {
     throw const _BadRequestException('Invalid deletion confirmation');
   }
 
-  final key = _passwordResetKey(username, email);
-  final record = _accountDeletionStore[key];
-  if (record == null) {
-    await _json(request, HttpStatus.badRequest, {
+  final subject = _passwordResetKey(username, email);
+  if (!await _consumeEmailOtpVerificationQuota(
+    request,
+    purpose: EmailOtpPurpose.externalAccountDeletion,
+  )) {
+    return;
+  }
+
+  late final EmailOtpAttemptResult attempt;
+  try {
+    attempt = await _emailOtpStore.claimAttempt(
+      purpose: EmailOtpPurpose.externalAccountDeletion,
+      subject: subject,
+      code: otp,
+      maxAttempts: _maxAttempts,
+      claimTtl: _emailOtpClaimTtl,
+    );
+  } catch (error, stackTrace) {
+    _logger.error('account_deletion_otp_claim_failed', error, stackTrace);
+    await _json(request, HttpStatus.serviceUnavailable, {
       'success': false,
-      'error': 'Deletion code was not requested',
+      'error': 'Account deletion is temporarily unavailable',
     });
     return;
   }
-  if (DateTime.now().toUtc().isAfter(record.expiresAt)) {
-    _accountDeletionStore.remove(key);
-    await _json(request, HttpStatus.badRequest, {
-      'success': false,
-      'error': 'Deletion code expired',
-    });
-    return;
-  }
-  record.attempts += 1;
-  if (record.attempts > _maxAttempts) {
-    _accountDeletionStore.remove(key);
-    await _json(request, HttpStatus.tooManyRequests, {
-      'success': false,
-      'error': 'Too many deletion attempts',
-    });
-    return;
-  }
-  if (record.code != otp) {
-    await _json(request, HttpStatus.badRequest, {
-      'success': false,
-      'error': 'Incorrect deletion code',
-    });
-    return;
+
+  switch (attempt.status) {
+    case EmailOtpAttemptStatus.valid:
+      break;
+    case EmailOtpAttemptStatus.notRequested:
+      await _json(request, HttpStatus.badRequest, {
+        'success': false,
+        'error': 'Deletion code was not requested',
+      });
+      return;
+    case EmailOtpAttemptStatus.expired:
+      await _json(request, HttpStatus.badRequest, {
+        'success': false,
+        'error': 'Deletion code expired',
+      });
+      return;
+    case EmailOtpAttemptStatus.tooManyAttempts:
+      await _json(request, HttpStatus.tooManyRequests, {
+        'success': false,
+        'error': 'Too many deletion attempts',
+      });
+      return;
+    case EmailOtpAttemptStatus.incorrectCode:
+      await _json(request, HttpStatus.badRequest, {
+        'success': false,
+        'error': 'Incorrect deletion code',
+      });
+      return;
+    case EmailOtpAttemptStatus.alreadyProcessing:
+      await _json(request, HttpStatus.conflict, {
+        'success': false,
+        'error': 'Account deletion is already being processed',
+      });
+      return;
   }
 
   final verified = await _isPasswordResetEmailVerified(
@@ -155,7 +198,10 @@ Future<void> _confirmExternalAccountDeletion(HttpRequest request) async {
     email: email,
   );
   if (!verified) {
-    _accountDeletionStore.remove(key);
+    await _removeEmailOtpChallenge(
+      purpose: EmailOtpPurpose.externalAccountDeletion,
+      subject: subject,
+    );
     await _json(request, HttpStatus.forbidden, {
       'success': false,
       'error': 'Email is not verified for this account',
@@ -164,7 +210,31 @@ Future<void> _confirmExternalAccountDeletion(HttpRequest request) async {
   }
 
   final userId = _matrixUserId(username);
-  _accountDeletionStore.remove(key);
+  try {
+    await _emailOtpStore.remove(
+      purpose: EmailOtpPurpose.externalAccountDeletion,
+      subject: subject,
+    );
+  } catch (error, stackTrace) {
+    try {
+      await _emailOtpStore.releaseClaim(
+        purpose: EmailOtpPurpose.externalAccountDeletion,
+        subject: subject,
+      );
+    } catch (releaseError, releaseStackTrace) {
+      _logger.error(
+        'account_deletion_otp_release_failed',
+        releaseError,
+        releaseStackTrace,
+      );
+    }
+    _logger.error('account_deletion_otp_consume_failed', error, stackTrace);
+    await _json(request, HttpStatus.serviceUnavailable, {
+      'success': false,
+      'error': 'Account deletion is temporarily unavailable',
+    });
+    return;
+  }
   await _acceptAccountDeletion(request, userId);
 }
 
@@ -245,7 +315,7 @@ Future<void> _performAccountDeletionJob(String userId) async {
     );
   }
   _accountDeletionJobs.advance(job.userId, AccountDeletionPhase.complete);
-  logInfo('account_deletion_completed', {'userId': job.userId});
+  logInfo('account_deletion_completed');
 }
 
 void _resumePendingAccountDeletionJobs() {
@@ -332,8 +402,18 @@ Future<void> _purgeXmoAccountRecords(String userId) async {
   if (_passwordResetStoreReady) {
     await _passwordResetStore.removeForUsername(localpart);
   }
-  _accountDeletionStore.removeWhere((key, _) => key.startsWith('$localpart|'));
-  if (email != null) _otpStore.remove(email);
+  if (_emailOtpStoreReady) {
+    if (email != null) {
+      await _removeEmailOtpChallenge(
+        purpose: EmailOtpPurpose.registration,
+        subject: email,
+      );
+      await _removeEmailOtpChallenge(
+        purpose: EmailOtpPurpose.externalAccountDeletion,
+        subject: _passwordResetKey(localpart, email),
+      );
+    }
+  }
   if (_walletAccountStoreReady) {
     await _walletAccountStore.removeUsername(localpart);
   }
@@ -380,10 +460,3 @@ const $=id=>document.getElementById(id),status=$('status');async function post(p
 $('send').onclick=async()=>{status.textContent='Sending...';$('send').disabled=true;try{const data=await post('/account-deletion/request',{username:$('username').value,email:$('email').value});status.textContent=data.message;$('confirm').style.display='block'}catch(e){status.textContent=e.message}finally{$('send').disabled=false}};
 $('delete').onclick=async()=>{if(!confirm('Permanently delete this XMO account? This cannot be undone.'))return;status.textContent='Deleting...';$('delete').disabled=true;try{const data=await post('/account-deletion/confirm',{username:$('username').value,email:$('email').value,otp:$('otp').value});status.textContent=data.status==='processing'?'Deletion is processing. Returning to XMO...':'Your XMO account has been deleted. Returning to XMO...';if(data.return_url){$('returnLink').href=data.return_url;$('return').style.display='block';if(/Android/i.test(navigator.userAgent)){setTimeout(()=>{location.href=data.return_url},700)}}$('request').style.display='none';$('confirm').style.display='none'}catch(e){status.textContent=e.message;$('delete').disabled=false}};
 </script></main></body></html>''';
-
-class _AccountDeletionRecord {
-  _AccountDeletionRecord({required this.code, required this.expiresAt});
-  final String code;
-  final DateTime expiresAt;
-  int attempts = 0;
-}

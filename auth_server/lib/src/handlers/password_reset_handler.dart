@@ -31,6 +31,13 @@ Future<void> _startPasswordReset(HttpRequest request) async {
     });
     return;
   }
+  if (!await _consumeEmailOtpSendQuota(
+    request,
+    purpose: EmailOtpPurpose.passwordReset,
+    subject: _passwordResetKey(username, email),
+  )) {
+    return;
+  }
 
   final verified = await _isPasswordResetEmailVerified(
     username: username,
@@ -89,10 +96,7 @@ Future<void> _startPasswordReset(HttpRequest request) async {
     return;
   }
 
-  logInfo('password_reset_otp_sent', {
-    'usernameHash': username.hashCode,
-    'emailHash': email.hashCode,
-  });
+  logInfo('password_reset_otp_sent');
   await _json(request, HttpStatus.ok, {'success': true});
 }
 
@@ -132,6 +136,12 @@ Future<void> _completePasswordReset(HttpRequest request) async {
     await _json(request, HttpStatus.serviceUnavailable, {
       'error': 'Password reset is temporarily unavailable',
     });
+    return;
+  }
+  if (!await _consumeEmailOtpVerificationQuota(
+    request,
+    purpose: EmailOtpPurpose.passwordReset,
+  )) {
     return;
   }
 
@@ -242,7 +252,7 @@ Future<void> _completePasswordReset(HttpRequest request) async {
   }
 
   await _removePasswordResetChallenge(username: username, email: email);
-  logInfo('password_reset_completed', {'usernameHash': username.hashCode});
+  logInfo('password_reset_completed');
   await _json(request, HttpStatus.ok, {'success': true});
 }
 

@@ -103,7 +103,7 @@ class EmailService {
             <p style="margin: 0 0 12px;">You requested this code to verify your email address for XMO Messenger.</p>
             <p style="margin: 0 0 12px;">Enter this verification code in the XMO app:</p>
             <div style="font-size: 32px; font-weight: 700; color: #65C91A; letter-spacing: 6px; margin: 18px 0;">$otp</div>
-            <p style="margin: 0 0 12px;">This code expires in 1 minute.</p>
+            <p style="margin: 0 0 12px;">This code expires in 5 minutes.</p>
             <p style="margin: 20px 0 0; color: #4B5563; font-size: 13px;">If you did not request this code, you can ignore this email.</p>
             <p style="margin: 12px 0 0; color: #4B5563; font-size: 13px;">XMO Messenger will never ask you to share this code with anyone.</p>
             <p style="margin: 16px 0 0; color: #4B5563; font-size: 13px;">Need help? Contact support@xmo.dpdns.org.</p>
@@ -114,7 +114,7 @@ class EmailService {
           'Verify your XMO account\n\n'
           'You requested this code to verify your email address for XMO Messenger.\n\n'
           'Your verification code is: $otp\n\n'
-          'This code expires in 1 minute.\n\n'
+          'This code expires in 5 minutes.\n\n'
           'If you did not request this code, you can ignore this email. XMO Messenger will never ask you to share this code with anyone.\n\n'
           'Need help? Contact support@xmo.dpdns.org.',
       tag: 'otp',

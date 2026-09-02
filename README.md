@@ -549,21 +549,35 @@ does not invalidate a code that has already been emailed. Configure
 characters. The reset store accepts dedicated `XMO_PASSWORD_RESET_DB_*`
 settings; when they are not present it uses the existing `XMO_WALLET_DB_*`
 connection settings. The database user needs permission to create and use the
-`xmo_password_reset_challenges` table. Never log or persist raw reset codes.
+`xmo_password_reset_challenges` table. The reset-code secret is mandatory and
+never falls back to `XMO_WALLET_JWT_SECRET`. Never log or persist raw reset
+codes.
 
-For an existing wallet-account deployment, only the separate reset-code secret
-is required:
+Registration and external account-deletion codes are also stored in
+PostgreSQL. Configure `XMO_EMAIL_OTP_CODE_SECRET` with a different random
+secret of at least 32 characters. Optional `XMO_EMAIL_OTP_DB_*` settings take
+precedence over `XMO_PASSWORD_RESET_DB_*` and `XMO_WALLET_DB_*`; only database
+connection settings fall back. The database user needs permission to create
+and use `xmo_email_otp_challenges` and `xmo_email_otp_rate_limits`. Stored
+subjects, client addresses, and codes are keyed digests rather than plaintext.
+
+For an existing wallet-account deployment, add both independent code secrets
+before deploying this auth-server version:
 
 ```bash
 openssl rand -hex 32
 # Add the generated value to /opt/xmo/auth.env as:
 XMO_PASSWORD_RESET_CODE_SECRET=<generated value>
+openssl rand -hex 32
+# Add the second generated value as:
+XMO_EMAIL_OTP_CODE_SECRET=<different generated value>
 ```
 
-After deployment, `xmo-auth` must log `password_reset_store_ready`. Request a
-reset code, restart only `xmo-auth`, then complete the reset with that same
-code to verify the operational path. The code remains valid for five minutes,
-permits five completion attempts, and is removed after a successful reset.
+After deployment, `xmo-auth` must log `password_reset_store_ready` and
+`email_otp_store_ready`. Request each type of code, restart only `xmo-auth`,
+then complete the corresponding operation with that same code to verify the
+operational paths. Codes are single-use, enforce completion-attempt limits,
+and use durable per-target and per-client-address request quotas.
 
 New and reset passwords must be 15-256 characters. Existing passwords remain
 valid until changed. Mirror this policy in every Authentik enrollment,

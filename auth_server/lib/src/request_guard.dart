@@ -27,11 +27,7 @@ class RequestRateLimiter {
   }
 
   String _clientAddress(HttpRequest request) {
-    return resolveClientAddress(
-      peerAddress: request.connectionInfo?.remoteAddress.address ?? 'unknown',
-      forwardedFor: request.headers.value('x-real-ip'),
-      trustedProxies: trustedProxies,
-    );
+    return resolveRequestClientAddress(request, trustedProxies: trustedProxies);
   }
 
   void _removeExpired(DateTime now) {
@@ -40,6 +36,15 @@ class RequestRateLimiter {
     );
   }
 }
+
+String resolveRequestClientAddress(
+  HttpRequest request, {
+  required TrustedProxyConfig trustedProxies,
+}) => resolveClientAddress(
+  peerAddress: request.connectionInfo?.remoteAddress.address ?? 'unknown',
+  forwardedFor: request.headers.value('x-real-ip'),
+  trustedProxies: trustedProxies,
+);
 
 /// A narrow allow-list of reverse proxies allowed to supply a client address.
 ///
