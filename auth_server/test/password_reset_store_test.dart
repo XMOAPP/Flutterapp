@@ -18,16 +18,18 @@ void main() {
       expect(config.database, 'reset');
       expect(config.username, 'reset_user');
       expect(config.isConfigured, isTrue);
+      expect(config.hasDistinctSecretFrom('w' * 32), isTrue);
+      expect(config.hasDistinctSecretFrom('a' * 32), isFalse);
     });
 
-    test('falls back to the existing wallet database configuration', () {
+    test('reuses wallet database settings with a dedicated reset secret', () {
       final config = PasswordResetStoreConfig.fromEnvironment({
         'XMO_WALLET_DB_HOST': 'postgres',
         'XMO_WALLET_DB_PORT': '5432',
         'XMO_WALLET_DB_NAME': 'xmo_wallet',
         'XMO_WALLET_DB_USER': 'xmo_wallet',
         'XMO_WALLET_DB_PASSWORD': 'wallet-password',
-        'XMO_WALLET_JWT_SECRET': 'b' * 32,
+        'XMO_PASSWORD_RESET_CODE_SECRET': 'b' * 32,
       });
 
       expect(config.database, 'xmo_wallet');
@@ -35,10 +37,20 @@ void main() {
       expect(config.isConfigured, isTrue);
     });
 
-    test('requires a strong secret', () {
+    test('does not fall back to the wallet JWT secret', () {
       final config = PasswordResetStoreConfig.fromEnvironment({
         'XMO_WALLET_DB_PASSWORD': 'wallet-password',
-        'XMO_WALLET_JWT_SECRET': 'short',
+        'XMO_WALLET_JWT_SECRET': 'b' * 32,
+      });
+
+      expect(config.codeSecret, isEmpty);
+      expect(config.isConfigured, isFalse);
+    });
+
+    test('requires a strong dedicated reset secret', () {
+      final config = PasswordResetStoreConfig.fromEnvironment({
+        'XMO_WALLET_DB_PASSWORD': 'wallet-password',
+        'XMO_PASSWORD_RESET_CODE_SECRET': 'short',
       });
 
       expect(config.isConfigured, isFalse);

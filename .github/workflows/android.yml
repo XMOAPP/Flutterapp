@@ -87,6 +87,20 @@ jobs:
     name: Auth server format, analyze, and test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: xmo_auth_test
+          POSTGRES_USER: xmo_auth_test
+          POSTGRES_PASSWORD: xmo_auth_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U xmo_auth_test -d xmo_auth_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: ./.github/actions/setup-flutter
@@ -109,6 +123,14 @@ jobs:
           bash ../tools/ci/run_with_timeout.sh 420 ../build/quality-logs/auth-analyze.log "$DART_BIN" analyze
       - name: Test auth server
         working-directory: auth_server
+        env:
+          XMO_TEST_POSTGRES: "true"
+          XMO_EMAIL_OTP_DB_HOST: 127.0.0.1
+          XMO_EMAIL_OTP_DB_PORT: "5432"
+          XMO_EMAIL_OTP_DB_NAME: xmo_auth_test
+          XMO_EMAIL_OTP_DB_USER: xmo_auth_test
+          XMO_EMAIL_OTP_DB_PASSWORD: xmo_auth_test_password
+          XMO_EMAIL_OTP_CODE_SECRET: ci-only-email-otp-secret-32-bytes-minimum
         run: |
           DART_BIN="$(dirname "$(which flutter)")/cache/dart-sdk/bin/dart"
           bash ../tools/ci/run_with_timeout.sh 600 ../build/quality-logs/auth-test.log "$DART_BIN" test --reporter expanded

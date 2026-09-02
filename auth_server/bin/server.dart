@@ -13,6 +13,7 @@ import 'package:googleapis_auth/auth_io.dart';
 import 'package:xmo_auth_server/src/account_deletion_job_store.dart';
 import 'package:xmo_auth_server/src/cors_policy.dart';
 import 'package:xmo_auth_server/src/email_service.dart';
+import 'package:xmo_auth_server/src/email_otp_challenge_store.dart';
 import 'package:xmo_auth_server/src/endpoint_modules.dart';
 import 'package:xmo_auth_server/src/health_status.dart';
 import 'package:xmo_auth_server/src/password_policy.dart';
@@ -56,7 +57,6 @@ final String _firebaseServiceAccountFile =
 final String _firebaseProjectId =
     Platform.environment['XMO_FIREBASE_PROJECT_ID'] ?? '';
 
-final _otpStore = <String, _OtpRecord>{};
 final _secureLoginEnrollmentProofs = SecureLoginEnrollmentProofStore(
   ttl: _secureLoginEnrollmentProofTtl,
   storageFile: File(
@@ -88,6 +88,10 @@ final _passwordResetStore = PasswordResetStore(
   config: PasswordResetStoreConfig.fromEnvironment(Platform.environment),
 );
 var _passwordResetStoreReady = false;
+final _emailOtpStore = EmailOtpChallengeStore(
+  config: EmailOtpChallengeStoreConfig.fromEnvironment(Platform.environment),
+);
+var _emailOtpStoreReady = false;
 final _recoveryEmailStore = RecoveryEmailStore(
   ttl: _secureLoginEnrollmentProofTtl,
   storageFile: _passwordResetConfig.recoveryEmailStorageFile,
@@ -101,7 +105,6 @@ final _walletAccountStore = WalletAccountStore(
 var _walletAccountStoreReady = false;
 final _azureBlobConfig = AzureBlobConfig.fromEnvironment(Platform.environment);
 final _reportConfig = ReportConfig.fromEnvironment(Platform.environment);
-final _accountDeletionStore = <String, _AccountDeletionRecord>{};
 final _accountDeletionJobs = AccountDeletionJobStore(
   storageFile: File(
     Platform.environment['XMO_ACCOUNT_DELETION_STORE_FILE'] ??
@@ -180,11 +183,16 @@ const _endpointAuthorization = EndpointAuthorizationRegistry(
   push: _pushEndpoints,
 );
 
-const _otpTtl = Duration(minutes: 1);
+const _otpTtl = Duration(minutes: 5);
 const _secureLoginEnrollmentProofTtl = Duration(minutes: 5);
 const _passwordResetTtl = Duration(minutes: 5);
 const _passwordResetClaimTtl = Duration(minutes: 2);
+const _emailOtpClaimTtl = Duration(minutes: 2);
 const _maxAttempts = 5;
+const _emailOtpSendTargetLimit = 3;
+const _emailOtpSendIpLimit = 10;
+const _emailOtpVerifyIpLimit = 20;
+const _emailOtpQuotaWindow = Duration(hours: 1);
 const _thirdwebBaseUrl = 'https://api.thirdweb.com';
 const _baseUsdcAddress = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const _defaultDonationRecipientAddress =
@@ -195,7 +203,9 @@ const _firebaseMessagingScope =
     'https://www.googleapis.com/auth/firebase.messaging';
 
 Future<void> main() async {
-  if (_passwordResetStore.config.isConfigured) {
+  final passwordResetSecretIsolated = _passwordResetStore.config
+      .hasDistinctSecretFrom(_walletAuthService.config.jwtSecret);
+  if (_passwordResetStore.config.isConfigured && passwordResetSecretIsolated) {
     try {
       await _passwordResetStore.initialize();
       _passwordResetStoreReady = true;
@@ -207,6 +217,23 @@ Future<void> main() async {
         stackTrace,
       );
     }
+  } else if (_passwordResetStore.config.isConfigured) {
+    logWarning('password_reset_secret_isolation_failed');
+  }
+  final emailOtpSecretIsolated = _emailOtpStore.config.hasDistinctSecretFrom([
+    _passwordResetStore.config.codeSecret,
+    _walletAuthService.config.jwtSecret,
+  ]);
+  if (_emailOtpStore.config.isConfigured && emailOtpSecretIsolated) {
+    try {
+      await _emailOtpStore.initialize();
+      _emailOtpStoreReady = true;
+      logInfo('email_otp_store_ready');
+    } catch (error, stackTrace) {
+      _logger.error('email_otp_store_initialization_failed', error, stackTrace);
+    }
+  } else if (_emailOtpStore.config.isConfigured) {
+    logWarning('email_otp_secret_isolation_failed');
   }
   if (_walletAccountStore.config.isConfigured &&
       _walletAuthService.config.isConfigured) {

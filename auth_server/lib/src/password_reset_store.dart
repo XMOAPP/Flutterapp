@@ -48,11 +48,7 @@ class PasswordResetStoreConfig {
         'XMO_WALLET_DB_PASSWORD',
         '',
       ),
-      codeSecret: value(
-        'XMO_PASSWORD_RESET_CODE_SECRET',
-        'XMO_WALLET_JWT_SECRET',
-        '',
-      ),
+      codeSecret: env['XMO_PASSWORD_RESET_CODE_SECRET']?.trim() ?? '',
     );
   }
 
@@ -69,12 +65,17 @@ class PasswordResetStoreConfig {
       username.isNotEmpty &&
       password.isNotEmpty &&
       codeSecret.length >= 32;
+
+  bool hasDistinctSecretFrom(String otherSecret) {
+    final other = otherSecret.trim();
+    return other.isEmpty || codeSecret != other;
+  }
 }
 
 /// Hashes a reset code before it reaches persistent storage.
 ///
-/// The action prefix domain-separates this HMAC from other uses of the same
-/// deployment secret while an installation migrates to a dedicated reset key.
+/// The action prefix domain-separates reset-code digests from other uses of the
+/// dedicated reset secret.
 String passwordResetCodeDigest({required String code, required String secret}) {
   return Hmac(
     sha256,

@@ -72,9 +72,9 @@ void main() {
     expect(body['subject'], 'Your XMO verification code');
     expect(body['htmlContent'].toString(), contains('123456'));
     expect(body['htmlContent'].toString(), contains('text-align: center'));
-    expect(body['htmlContent'].toString(), contains('expires in 1 minute'));
+    expect(body['htmlContent'].toString(), contains('expires in 5 minutes'));
     expect(body['textContent'].toString(), contains('XMO Messenger'));
-    expect(body['textContent'].toString(), contains('expires in 1 minute'));
+    expect(body['textContent'].toString(), contains('expires in 5 minutes'));
     expect(body['textContent'].toString(), contains('support@xmo.dpdns.org'));
     expect(body['tags'], ['otp']);
   });
