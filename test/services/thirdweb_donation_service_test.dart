@@ -88,4 +88,61 @@ void main() {
       throwsA(isA<Exception>()),
     );
   });
+
+  test('creates validated Base USDC wallet transfer instructions', () async {
+    final service = ThirdwebDonationService(
+      client: MockClient((request) async {
+        expect(jsonDecode(request.body), {
+          'amountUsdcSmallestUnit': '5000000',
+          'checkoutMode': 'wallet',
+        });
+        return http.Response(
+          jsonEncode({
+            'transfer': {
+              'chainId': 8453,
+              'tokenAddress': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+              'recipient': '0xc1a4BF16f64f5eE26b7C73831eF8bc70f200EacB',
+              'amount': '5000000',
+            },
+          }),
+          200,
+        );
+      }),
+    );
+
+    final transfer = await service.createWalletDonationTransfer(
+      amountUsdcSmallestUnit: BigInt.from(5000000),
+      accessToken: 'matrix-access-token',
+    );
+
+    expect(transfer.chainId, 8453);
+    expect(transfer.tokenAddress, '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
+    expect(transfer.amount, BigInt.from(5000000));
+  });
+
+  test('rejects wallet transfer instructions with a changed amount', () async {
+    final service = ThirdwebDonationService(
+      client: MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'transfer': {
+              'chainId': 8453,
+              'tokenAddress': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+              'recipient': '0xc1a4BF16f64f5eE26b7C73831eF8bc70f200EacB',
+              'amount': '6000000',
+            },
+          }),
+          200,
+        ),
+      ),
+    );
+
+    await expectLater(
+      service.createWalletDonationTransfer(
+        amountUsdcSmallestUnit: BigInt.from(5000000),
+        accessToken: 'matrix-access-token',
+      ),
+      throwsA(isA<Exception>()),
+    );
+  });
 }

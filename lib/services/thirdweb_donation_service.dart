@@ -11,6 +11,20 @@ class ThirdwebDonationPayment {
   const ThirdwebDonationPayment({required this.id, required this.link});
 }
 
+class WalletDonationTransfer {
+  final int chainId;
+  final String tokenAddress;
+  final String recipient;
+  final BigInt amount;
+
+  const WalletDonationTransfer({
+    required this.chainId,
+    required this.tokenAddress,
+    required this.recipient,
+    required this.amount,
+  });
+}
+
 class ThirdwebDonationService {
   const ThirdwebDonationService({http.Client? client}) : _client = client;
 
@@ -55,6 +69,60 @@ class ThirdwebDonationService {
       }
 
       return ThirdwebDonationPayment(id: id, link: link!);
+    } finally {
+      if (_client == null) client.close();
+    }
+  }
+
+  Future<WalletDonationTransfer> createWalletDonationTransfer({
+    required BigInt amountUsdcSmallestUnit,
+    required String accessToken,
+  }) async {
+    final token = accessToken.trim();
+    if (token.isEmpty) {
+      throw StateError('Your XMO session is unavailable. Sign in again.');
+    }
+    final client = _client ?? http.Client();
+    try {
+      final response = await client.post(
+        _endpoint(),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'amountUsdcSmallestUnit': amountUsdcSmallestUnit.toString(),
+          'checkoutMode': 'wallet',
+        }),
+      );
+
+      final decoded = _decodeJson(response.body);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception(_errorMessage(decoded));
+      }
+
+      final transfer = decoded['transfer'];
+      if (transfer is! Map<String, dynamic>) {
+        throw Exception('Donation server did not return transfer details.');
+      }
+      final chainId = int.tryParse(transfer['chainId']?.toString() ?? '');
+      final tokenAddress = transfer['tokenAddress']?.toString() ?? '';
+      final recipient = transfer['recipient']?.toString() ?? '';
+      final amount = BigInt.tryParse(transfer['amount']?.toString() ?? '');
+      if (chainId != 8453 ||
+          !_isEthereumAddress(tokenAddress) ||
+          !_isEthereumAddress(recipient) ||
+          amount == null ||
+          amount != amountUsdcSmallestUnit) {
+        throw Exception('Donation server returned invalid transfer details.');
+      }
+
+      return WalletDonationTransfer(
+        chainId: chainId!,
+        tokenAddress: tokenAddress,
+        recipient: recipient,
+        amount: amount,
+      );
     } finally {
       if (_client == null) client.close();
     }
@@ -109,4 +177,7 @@ class ThirdwebDonationService {
       link.scheme == 'https' &&
       link.host.isNotEmpty &&
       link.userInfo.isEmpty;
+
+  bool _isEthereumAddress(String value) =>
+      RegExp(r'^0x[0-9a-fA-F]{40}$').hasMatch(value);
 }

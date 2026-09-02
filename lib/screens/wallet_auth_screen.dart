@@ -45,8 +45,12 @@ class _WalletAuthScreenState extends State<WalletAuthScreen> {
   @override
   void dispose() {
     _usernameCtrl.dispose();
-    _appKitModal?.removeListener(_onWalletStateChanged);
-    _appKitModal?.dispose();
+    final appKitModal = _appKitModal;
+    if (appKitModal != null) {
+      WalletDeepLinkHandler.detach(appKitModal);
+      appKitModal.removeListener(_onWalletStateChanged);
+      appKitModal.dispose();
+    }
     super.dispose();
   }
 

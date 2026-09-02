@@ -31,6 +31,12 @@ class WalletDeepLinkHandler {
     Future<void>.microtask(_flushPendingWalletLinks);
   }
 
+  static void detach(IReownAppKitModal appKitModal) {
+    if (identical(_appKitModal, appKitModal)) {
+      _appKitModal = null;
+    }
+  }
+
   static Future<void> checkInitialLink() async {
     if (kIsWeb) return;
     try {
