@@ -14,8 +14,19 @@ Future<void> _createDonationPayment(HttpRequest request) async {
 
   final body = await _readJson(request);
   final amount = _parseAmount(body['amountUsdcSmallestUnit']);
+  final checkoutMode = body['checkoutMode']?.toString().trim().toLowerCase();
 
-  if (_thirdwebSecretKey.isEmpty) {
+  if (checkoutMode != null &&
+      checkoutMode.isNotEmpty &&
+      checkoutMode != 'hosted' &&
+      checkoutMode != 'wallet') {
+    await _json(request, HttpStatus.badRequest, {
+      'error': 'Invalid donation checkout mode',
+    });
+    return;
+  }
+
+  if (checkoutMode != 'wallet' && _thirdwebSecretKey.isEmpty) {
     await _json(request, HttpStatus.internalServerError, {
       'error': 'Thirdweb secret key is not configured',
     });
@@ -40,6 +51,19 @@ Future<void> _createDonationPayment(HttpRequest request) async {
   if (amount < minSmallestUnit) {
     await _json(request, HttpStatus.badRequest, {
       'error': 'Minimum donation is \$5',
+    });
+    return;
+  }
+
+  if (checkoutMode == 'wallet') {
+    await _json(request, HttpStatus.ok, {
+      'success': true,
+      'transfer': {
+        'chainId': _baseChainId,
+        'tokenAddress': _baseUsdcAddress,
+        'recipient': _donationRecipientAddress,
+        'amount': amount.toString(),
+      },
     });
     return;
   }
