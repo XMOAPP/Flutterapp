@@ -198,8 +198,17 @@ class _LoginScreenState extends State<LoginScreen>
         onError: (err) {
           if (!mounted) return;
           Navigator.pop(context);
+          final isRateLimited =
+              err.toLowerCase().contains('too many verification requests') ||
+              err.toLowerCase().contains('too many requests');
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(err), backgroundColor: Colors.red),
+            SnackBar(
+              content: Text(
+                err,
+                style: isRateLimited ? GoogleFonts.inter(color: kBlack) : null,
+              ),
+              backgroundColor: isRateLimited ? kWhite : Colors.red,
+            ),
           );
         },
       );
