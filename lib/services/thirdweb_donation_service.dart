@@ -50,11 +50,11 @@ class ThirdwebDonationService {
       final id = payment['id']?.toString();
       final linkRaw = payment['link']?.toString();
       final link = linkRaw == null ? null : Uri.tryParse(linkRaw);
-      if (id == null || id.isEmpty || link == null) {
+      if (id == null || id.isEmpty || !_isSafeCheckoutLink(link)) {
         throw Exception('Donation server did not return a checkout link.');
       }
 
-      return ThirdwebDonationPayment(id: id, link: link);
+      return ThirdwebDonationPayment(id: id, link: link!);
     } finally {
       if (_client == null) client.close();
     }
@@ -102,4 +102,11 @@ class ThirdwebDonationService {
     }
     return null;
   }
+
+  bool _isSafeCheckoutLink(Uri? link) =>
+      link != null &&
+      link.isAbsolute &&
+      link.scheme == 'https' &&
+      link.host.isNotEmpty &&
+      link.userInfo.isEmpty;
 }

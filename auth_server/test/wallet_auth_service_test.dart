@@ -8,6 +8,45 @@ import 'package:web3dart/web3dart.dart';
 import 'package:xmo_auth_server/src/wallet_auth_service.dart';
 
 void main() {
+  group('WalletAuthConfig production origin', () {
+    test('fails closed when the wallet origin is absent', () {
+      final config = WalletAuthConfig.fromEnvironment({
+        'XMO_WALLET_JWT_SECRET': 'a' * 32,
+        'XMO_WALLET_JWT_ISSUER': 'xmo-wallet-auth',
+        'XMO_WALLET_JWT_AUDIENCE': 'xmo-matrix',
+      });
+
+      expect(config.domain, isEmpty);
+      expect(config.uri, isEmpty);
+      expect(config.isConfigured, isFalse);
+    });
+
+    test('requires an HTTPS URI for the configured signing domain', () {
+      final invalidConfigs = <WalletAuthConfig>[
+        const WalletAuthConfig(
+          jwtSecret: 'test-wallet-secret-that-is-long-enough-for-hmac',
+          jwtIssuer: 'xmo-wallet-auth',
+          jwtAudience: 'xmo-matrix',
+          domain: 'xmo.dpdns.org',
+          uri: 'http://xmo.dpdns.org',
+          statement: 'Sign in to XMO.',
+        ),
+        const WalletAuthConfig(
+          jwtSecret: 'test-wallet-secret-that-is-long-enough-for-hmac',
+          jwtIssuer: 'xmo-wallet-auth',
+          jwtAudience: 'xmo-matrix',
+          domain: 'xmo.dpdns.org',
+          uri: 'https://other.example',
+          statement: 'Sign in to XMO.',
+        ),
+      ];
+
+      for (final config in invalidConfigs) {
+        expect(config.isConfigured, isFalse);
+      }
+    });
+  });
+
   group('WalletAuthService username rules', () {
     test('normalizes capitals and rejects punctuation', () {
       expect(WalletAuthService.normalizeUsername('Alice01'), 'alice01');
@@ -63,6 +102,35 @@ void main() {
     expect(claims['aud'], 'xmo-matrix');
     expect((claims['exp'] as int) - (claims['iat'] as int), 60);
   });
+
+  test(
+    'includes only the configured public XMO origin in the signing prompt',
+    () {
+      final service = WalletAuthService(
+        config: const WalletAuthConfig(
+          jwtSecret: 'test-wallet-secret-that-is-long-enough-for-hmac',
+          jwtIssuer: 'xmo-wallet-auth',
+          jwtAudience: 'xmo-matrix',
+          domain: 'xmo.dpdns.org',
+          uri: 'https://xmo.dpdns.org',
+          statement: 'Sign in to XMO.',
+        ),
+      );
+
+      final challenge = service.createChallenge(
+        username: 'alice',
+        address: '0x0000000000000000000000000000000000000001',
+        mode: 'login',
+      );
+
+      expect(challenge.message, contains('xmo.dpdns.org wants you to sign in'));
+      expect(challenge.message, contains('URI: https://xmo.dpdns.org'));
+      expect(
+        challenge.message,
+        isNot(contains('centralindia.cloudapp.azure.com')),
+      );
+    },
+  );
 
   test('verifies Solana Ed25519 challenge', () async {
     final service = WalletAuthService(

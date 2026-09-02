@@ -67,4 +67,25 @@ void main() {
       expect(called, isFalse);
     },
   );
+
+  test('rejects an insecure checkout URL returned by the server', () async {
+    final service = ThirdwebDonationService(
+      client: MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'payment': {'id': 'payment-123', 'link': 'http://checkout.test'},
+          }),
+          200,
+        ),
+      ),
+    );
+
+    await expectLater(
+      service.createDonationPayment(
+        amountUsdcSmallestUnit: BigInt.from(5000000),
+        accessToken: 'matrix-access-token',
+      ),
+      throwsA(isA<Exception>()),
+    );
+  });
 }

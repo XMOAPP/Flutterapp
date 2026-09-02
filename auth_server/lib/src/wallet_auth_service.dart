@@ -20,14 +20,10 @@ class WalletAuthConfig {
   factory WalletAuthConfig.fromEnvironment(Map<String, String> env) {
     return WalletAuthConfig(
       jwtSecret: env['XMO_WALLET_JWT_SECRET'] ?? '',
-      jwtIssuer: env['XMO_WALLET_JWT_ISSUER'] ?? 'xmo-wallet-auth',
-      jwtAudience: env['XMO_WALLET_JWT_AUDIENCE'] ?? 'xmo-matrix',
-      domain:
-          env['XMO_WALLET_AUTH_DOMAIN'] ??
-          'xmo-matrix.centralindia.cloudapp.azure.com',
-      uri:
-          env['XMO_WALLET_AUTH_URI'] ??
-          'https://xmo-matrix.centralindia.cloudapp.azure.com',
+      jwtIssuer: env['XMO_WALLET_JWT_ISSUER'] ?? '',
+      jwtAudience: env['XMO_WALLET_JWT_AUDIENCE'] ?? '',
+      domain: env['XMO_WALLET_AUTH_DOMAIN'] ?? '',
+      uri: env['XMO_WALLET_AUTH_URI'] ?? '',
       statement:
           env['XMO_WALLET_AUTH_STATEMENT'] ??
           'Sign in to XMO Messenger. This request will not trigger a blockchain transaction.',
@@ -44,7 +40,36 @@ class WalletAuthConfig {
   bool get isConfigured =>
       jwtSecret.trim().length >= 32 &&
       jwtIssuer.trim().isNotEmpty &&
-      jwtAudience.trim().isNotEmpty;
+      jwtAudience.trim().isNotEmpty &&
+      _hasValidOrigin;
+
+  /// Wallet signatures are a user-visible security boundary. Do not fall back
+  /// to an infrastructure hostname when the public XMO origin is missing.
+  bool get _hasValidOrigin {
+    final configuredDomain = domain.trim().toLowerCase();
+    final parsedUri = Uri.tryParse(uri.trim());
+    if (configuredDomain.isEmpty ||
+        !_isValidHostname(configuredDomain) ||
+        parsedUri == null ||
+        parsedUri.scheme != 'https' ||
+        !parsedUri.hasAuthority ||
+        parsedUri.host.toLowerCase() != configuredDomain ||
+        parsedUri.hasPort ||
+        parsedUri.userInfo.isNotEmpty ||
+        (parsedUri.path.isNotEmpty && parsedUri.path != '/') ||
+        parsedUri.hasQuery ||
+        parsedUri.hasFragment) {
+      return false;
+    }
+    return true;
+  }
+
+  static bool _isValidHostname(String value) {
+    if (value.length > 253 || value.contains('..')) return false;
+    return RegExp(
+      r'^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$',
+    ).hasMatch(value);
+  }
 }
 
 class WalletAuthService {
