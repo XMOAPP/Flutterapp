@@ -228,10 +228,7 @@ class AzureBlobConfig {
       container: container,
       accountKey: environment['XMO_AZURE_BLOB_ACCOUNT_KEY'] ?? '',
       endpoint: endpoint,
-      publicBaseUrl:
-          environment['XMO_PUBLIC_BASE_URL'] ??
-          environment['XMO_WALLET_AUTH_URI'] ??
-          '',
+      publicBaseUrl: environment['XMO_PUBLIC_BASE_URL'] ?? '',
       homeserverUrl: environment['XMO_HOMESERVER_URL'] ?? 'http://synapse:8008',
       uploadTtl: Duration(
         minutes:

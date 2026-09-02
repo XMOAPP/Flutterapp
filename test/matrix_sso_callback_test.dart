@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xmo/services/matrix_sso_service.dart';
 
@@ -33,4 +35,13 @@ void main() {
       );
     },
   );
+
+  test('Android reuses the active XMO task for SSO callbacks', () {
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+
+    expect(manifest, contains('android:launchMode="singleTask"'));
+    expect(manifest, contains('android:pathPrefix="/auth/callback"'));
+  });
 }

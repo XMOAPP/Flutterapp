@@ -4,6 +4,72 @@ final _authentikConfig = AuthentikProvisioningConfig.fromEnvironment(
   Platform.environment,
 );
 
+Future<void> _getMfaStatus(HttpRequest request) async {
+  if (!_authentikConfig.isConfigured) {
+    await _json(request, HttpStatus.serviceUnavailable, {
+      'success': false,
+      'error': 'Two-step verification status is unavailable',
+    });
+    return;
+  }
+
+  final token = _userDirectoryBearerToken(request);
+  if (token == null) {
+    await _unauthorized(request);
+    return;
+  }
+
+  try {
+    final userId = await _userDirectoryWhoamiForRequest(request, token);
+    final username = _normalizeMatrixLocalpart(userId);
+    final user = await _authentikFindUser(username);
+    if (user == null) {
+      await _json(request, HttpStatus.notFound, {
+        'success': false,
+        'error': 'Secure sign-in account was not found',
+      });
+      return;
+    }
+
+    await _json(request, HttpStatus.ok, {
+      'success': true,
+      'enrolled': await _authentikHasConfirmedTotp(user.pk),
+    });
+  } catch (error, stackTrace) {
+    _logger.error('mfa_status_lookup_failed', error, stackTrace);
+    await _json(request, HttpStatus.badGateway, {
+      'success': false,
+      'error': 'Could not check two-step verification status',
+    });
+  }
+}
+
+Future<bool> _authentikHasConfirmedTotp(int userPk) async {
+  final response = await _authentikRequest(
+    method: 'GET',
+    pathSegments: ['api', 'v3', 'authenticators', 'admin', 'all'],
+    queryParameters: {'user': userPk.toString()},
+  );
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw HttpException(
+      'Authentik authenticator lookup failed: ${response.statusCode}',
+    );
+  }
+
+  final decoded = jsonDecode(response.body);
+  final results = decoded is List
+      ? decoded
+      : _asList(_asMap(decoded)?['results']) ?? const <dynamic>[];
+  for (final item in results) {
+    final device = _asMap(item);
+    if (device == null || device['confirmed'] != true) continue;
+    final type = device['type']?.toString().toLowerCase() ?? '';
+    final modelName = device['meta_model_name']?.toString().toLowerCase() ?? '';
+    if (type.contains('totp') || modelName.contains('totp')) return true;
+  }
+  return false;
+}
+
 /// Performs an early registration check so an unavailable username is
 /// rejected before an email OTP is sent. Registration repeats these checks
 /// transactionally because availability can change after this response.

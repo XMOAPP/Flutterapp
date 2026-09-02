@@ -598,6 +598,33 @@ login module, and test new-wallet registration, existing-wallet login,
 username collision, nonce expiry, replay, invalid signature, logout, and
 device-session creation.
 
+Wallet sign-in is fail-closed. Configure these exact production values in the
+auth-server secret environment; do not rely on defaults and do not put any of
+these values in Flutter dart-defines:
+
+```text
+XMO_WALLET_AUTH_DOMAIN=xmo.dpdns.org
+XMO_WALLET_AUTH_URI=https://xmo.dpdns.org
+XMO_WALLET_JWT_SECRET=<one random secret shared with Synapse>
+XMO_WALLET_JWT_ISSUER=xmo-wallet-auth
+XMO_WALLET_JWT_AUDIENCE=xmo-matrix
+XMO_PUBLIC_BASE_URL=https://xmo-matrix.centralindia.cloudapp.azure.com
+```
+
+The auth server and Synapse must use identical JWT secret, issuer, and
+audience settings. Compare redacted SHA-256 digests during deployment and
+record only `match` or `mismatch`; never print their values. Wallet prompts
+must show `xmo.dpdns.org`, never an Azure or container hostname.
+
+`XMO_PUBLIC_BASE_URL` is the externally reachable auth/media API origin, not
+the wallet-signing domain. It must be a hostname that the reverse proxy
+actually serves for `/auth/media/*`; the current deployment uses the Matrix
+hostname for that route.
+
+Donations open a Thirdweb checkout outside XMO. Until a signed Thirdweb
+webhook, verified transaction store, and idempotent benefit model are deployed,
+the app must not claim that a payment completed or grant donation benefits.
+
 ### Deterministic quality gates
 
 Run from the Flutter project root:

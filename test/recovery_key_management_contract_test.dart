@@ -39,6 +39,25 @@ void main() {
       expect(setDefault, greaterThan(verify));
     });
 
+    test(
+      'backup setup uploads existing room keys before reporting success',
+      () {
+        final done = service.indexOf('case BootstrapState.done:');
+        final upload = service.indexOf(
+          'await encryption.keyManager.uploadInboundGroupSessions();',
+          done,
+        );
+        final success = service.indexOf(
+          'return E2eeBootstrapResult.success(',
+          done,
+        );
+
+        expect(done, greaterThan(-1));
+        expect(upload, greaterThan(done));
+        expect(success, greaterThan(upload));
+      },
+    );
+
     test('sensitive display uses Android screenshot protection', () {
       expect(securityUi, contains('setProtected(true)'));
       expect(securityUi, contains('setProtected(false)'));

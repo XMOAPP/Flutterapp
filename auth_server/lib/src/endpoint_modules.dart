@@ -213,6 +213,7 @@ class UserDirectoryEndpointModule {
     required this.registerOidcAccount,
     required this.prepareSecureRegistration,
     required this.provisionSecureLogin,
+    required this.mfaStatus,
   });
 
   final EndpointHandler upsert;
@@ -221,6 +222,7 @@ class UserDirectoryEndpointModule {
   final EndpointHandler registerOidcAccount;
   final EndpointHandler prepareSecureRegistration;
   final EndpointHandler provisionSecureLogin;
+  final EndpointHandler mfaStatus;
 
   bool handlesUpsert(String path) =>
       path == '/users/upsert' ||
@@ -251,6 +253,11 @@ class UserDirectoryEndpointModule {
       path == '/users/provision-secure-login' ||
       path == '/auth/users/provision-secure-login' ||
       path == '/auth/otp/users/provision-secure-login';
+
+  bool handlesMfaStatus(String path) =>
+      path == '/security/mfa-status' ||
+      path == '/auth/security/mfa-status' ||
+      path == '/auth/otp/security/mfa-status';
 }
 
 class ReportEndpointModule {
@@ -381,7 +388,9 @@ class EndpointAuthorizationRegistry {
       return EndpointAuthorizationPolicy.public;
     }
     if (method == 'GET' &&
-        (wallet.handlesSession(path) || azureBlob.handlesDownload(path))) {
+        (wallet.handlesSession(path) ||
+            azureBlob.handlesDownload(path) ||
+            userDirectory.handlesMfaStatus(path))) {
       return EndpointAuthorizationPolicy.matrixUser;
     }
 

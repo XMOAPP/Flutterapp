@@ -175,6 +175,16 @@ class _DonationScreenState extends State<DonationScreen> {
                   _ErrorBox(_error!),
                 ],
                 const SizedBox(height: 28),
+                Text(
+                  'Donation checkout is handled externally. XMO does not process or confirm payments in the app.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(
+                    color: kLightGrey,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 20),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 34),
                   child: SizedBox(
@@ -200,7 +210,7 @@ class _DonationScreenState extends State<DonationScreen> {
                               ),
                             )
                           : Text(
-                              'Donate',
+                              'Continue to checkout',
                               style: GoogleFonts.inter(
                                 fontSize: 15,
                                 fontWeight: FontWeight.w700,

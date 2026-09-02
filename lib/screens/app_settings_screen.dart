@@ -27,6 +27,7 @@ import '../services/app_settings_service.dart';
 import '../services/direct_chat_service.dart';
 import '../services/e2ee_service.dart';
 import '../services/mfa_setup_completion_service.dart';
+import '../services/mfa_status_service.dart';
 import '../services/matrix_sso_service.dart';
 import '../services/matrix_uia_fallback_service.dart';
 import '../services/privacy_service.dart';
@@ -1798,7 +1799,8 @@ class TwoFactorStatusScreen extends StatefulWidget {
   State<TwoFactorStatusScreen> createState() => _TwoFactorStatusScreenState();
 }
 
-class _TwoFactorStatusScreenState extends State<TwoFactorStatusScreen> {
+class _TwoFactorStatusScreenState extends State<TwoFactorStatusScreen>
+    with WidgetsBindingObserver {
   static const _secureStorage = FlutterSecureStorage();
   static const _setupStatusKeyPrefix = 'xmo_mfa_setup_completed_v1_';
 
@@ -1806,6 +1808,7 @@ class _TwoFactorStatusScreenState extends State<TwoFactorStatusScreen> {
   bool _setupCompleted = false;
   bool _setupStarting = false;
   bool _setupStatusLoading = true;
+  bool _setupStatusFailed = false;
 
   String? get _setupStatusKey {
     final userId = context.read<MatrixProvider>().userId?.trim();
@@ -1816,6 +1819,7 @@ class _TwoFactorStatusScreenState extends State<TwoFactorStatusScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final completionService = MfaSetupCompletionService.instance;
     _setupCompleted = completionService.consumePendingCompletion();
     _completionSubscription = completionService.completions.listen((_) {
@@ -1827,21 +1831,59 @@ class _TwoFactorStatusScreenState extends State<TwoFactorStatusScreen> {
   }
 
   Future<void> _loadSetupStatus() async {
-    var completed = _setupCompleted;
+    if (mounted) {
+      setState(() {
+        _setupStatusLoading = true;
+        _setupStatusFailed = false;
+      });
+    }
+    var cachedCompleted = _setupCompleted;
     final storageKey = _setupStatusKey;
-    if (storageKey != null && !completed) {
+    if (storageKey != null && !cachedCompleted) {
       try {
-        completed = await _secureStorage.read(key: storageKey) == 'true';
+        cachedCompleted = await _secureStorage.read(key: storageKey) == 'true';
       } catch (_) {
-        // The completion callback still updates the current screen if secure
-        // storage is unavailable on a device.
+        // Continue with the server-side source of truth.
       }
     }
-    if (!mounted) return;
-    setState(() {
-      _setupCompleted = _setupCompleted || completed;
-      _setupStatusLoading = false;
-    });
+
+    try {
+      final token = context.read<MatrixProvider>().service.accessToken ?? '';
+      final enrolled = await const MfaStatusService().isTotpEnrolled(
+        accessToken: token,
+      );
+      if (storageKey != null) {
+        try {
+          if (enrolled) {
+            await _secureStorage.write(key: storageKey, value: 'true');
+          } else {
+            await _secureStorage.delete(key: storageKey);
+          }
+        } catch (_) {
+          // The server result remains authoritative for the current screen.
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _setupCompleted = enrolled;
+        _setupStatusLoading = false;
+        _setupStatusFailed = false;
+      });
+    } on MfaStatusException {
+      if (!mounted) return;
+      setState(() {
+        _setupCompleted = cachedCompleted;
+        _setupStatusLoading = false;
+        _setupStatusFailed = !cachedCompleted;
+      });
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_setupStarting) {
+      unawaited(_loadSetupStatus());
+    }
   }
 
   Future<void> _markSetupCompleted({required bool showConfirmation}) async {
@@ -1871,6 +1913,7 @@ class _TwoFactorStatusScreenState extends State<TwoFactorStatusScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     unawaited(_completionSubscription?.cancel());
     super.dispose();
   }
@@ -1879,6 +1922,14 @@ class _TwoFactorStatusScreenState extends State<TwoFactorStatusScreen> {
     if (_setupStarting) return;
     setState(() => _setupStarting = true);
     try {
+      final token = context.read<MatrixProvider>().service.accessToken ?? '';
+      final enrolled = await const MfaStatusService().isTotpEnrolled(
+        accessToken: token,
+      );
+      if (enrolled) {
+        await _markSetupCompleted(showConfirmation: false);
+        return;
+      }
       // Authentik owns this browser flow. Starting Matrix SSO here first
       // causes the browser to return to XMO before the QR setup is opened.
       final opened = await launchUrl(
@@ -1970,6 +2021,8 @@ class _TwoFactorStatusScreenState extends State<TwoFactorStatusScreen> {
               title: 'Authenticator app',
               subtitle: _setupCompleted
                   ? 'Set up'
+                  : _setupStatusFailed
+                  ? 'Status unavailable'
                   : 'Set up after verification',
               complete: _setupCompleted,
             ),
@@ -1981,9 +2034,13 @@ class _TwoFactorStatusScreenState extends State<TwoFactorStatusScreen> {
                   ? 'Verifying...'
                   : _setupCompleted
                   ? 'Authenticator already set up'
+                  : _setupStatusFailed
+                  ? 'Retry authenticator check'
                   : 'Set up authenticator',
               icon: Icons.qr_code_2,
-              onPressed: _verifyAndOpenMfaSetup,
+              onPressed: _setupStatusFailed
+                  ? _loadSetupStatus
+                  : _verifyAndOpenMfaSetup,
               enabled:
                   !_setupStatusLoading && !_setupStarting && !_setupCompleted,
             ),

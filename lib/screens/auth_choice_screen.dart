@@ -1,7 +1,10 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../providers/matrix_provider.dart';
 import '../theme.dart';
+import 'home_screen.dart';
 import 'login_screen.dart';
 import 'wallet_auth_screen.dart';
 
@@ -17,6 +20,8 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen>
   late AnimationController _bgCtrl;
   late AnimationController _fadeCtrl;
   late Animation<double> _fadeAnim;
+  MatrixProvider? _matrixProvider;
+  bool _openingHome = false;
 
   @override
   void initState() {
@@ -34,10 +39,37 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final provider = context.read<MatrixProvider>();
+    if (_matrixProvider == provider) return;
+    _matrixProvider?.removeListener(_handleAuthenticationState);
+    _matrixProvider = provider..addListener(_handleAuthenticationState);
+    _handleAuthenticationState();
+  }
+
+  @override
   void dispose() {
+    _matrixProvider?.removeListener(_handleAuthenticationState);
     _bgCtrl.dispose();
     _fadeCtrl.dispose();
     super.dispose();
+  }
+
+  void _handleAuthenticationState() {
+    if (!mounted || _openingHome || _matrixProvider?.isLoggedIn != true) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _openingHome || _matrixProvider?.isLoggedIn != true) {
+        return;
+      }
+      final route = ModalRoute.of(context);
+      if (route?.isCurrent != true) return;
+      _openingHome = true;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute<void>(builder: (_) => const HomeScreen()),
+        (route) => false,
+      );
+    });
   }
 
   void _goToSignUp() {

@@ -39,6 +39,7 @@ const _userDirectory = UserDirectoryEndpointModule(
   registerOidcAccount: _noop,
   prepareSecureRegistration: _noop,
   provisionSecureLogin: _noop,
+  mfaStatus: _noop,
 );
 const _reports = ReportEndpointModule(
   submit: _noop,
@@ -97,6 +98,10 @@ void main() {
     );
     expect(
       policy('GET', '/auth/media/chunks/azure/download'),
+      EndpointAuthorizationPolicy.matrixUser,
+    );
+    expect(
+      policy('GET', '/auth/otp/security/mfa-status'),
       EndpointAuthorizationPolicy.matrixUser,
     );
   });

@@ -70,6 +70,14 @@ final _trustedProxyConfig = TrustedProxyConfig.fromEnvironment(
 );
 final _corsPolicy = CorsPolicy.fromEnvironment(Platform.environment);
 final _rateLimiter = RequestRateLimiter(trustedProxies: _trustedProxyConfig);
+final _walletDiscoveryRateLimiter = RequestRateLimiter(
+  maxRequestsPerWindow: 20,
+  trustedProxies: _trustedProxyConfig,
+);
+final _walletChallengeRateLimiter = RequestRateLimiter(
+  maxRequestsPerWindow: 10,
+  trustedProxies: _trustedProxyConfig,
+);
 const _logger = StructuredLogger();
 final _emailConfig = EmailConfig.fromEnvironment(Platform.environment);
 final _emailService = EmailService(config: _emailConfig, logger: _logger);
@@ -139,6 +147,7 @@ const _userDirectoryEndpoints = UserDirectoryEndpointModule(
   registerOidcAccount: _registerOidcAccount,
   prepareSecureRegistration: _prepareSecureRegistration,
   provisionSecureLogin: _provisionSecureLogin,
+  mfaStatus: _getMfaStatus,
 );
 const _reportEndpoints = ReportEndpointModule(
   submit: _submitReport,
@@ -269,6 +278,14 @@ Future<void> _handleRequest(HttpRequest request) async {
     final inviteRedeem =
         request.method == 'POST' &&
         _inviteEndpoints.handlesRedeem(request.uri.path);
+    final walletDiscovery =
+        request.method == 'POST' &&
+        (_walletEndpoints.handlesAccount(request.uri.path) ||
+            _walletEndpoints.handlesUsernameAvailability(request.uri.path));
+    final walletChallenge =
+        request.method == 'POST' &&
+        (_walletEndpoints.handlesNonce(request.uri.path) ||
+            _walletEndpoints.handlesVerify(request.uri.path));
     final rateLimitRoute = invitePreview
         ? '/invites/:token/preview'
         : inviteAvatar
@@ -280,6 +297,26 @@ Future<void> _handleRequest(HttpRequest request) async {
         !_rateLimiter.allow(request, routeKey: rateLimitRoute)) {
       await _json(request, HttpStatus.tooManyRequests, {
         'error': 'Too many requests. Please try again shortly.',
+      });
+      return;
+    }
+    if (walletDiscovery &&
+        !_walletDiscoveryRateLimiter.allow(
+          request,
+          routeKey: '/wallet/discovery',
+        )) {
+      await _json(request, HttpStatus.tooManyRequests, {
+        'error': 'Too many wallet lookups. Please try again shortly.',
+      });
+      return;
+    }
+    if (walletChallenge &&
+        !_walletChallengeRateLimiter.allow(
+          request,
+          routeKey: '/wallet/challenge',
+        )) {
+      await _json(request, HttpStatus.tooManyRequests, {
+        'error': 'Too many wallet sign-in attempts. Please try again shortly.',
       });
       return;
     }
@@ -466,6 +503,12 @@ Future<void> _handleRequest(HttpRequest request) async {
     if (request.method == 'GET' &&
         _azureBlobEndpoints.handlesDownload(request.uri.path)) {
       await _azureBlobEndpoints.download(request);
+      return;
+    }
+
+    if (request.method == 'GET' &&
+        _userDirectoryEndpoints.handlesMfaStatus(request.uri.path)) {
+      await _userDirectoryEndpoints.mfaStatus(request);
       return;
     }
 

@@ -13,6 +13,7 @@ void main() {
     registerOidcAccount: _noop,
     prepareSecureRegistration: _noop,
     provisionSecureLogin: _noop,
+    mfaStatus: _noop,
   );
 
   test('matches username availability route aliases', () {
@@ -86,6 +87,13 @@ void main() {
       isTrue,
     );
     expect(module.handlesProvisionSecureLogin('/users/search'), isFalse);
+  });
+
+  test('matches authenticated MFA status route aliases', () {
+    expect(module.handlesMfaStatus('/security/mfa-status'), isTrue);
+    expect(module.handlesMfaStatus('/auth/security/mfa-status'), isTrue);
+    expect(module.handlesMfaStatus('/auth/otp/security/mfa-status'), isTrue);
+    expect(module.handlesMfaStatus('/security/mfa-setup'), isFalse);
   });
 
   const recoveryModule = RecoveryEmailEndpointModule(

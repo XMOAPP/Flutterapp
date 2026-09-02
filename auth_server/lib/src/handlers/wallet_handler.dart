@@ -254,8 +254,7 @@ Future<void> _verifyWalletSignature(HttpRequest request) async {
     final token = _walletAuthService.issueMatrixLoginToken(account.username);
     logInfo('wallet_auth_verified', {
       'mode': stored.mode,
-      'usernameHash': account.username.hashCode,
-      'walletHash': account.walletAddress.hashCode,
+      'walletType': account.walletType,
     });
     await _json(request, HttpStatus.ok, {
       'success': true,

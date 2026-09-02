@@ -51,7 +51,7 @@ class WalletDeepLinkHandler {
     if (await AccountDeletionCompletionService.instance.handleLink(value)) {
       return;
     }
-    if (MatrixSsoService.instance.handleLink(value)) return;
+    if (await MatrixSsoService.instance.handleLink(value)) return;
 
     final appKitModal = _appKitModal;
     if (appKitModal == null && isSupportedWalletLink(value)) {

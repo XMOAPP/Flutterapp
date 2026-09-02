@@ -950,6 +950,7 @@ class _MatrixChatScreenState extends State<MatrixChatScreen> with RouteAware {
     if (mounted) setState(() => _loadingHistory = true);
     try {
       await timeline.requestHistory(historyCount: historyCount);
+      timeline.requestKeys(onlineKeyBackupOnly: false);
       final loadedAny = timeline.events.length > beforeEventCount;
       unawaited(
         _indexSharedMediaTimeline(
