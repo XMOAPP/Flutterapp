@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:xmo/utils/user_facing_error.dart';
 import 'package:flutter/services.dart';
@@ -505,9 +507,9 @@ class _DonationScreenState extends State<DonationScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 34),
+                Center(
                   child: SizedBox(
+                    width: 250,
                     height: 48,
                     child: ElevatedButton(
                       onPressed:
@@ -532,51 +534,25 @@ class _DonationScreenState extends State<DonationScreen> {
                                 strokeWidth: 2.5,
                               ),
                             )
-                          : Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(
-                                  Icons.account_balance_wallet,
-                                  size: 19,
-                                ),
-                                const SizedBox(width: 9),
-                                Flexible(
-                                  child: Text(
-                                    walletButtonLabel,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: GoogleFonts.inter(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                          : Text(
+                              walletButtonLabel,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.inter(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                     ),
                   ),
                 ),
                 const SizedBox(height: 12),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 34),
+                Center(
                   child: SizedBox(
+                    width: 250,
                     height: 48,
-                    child: OutlinedButton.icon(
+                    child: _LiquidGlassButton(
                       onPressed: _busy ? null : _openHostedCheckout,
-                      icon: const Icon(Icons.open_in_browser, size: 19),
-                      label: Text(
-                        'Thirdweb browser checkout',
-                        style: GoogleFonts.inter(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: kWhite,
-                        side: BorderSide(color: kWhite.withValues(alpha: 0.65)),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                      ),
+                      label: 'Thirdweb browser checkout',
                     ),
                   ),
                 ),
@@ -596,6 +572,76 @@ class _DonationScreenState extends State<DonationScreen> {
         fontSize: 10,
         fontWeight: FontWeight.w700,
         letterSpacing: 0.8,
+      ),
+    );
+  }
+}
+
+class _LiquidGlassButton extends StatelessWidget {
+  const _LiquidGlassButton({required this.onPressed, required this.label});
+
+  final VoidCallback? onPressed;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+    const radius = BorderRadius.all(Radius.circular(24));
+
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: label,
+      child: Opacity(
+        opacity: enabled ? 1 : 0.5,
+        child: ClipRRect(
+          borderRadius: radius,
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: radius,
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    kWhite.withValues(alpha: 0.26),
+                    kWhite.withValues(alpha: 0.10),
+                    kWhite.withValues(alpha: 0.05),
+                  ],
+                ),
+                border: Border.all(color: kWhite.withValues(alpha: 0.48)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.28),
+                    blurRadius: 16,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onPressed,
+                  borderRadius: radius,
+                  splashColor: kWhite.withValues(alpha: 0.16),
+                  highlightColor: kWhite.withValues(alpha: 0.08),
+                  child: Center(
+                    child: Text(
+                      label,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        color: kWhite,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
