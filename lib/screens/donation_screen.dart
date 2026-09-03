@@ -497,16 +497,6 @@ class _DonationScreenState extends State<DonationScreen> {
                   _ErrorBox(_error!),
                 ],
                 const SizedBox(height: 28),
-                Text(
-                  'Thirdweb processes the payment. Reown connects your wallet for Base USDC, or use browser checkout for other methods.',
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.inter(
-                    color: kLightGrey,
-                    fontSize: 12,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 20),
                 Center(
                   child: SizedBox(
                     width: 250,
@@ -605,17 +595,20 @@ class _LiquidGlassButton extends StatelessWidget {
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    kWhite.withValues(alpha: 0.26),
-                    kWhite.withValues(alpha: 0.10),
-                    kWhite.withValues(alpha: 0.05),
+                    kLightGrey.withValues(alpha: 0.40),
+                    kLightGrey.withValues(alpha: 0.25),
+                    kLightGrey.withValues(alpha: 0.16),
                   ],
                 ),
-                border: Border.all(color: kWhite.withValues(alpha: 0.48)),
+                border: Border.all(
+                  color: kLightGrey.withValues(alpha: 0.62),
+                  width: 0.6,
+                ),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.28),
-                    blurRadius: 16,
-                    offset: const Offset(0, 8),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
                   ),
                 ],
               ),
