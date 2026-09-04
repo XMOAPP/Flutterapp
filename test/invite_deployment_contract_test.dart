@@ -79,6 +79,13 @@ void main() {
         assetLinks,
         contains('REPLACE_WITH_GOOGLE_PLAY_APP_SIGNING_SHA256'),
       );
+      expect(
+        assetLinks,
+        contains(
+          '3B:58:20:A0:35:70:7F:9F:B9:F0:DA:C4:A9:E7:D6:35:'
+          '73:60:C7:F3:6E:44:25:48:9F:7F:5E:12:88:0F:62:D0',
+        ),
+      );
     });
 
     test('deployment script validates and replaces the Play fingerprint', () {
